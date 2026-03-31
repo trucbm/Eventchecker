@@ -12,6 +12,7 @@ from openpyxl import load_workbook
 import os
 import sys
 import shutil
+import logging
 
 # Khởi tạo ứng dụng Flask và SocketIO
 app = Flask(__name__)
@@ -2322,10 +2323,19 @@ def run_server(host="0.0.0.0", port=5001):
     threading.Thread(target=package_log_emitter, daemon=True).start()
     threading.Thread(target=package_pid_monitor, daemon=True).start()
 
-    print("===================================================")
-    print("  HuyềnRabbit - Merged Event Validator V2.0.0 Started")
-    print(f"  - Access: http://{host}:{port}")
-    print("===================================================")
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            try:
+                print(msg.encode("utf-8", "ignore").decode("utf-8"))
+            except Exception:
+                logging.info(msg)
+
+    safe_print("===================================================")
+    safe_print("  Event Inspector Started")
+    safe_print(f"  - Access: http://{host}:{port}")
+    safe_print("===================================================")
     socketio.run(
         app,
         host=host,
