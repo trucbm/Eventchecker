@@ -348,7 +348,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(7)</title>
+    <title>Event Inspector V2.0.0(8)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -401,7 +401,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-3">
                             <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(7)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(8)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -866,6 +866,7 @@ HTML_TEMPLATE = """
         const convertLogJsonBtn = document.getElementById('convertLogJsonBtn');
         const deviceFilter = document.getElementById('deviceFilter');
         const clearAllBtn = document.getElementById('clearAllBtn');
+        const restartAppBtn = document.getElementById('restartAppBtn');
 
         // --- Tab Logic ---
         function switchTab(tabName) {
@@ -900,6 +901,12 @@ HTML_TEMPLATE = """
         clearAllBtn.addEventListener('click', () => {
             if (confirm('Are you sure you want to clear ALL logs?')) {
                 socket.emit('clear_all_logs');
+            }
+        });
+
+        restartAppBtn?.addEventListener('click', () => {
+            if (confirm('Restart app now to check for updates?')) {
+                fetch('/restart_app', { method: 'POST' });
             }
         });
         
@@ -1427,6 +1434,14 @@ HTML_TEMPLATE = """
             const params = val.split('\\n').map(p=>p.trim()).filter(p=>p);
             socket.emit('start_validation', params);
         });
+
+        document.getElementById('clearValidatorFilterBtn')?.addEventListener('click', () => {
+            const eventInput = document.getElementById('validatorEventFilterInput');
+            const paramInput = document.getElementById('paramInput');
+            if (eventInput) eventInput.value = '';
+            if (paramInput) paramInput.value = '';
+            renderValidatorTable(validator_results_cache);
+        });
         
         document.getElementById('validatorEventFilterInput').addEventListener('input', () => {
             renderValidatorTable(validator_results_cache);
@@ -1657,6 +1672,21 @@ HTML_TEMPLATE = """
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE, default_event_names=sorted(event_specific_params.keys()))
+
+@app.post('/restart_app')
+def restart_app():
+    cmd = os.getenv('EVENTINSPECTOR_RESTART_CMD')
+    args = os.getenv('EVENTINSPECTOR_RESTART_ARGS', '')
+    if not cmd:
+        return jsonify({'ok': False, 'error': 'restart_cmd_missing'})
+    argv = [cmd]
+    if args:
+        argv.append(args)
+    try:
+        subprocess.Popen(argv, creationflags=creation_flags)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
+    os._exit(0)
 
 # --- BACKEND LOGIC ---
 
