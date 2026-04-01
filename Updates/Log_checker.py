@@ -348,7 +348,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>HuyềnRabbit - Event Validator V2.0.0(7)</title>
+    <title>Event Inspector V2.0.0(1)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -400,8 +400,8 @@ HTML_TEMPLATE = """
                 <div class="flex items-center gap-4">
                     <div>
                         <div class="flex items-center gap-3">
-                            <h1 class="text-2xl font-bold text-gray-700">HuyềnRabbit - Event Validator</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(7)</span>
+                            <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(1)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2167,26 +2167,81 @@ def package_pid_monitor():
     global active_package_pids
     while True:
         time.sleep(3)
+
         with lock:
-            if not target_package_name:
-                for p in active_logcat_processes.values(): p.terminate()
-                active_logcat_processes.clear(); active_package_pids.clear()
-                continue
-            
-            # (Giản lược logic PID monitor một chút để code gọn hơn nhưng vẫn đủ chức năng)
-            for device in connected_devices_info:
-                did = device['id']
-                try:
-                    res = subprocess.run([ADB_EXECUTABLE, '-s', did, 'shell', 'pidof', '-s', target_package_name], capture_output=True, text=True, creationflags=creation_flags)
-                    pid = res.stdout.strip()
-                    if pid and pid != active_package_pids.get(did):
-                        if did in active_logcat_processes: active_logcat_processes[did].terminate()
+            pkg = target_package_name
+            devices_snapshot = list(connected_devices_info)
+
+        if not pkg:
+            with lock:
+                for p in active_logcat_processes.values():
+                    try:
+                        p.terminate()
+                    except Exception:
+                        pass
+                active_logcat_processes.clear()
+                active_package_pids.clear()
+            continue
+
+        current_ids = {d['id'] for d in devices_snapshot}
+
+        # Clean up disconnected devices
+        with lock:
+            for did in list(active_logcat_processes.keys()):
+                if did not in current_ids:
+                    try:
+                        active_logcat_processes[did].terminate()
+                    except Exception:
+                        pass
+                    active_logcat_processes.pop(did, None)
+                    active_package_pids.pop(did, None)
+
+        for device in devices_snapshot:
+            did = device['id']
+            try:
+                res = subprocess.run([ADB_EXECUTABLE, '-s', did, 'shell', 'pidof', '-s', pkg],
+                                     capture_output=True, text=True, creationflags=creation_flags)
+                pid = res.stdout.strip()
+
+                if not pid:
+                    with lock:
+                        if did in active_logcat_processes:
+                            try:
+                                active_logcat_processes[did].terminate()
+                            except Exception:
+                                pass
+                            active_logcat_processes.pop(did, None)
+                        active_package_pids.pop(did, None)
+                    continue
+
+                with lock:
+                    proc = active_logcat_processes.get(did)
+                    prev_pid = active_package_pids.get(did)
+
+                restart = (pid != prev_pid) or (proc is None) or (proc.poll() is not None)
+
+                if restart:
+                    with lock:
+                        if did in active_logcat_processes:
+                            try:
+                                active_logcat_processes[did].terminate()
+                            except Exception:
+                                pass
                         cmd = [ADB_EXECUTABLE, '-s', did, 'logcat', f'--pid={pid}']
                         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=creation_flags)
                         active_logcat_processes[did] = proc
                         active_package_pids[did] = pid
                         threading.Thread(target=package_log_consumer, args=(did, proc), daemon=True).start()
-                except: pass
+            except Exception:
+                with lock:
+                    if did in active_logcat_processes:
+                        try:
+                            active_logcat_processes[did].terminate()
+                        except Exception:
+                            pass
+                        active_logcat_processes.pop(did, None)
+                    active_package_pids.pop(did, None)
+
 
 def package_log_emitter():
     while True:
