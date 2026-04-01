@@ -304,12 +304,11 @@ def format_param_issue_html(title, items, color_class, chunk_size=4):
     if not items:
         return ""
     ordered = [html.escape(str(x)) for x in sorted(items)]
-    lines = [", ".join(ordered[i:i + chunk_size]) for i in range(0, len(ordered), chunk_size)]
-    line_html = "<br>".join(f"&nbsp;&nbsp;{line}" for line in lines)
+    lines = "<br>".join(f"&nbsp;&nbsp;{item}" for item in ordered)
     return (
         f'<div class="{color_class} text-sm mb-2 break-words">'
         f'<div>{html.escape(title)}:</div>'
-        f'<div class="font-normal">{line_html}</div>'
+        f'<div class="font-normal">{lines}</div>'
         f'</div>'
     )
 
