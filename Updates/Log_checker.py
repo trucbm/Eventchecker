@@ -527,6 +527,10 @@ HTML_TEMPLATE = """
                     <button id="restartAppBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-sm">Refresh</button>
                 </div>
                 <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-2">
+                        <button id="pauseBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-yellow-500 hover:bg-yellow-600 text-white">Pause</button>
+                        <button id="clearAllBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-red-500 hover:bg-red-600 text-white">Clear All</button>
+                    </div>
                     <div class="text-right p-3 rounded-lg bg-gray-50 border min-w-[280px]">
                         <p class="font-semibold text-gray-700 mb-1 border-b pb-1">Connected Devices:</p>
                         <div id="deviceList" class="text-sm text-gray-600">
@@ -557,10 +561,6 @@ HTML_TEMPLATE = """
                     <button id="tabBtnSdkCheck" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('SdkCheck')">SDK Check</button>
                     <button id="tabBtnPackage" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('Package')">Package Logcat</button>
                 </div>
-                 <div class="flex items-center gap-2 pb-2">
-                    <button id="pauseBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-yellow-500 hover:bg-yellow-600 text-white">Pause</button>
-                    <button id="clearAllBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-red-500 hover:bg-red-600 text-white ml-2">Clear All</button>
-                 </div>
             </div>
         </div>
 
