@@ -454,7 +454,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(12)</title>
+    <title>Event Inspector V2.0.0(14)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -507,7 +507,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-3">
                             <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(12)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(14)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -618,14 +618,18 @@ HTML_TEMPLATE = """
                         <div class="lg:col-span-1">
                             <div class="space-y-6">
                                 <div>
-                                    <label for="profileSelect" class="block text-sm font-medium text-gray-700 mb-1">Game Profile:</label>
-                                    <div class="flex flex-wrap items-center gap-2">
-                                        <select id="profileSelect" class="flex-1 min-w-[220px] h-10 px-3 border rounded-md shadow-sm text-sm"></select>
-                                        <input type="file" id="profileFileInput" accept=".xlsx" class="hidden">
-                                        <button id="importProfileBtn" class="bg-slate-700 hover:bg-slate-800 text-white font-semibold text-sm px-4 rounded-lg h-10">Import Profile</button>
-                                        <button id="reloadProfileBtn" class="bg-slate-200 hover:bg-slate-300 text-gray-800 font-semibold text-sm px-4 rounded-lg h-10">Reload Profile</button>
+                                    <div class="flex items-center gap-3 mb-2">
+                                        <label for="profileSelect" class="text-sm font-medium text-gray-700">Game Profile:</label>
+                                        <p id="profileGameText" class="text-sm font-semibold text-indigo-700"></p>
                                     </div>
-                                    <p id="profileGameText" class="mt-2 text-sm font-medium text-indigo-700"></p>
+                                    <div class="space-y-3">
+                                        <select id="profileSelect" class="w-full h-10 px-3 border rounded-md shadow-sm text-sm"></select>
+                                        <input type="file" id="profileFileInput" accept=".xlsx" class="hidden">
+                                        <div class="flex flex-wrap items-center gap-3">
+                                            <button id="importProfileBtn" class="bg-slate-700 hover:bg-slate-800 text-white font-semibold text-sm px-4 rounded-lg h-10 min-w-[132px]">Import Profile</button>
+                                            <button id="reloadProfileBtn" class="bg-slate-200 hover:bg-slate-300 text-gray-800 font-semibold text-sm px-4 rounded-lg h-10 min-w-[132px]">Reload Profile</button>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div>
                                     <label for="validatorEventFilterInput" class="block text-sm font-medium text-gray-700 mb-1">Filter by Event Name:</label>
@@ -1090,7 +1094,7 @@ HTML_TEMPLATE = """
         function updateProfileStatus(payload) {
             const gameEl = document.getElementById('profileGameText');
             if (gameEl) {
-                gameEl.textContent = payload.game_name ? `Game: ${payload.game_name}` : 'Game: Unknown';
+                gameEl.textContent = payload.game_name || 'Unknown';
             }
         }
 
