@@ -4,6 +4,7 @@ import subprocess
 import threading
 import time
 import requests
+import html
 from collections import deque
 from flask import Flask, render_template_string, request, jsonify, Response
 from flask_socketio import SocketIO
@@ -298,6 +299,19 @@ def format_json_html(data):
     except:
         return str(data)
 
+
+def format_param_issue_html(title, items, color_class, chunk_size=4):
+    if not items:
+        return ""
+    ordered = [html.escape(str(x)) for x in sorted(items)]
+    lines = [", ".join(ordered[i:i + chunk_size]) for i in range(0, len(ordered), chunk_size)]
+    line_html = "<br>".join(lines)
+    return (
+        f'<div class="{color_class} font-bold mb-2 break-words">'
+        f'{html.escape(title)}: {line_html}'
+        f'</div>'
+    )
+
 def extract_json_object_from_text(text):
     """Extract first JSON object substring from text by brace matching."""
     try:
@@ -486,7 +500,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(18)</title>
+    <title>Event Inspector V2.0.0(19)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -496,7 +510,7 @@ HTML_TEMPLATE = """
         #packageLogTable { table-layout: fixed; width: 100%; }
         #packageLogTable col.col-time { width: 110px; }
         #packageLogTable col.col-tag { width: 90px; }
-        .details-cell { font-family: monospace; font-size: 0.8rem; line-height: 1.4; min-width: 350px; }
+        .details-cell { font-family: monospace; font-size: 0.8rem; line-height: 1.4; min-width: 260px; max-width: 640px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
         .tag-cell { max-width: 90px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .tag-header { max-width: 90px; }
         .time-cell { white-space: nowrap; width: 1%; max-width: 110px; font-size: 0.75rem; }
@@ -515,7 +529,7 @@ HTML_TEMPLATE = """
         .resizer:hover { background: rgba(59, 130, 246, 0.15); }
         #packageLogTableBody tr.selected { background-color: #bfdbfe !important; }
         .resizer.disabled { cursor: not-allowed; background: transparent; }
-        .details-cell pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; }
+        .details-cell pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
         @keyframes pulse { 50% { opacity: .6; } }
         .animate-pulse-green { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
         .animate-record { animation: pulse 1.5s infinite; }
@@ -552,7 +566,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-3">
                             <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(18)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(19)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2273,7 +2287,7 @@ def process_event_validator_log(event_name, actual_params, json_string, log_entr
             if closest and best_dist <= 2:
                 details_html += f'<div class="text-orange-600 font-bold mb-2">Possible typo: "{event_name}" ~ "{closest}"</div>'
         if missing:
-            details_html += f'<div class="text-red-600 font-bold mb-2">Missing: {list(missing)}</div>'
+            details_html += format_param_issue_html("Missing", missing, "text-red-600")
         
         details_html += format_json_html(actual_params)
         
@@ -2313,10 +2327,10 @@ def _apply_specific_filter_and_emit():
                      status = "PASSED" if not missing else "FAILED"
                      
                      if missing:
-                         details += f'<div class="text-red-600 font-bold mb-2">Missing: {list(missing)}</div>'
+                         details += format_param_issue_html("Missing", missing, "text-red-600")
                      
                      if strange:
-                         details += f'<div class="text-orange-600 font-bold mb-2">Strange: {list(strange)}</div>'
+                         details += format_param_issue_html("Strange", strange, "text-orange-600")
                      
                      # Show full JSON
                      details += format_json_html(params)
@@ -2356,12 +2370,10 @@ def _apply_adrevenue_filter_and_emit():
 
             summary_parts = []
             if normalized:
-                summary_parts.append(f"<div class='mb-2 text-xs font-semibold {'text-green-600' if not missing else 'text-red-600'}'>")
                 if missing:
-                    summary_parts.append(f"Missing params: {', '.join(missing)}")
+                    summary_parts.append(format_param_issue_html("Missing params", missing, "text-red-600", chunk_size=3))
                 else:
-                    summary_parts.append("All requested params found")
-                summary_parts.append("</div>")
+                    summary_parts.append("<div class='mb-2 text-xs font-semibold text-green-600'>All requested params found</div>")
 
             details_html = ''.join(summary_parts) + format_json_html(parsed_data if parsed_data else item.get("raw_details", ""))
             rendered.append({
