@@ -305,10 +305,11 @@ def format_param_issue_html(title, items, color_class, chunk_size=4):
         return ""
     ordered = [html.escape(str(x)) for x in sorted(items)]
     lines = [", ".join(ordered[i:i + chunk_size]) for i in range(0, len(ordered), chunk_size)]
-    line_html = "<br>".join(lines)
+    line_html = "<br>".join(f"&nbsp;&nbsp;{line}" for line in lines)
     return (
-        f'<div class="{color_class} font-bold mb-2 break-words">'
-        f'{html.escape(title)}: {line_html}'
+        f'<div class="{color_class} text-sm mb-2 break-words">'
+        f'<div>{html.escape(title)}:</div>'
+        f'<div class="font-normal">{line_html}</div>'
         f'</div>'
     )
 
@@ -500,7 +501,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(19)</title>
+    <title>Event Inspector V2.0.0(20)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -566,7 +567,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-3">
                             <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(19)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(20)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1672,10 +1673,25 @@ HTML_TEMPLATE = """
         });
 
         // --- Specific Tab Logic ---
+        function setValidationButtonState(isActive) {
+            const btn = document.getElementById('startValidationBtn');
+            if (!btn) return;
+            if (isActive) {
+                btn.textContent = 'Stop';
+                btn.className = 'bg-red-500 hover:bg-red-600 text-white font-bold text-sm px-5 rounded-lg h-10';
+            } else {
+                btn.textContent = 'Start Checking';
+                btn.className = 'bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm px-5 rounded-lg h-10';
+            }
+        }
+
         document.getElementById('startValidationBtn').addEventListener('click', () => {
             const val = document.getElementById('paramInput').value;
             const params = val.split('\\n').map(p=>p.trim()).filter(p=>p);
-            socket.emit('start_validation', params);
+            const btn = document.getElementById('startValidationBtn');
+            const isStarting = btn && btn.textContent === 'Start Checking';
+            if (isStarting) socket.emit('start_validation', params);
+            else socket.emit('stop_validation');
         });
 
         document.getElementById('clearValidatorFilterBtn')?.addEventListener('click', () => {
@@ -1688,6 +1704,10 @@ HTML_TEMPLATE = """
         
         document.getElementById('validatorEventFilterInput').addEventListener('input', () => {
             renderValidatorTable(validator_results_cache);
+        });
+
+        socket.on('validator_status', (data) => {
+            setValidationButtonState(!!(data && data.active));
         });
 
         const specificEventInput = document.getElementById('specificEventInput');
@@ -2716,6 +2736,13 @@ def val(p):
     validator_active = True
     validator_results.clear()
     socketio.emit('update_validator_table', [])
+    socketio.emit('validator_status', {'active': True})
+
+@socketio.on('stop_validation')
+def stop_val():
+    global validator_active
+    validator_active = False
+    socketio.emit('validator_status', {'active': False})
 
 @socketio.on('update_specific_filter')
 def usf(d):
@@ -2764,6 +2791,7 @@ def refresh():
 @socketio.on('connect')
 def connect(): 
     socketio.emit('pause_status', {'is_paused': is_paused})
+    socketio.emit('validator_status', {'active': validator_active})
     # Sync recording buttons on connect
     for tab, state in recording_states.items():
         socketio.emit('record_status', {
