@@ -490,6 +490,19 @@ HTML_TEMPLATE = """
         .tab-btn { transition: all 0.2s ease-in-out; }
         .tab-btn.active { border-color: #4f46e5; color: #4f46e5; background-color: #eef2ff; }
         .log-row.selected { background-color: #dbeafe; }
+        .log-cell,
+        .details-cell,
+        .details-cell *,
+        #loadAdsTableBody td,
+        #loadAdsExtTableBody td,
+        #validatorTableBody td,
+        #specificEventTableBody td,
+        #adRevenueTableBody td,
+        #callbackAdTableBody td,
+        #sdkCheckTableBody td {
+            user-select: text;
+            -webkit-user-select: text;
+        }
         
         /* Custom scrollbar for pre blocks */
         pre::-webkit-scrollbar { height: 6px; width: 6px; }
