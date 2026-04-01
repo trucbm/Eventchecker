@@ -348,7 +348,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(4)</title>
+    <title>Event Inspector V2.0.0(5)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -401,7 +401,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-3">
                             <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(4)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(5)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -996,7 +996,8 @@ HTML_TEMPLATE = """
                 return;
             }
             container.innerHTML = defaultEventNames.map(name => `
-                <div class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white shadow-sm">
+                <div class="default-event-item flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white shadow-sm cursor-pointer hover:bg-gray-50"
+                     data-event-name="${escapeAttribute(name)}" title="Click to filter by this event">
                     <span class="event-status-icon text-gray-400 font-bold w-4 text-center" data-event="${name}" title="checking">...</span>
                     <span class="truncate font-medium text-gray-700" title="${escapeHTML(name)}">${escapeHTML(name)}</span>
                 </div>
@@ -1052,7 +1053,7 @@ HTML_TEMPLATE = """
                     <tr class="hover:bg-gray-50 border-b">
                         <td class="py-3 px-4 text-purple-700">${res.device_name}</td>
                         <td class="py-3 px-4 font-bold ${res.status === 'PASSED' ? 'text-green-600' : 'text-red-600'}">${res.status}</td>
-                        <td class="py-3 px-4 font-semibold">${res.event_name}</td>
+                        <td class="py-3 px-4 font-semibold"><span class="event-name-link cursor-pointer text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td>
                         <td class="py-3 px-4 details-cell">${res.details}</td>
                         <td class="py-3 px-4 log-cell">${res.raw_log}</td>
                         <td class="py-3 px-4"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td>
@@ -1062,6 +1063,33 @@ HTML_TEMPLATE = """
         }
 
         renderDefaultEventStatusList();
+
+        // Click default event to fill filter input
+        document.getElementById('defaultEventStatusList')?.addEventListener('click', (e) => {
+            const item = e.target.closest('.default-event-item');
+            if (!item) return;
+            const name = item.getAttribute('data-event-name') || '';
+            const input = document.getElementById('validatorEventFilterInput');
+            if (input) {
+                input.value = name;
+                input.focus();
+                renderValidatorTable(validator_results_cache);
+            }
+        });
+
+
+        // Click event name in results table to fill filter input
+        document.getElementById('validatorTableBody')?.addEventListener('click', (e) => {
+            const el = e.target.closest('.event-name-link');
+            if (!el) return;
+            const name = el.getAttribute('data-event-name') || '';
+            const input = document.getElementById('validatorEventFilterInput');
+            if (input) {
+                input.value = name;
+                input.focus();
+                renderValidatorTable(validator_results_cache);
+            }
+        });
 
         // --- Socket Listeners (Renderers) ---
         socket.on('update_load_ads', (d) => renderSimpleTable('loadAdsTableBody', d));
@@ -1078,7 +1106,7 @@ HTML_TEMPLATE = """
              const filtered = (selectedDevice === 'all') ? d : d.filter(r => r.device_id === selectedDevice);
              if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
              else {
-                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b"><td class="py-3 px-4 text-purple-700">${res.device_name}</td><td class="py-3 px-4 font-bold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-3 px-4 font-semibold">${res.event_name}</td><td class="py-3 px-4 details-cell">${res.details}</td><td class="py-3 px-4 log-cell">${res.raw_log}</td><td class="py-3 px-4"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
+                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b"><td class="py-3 px-4 text-purple-700">${res.device_name}</td><td class="py-3 px-4 font-bold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-3 px-4 font-semibold"><span class="event-name-link cursor-pointer text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-3 px-4 details-cell">${res.details}</td><td class="py-3 px-4 log-cell">${res.raw_log}</td><td class="py-3 px-4"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
              }
         });
 
@@ -1089,7 +1117,7 @@ HTML_TEMPLATE = """
              const filtered = d.filter(r => (selectedDevice === 'all' || r.device_id === selectedDevice) && (!filterText || r.raw_log.toLowerCase().includes(filterText)));
              if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
              else {
-                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b"><td class="py-3 px-4 text-purple-700">${res.device_name}</td><td class="py-3 px-4 font-bold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-3 px-4 font-semibold">${res.event_name}</td><td class="py-3 px-4 details-cell">${res.details}</td><td class="py-3 px-4 log-cell">${res.raw_log}</td><td class="py-3 px-4"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
+                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b"><td class="py-3 px-4 text-purple-700">${res.device_name}</td><td class="py-3 px-4 font-bold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-3 px-4 font-semibold"><span class="event-name-link cursor-pointer text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-3 px-4 details-cell">${res.details}</td><td class="py-3 px-4 log-cell">${res.raw_log}</td><td class="py-3 px-4"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
              }
         });
 
