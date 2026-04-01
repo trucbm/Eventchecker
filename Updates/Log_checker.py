@@ -306,7 +306,7 @@ def format_param_issue_html(title, items, color_class, chunk_size=4):
     ordered = [html.escape(str(x)) for x in sorted(items)]
     lines = "<br>".join(f"&nbsp;&nbsp;{item}" for item in ordered)
     return (
-        f'<div class="{color_class} text-sm mb-2 break-words">'
+        f'<div class="{color_class} text-xs mb-2 break-words leading-5">'
         f'<div>{html.escape(title)}:</div>'
         f'<div class="font-normal">{lines}</div>'
         f'</div>'
@@ -500,7 +500,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(20)</title>
+    <title>Event Inspector V2.0.0(23)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -566,7 +566,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-3">
                             <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(20)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(23)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
