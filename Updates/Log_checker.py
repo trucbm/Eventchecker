@@ -348,7 +348,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(9)</title>
+    <title>Event Inspector V2.0.0(10)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -401,7 +401,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-3">
                             <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(9)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(10)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1337,8 +1337,16 @@ HTML_TEMPLATE = """
                     try {
                         const parsed = JSON.parse(jsonStr);
                         const pretty = JSON.stringify(parsed, null, 2);
-                        const evtLine = headerLine ? `${headerLine}\\n` : (evt ? `event_name: ${evt}\\n` : '');
-                        return `--- #${idx + 1} (JSON) ---\\n${evtLine}${pretty}`;
+                        const metaLines = [];
+                        if (headerLine) metaLines.push(`context: ${headerLine}`);
+                        else if (evt) metaLines.push(`event_name: ${evt}`);
+                        metaLines.push('');
+                        metaLines.push('raw_log:');
+                        metaLines.push(line);
+                        metaLines.push('');
+                        metaLines.push('extracted_json:');
+                        metaLines.push(pretty);
+                        return `--- #${idx + 1} (JSON) ---\\n${metaLines.join('\\n')}`;
                     } catch (e) {
                         return `--- #${idx + 1} ---\\n${line}`;
                     }
