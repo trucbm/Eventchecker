@@ -13,6 +13,7 @@ import os
 import sys
 import shutil
 import logging
+from pathlib import Path
 
 # Khởi tạo ứng dụng Flask và SocketIO
 app = Flask(__name__)
@@ -93,6 +94,29 @@ def _resolve_default_params_path():
 
 DEFAULT_PARAMS_XLSX = _resolve_default_params_path()
 DEFAULT_PARAM_FILL = "FFFCE5CD"
+
+
+def _runtime_app_dir():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return SCRIPT_DIR
+
+
+def _resolve_profiles_dir():
+    base_dir = _runtime_app_dir()
+    profiles_dir = os.path.join(base_dir, "profiles")
+    try:
+        os.makedirs(profiles_dir, exist_ok=True)
+        return profiles_dir
+    except Exception:
+        fallback = os.path.join(SCRIPT_DIR, "profiles")
+        os.makedirs(fallback, exist_ok=True)
+        return fallback
+
+
+PROFILE_DIR = _resolve_profiles_dir()
+active_profile_name = None
+active_profile_path = None
 
 def _resolve_adb():
     adb_env = os.getenv("ADB_PATH")
@@ -262,7 +286,7 @@ def extract_json_object_from_text(text):
 def load_default_params_config():
     """Load default params + event-specific params from XLSX."""
     global default_params, event_specific_params
-    path = DEFAULT_PARAMS_XLSX
+    path = active_profile_path or DEFAULT_PARAMS_XLSX
     if not path or not os.path.exists(path):
         print(f"INFO: Default params sheet not found: {path}")
         default_params = []
@@ -311,6 +335,77 @@ def load_default_params_config():
         default_params = []
         event_specific_params = {}
 
+
+def _sanitize_profile_filename(filename):
+    name = os.path.basename((filename or "").strip())
+    name = name.replace("\\", "_").replace("/", "_")
+    if not name.lower().endswith(".xlsx"):
+        raise ValueError("Only .xlsx files are supported")
+    return name
+
+
+def _list_profile_names():
+    try:
+        files = [
+            p.name for p in Path(PROFILE_DIR).glob("*.xlsx")
+            if p.is_file()
+        ]
+        return sorted(files, key=lambda x: x.lower())
+    except Exception:
+        return []
+
+
+def _ensure_default_profile_seed():
+    source = DEFAULT_PARAMS_XLSX
+    if not source or not os.path.exists(source):
+        return
+    target = os.path.join(PROFILE_DIR, os.path.basename(source))
+    if os.path.abspath(source) == os.path.abspath(target):
+        return
+    if not os.path.exists(target):
+        try:
+            shutil.copyfile(source, target)
+        except Exception as e:
+            print(f"WARNING: Failed to seed default profile: {e}")
+
+
+def _set_active_profile(profile_name=None):
+    global active_profile_name, active_profile_path
+    _ensure_default_profile_seed()
+    names = _list_profile_names()
+    if not names:
+        active_profile_name = None
+        active_profile_path = None
+        load_default_params_config()
+        return False
+
+    selected = None
+    if profile_name:
+        clean = _sanitize_profile_filename(profile_name)
+        if clean in names:
+            selected = clean
+
+    if not selected:
+        preferred = os.path.basename(DEFAULT_PARAMS_XLSX) if DEFAULT_PARAMS_XLSX else None
+        if preferred in names:
+            selected = preferred
+        else:
+            selected = names[0]
+
+    active_profile_name = selected
+    active_profile_path = os.path.join(PROFILE_DIR, selected)
+    load_default_params_config()
+    return True
+
+
+def _profile_payload():
+    return {
+        "profiles": _list_profile_names(),
+        "current_profile": active_profile_name,
+        "profile_dir": PROFILE_DIR,
+        "default_event_names": sorted(event_specific_params.keys()),
+    }
+
 def _levenshtein_distance_limit(a, b, limit=2):
     """Compute Levenshtein distance with early exit if > limit."""
     if a == b:
@@ -348,7 +443,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(10)</title>
+    <title>Event Inspector V2.0.0(11)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -401,7 +496,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-3">
                             <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(10)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(11)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -511,6 +606,16 @@ HTML_TEMPLATE = """
                     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
                         <div class="lg:col-span-1">
                             <div class="space-y-6">
+                                <div>
+                                    <label for="profileSelect" class="block text-sm font-medium text-gray-700 mb-1">Game Profile:</label>
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <select id="profileSelect" class="flex-1 min-w-[220px] p-2 border rounded-md shadow-sm"></select>
+                                        <input type="file" id="profileFileInput" accept=".xlsx" class="hidden">
+                                        <button id="importProfileBtn" class="bg-slate-700 hover:bg-slate-800 text-white font-semibold py-2 px-4 rounded-lg h-10">Import Profile</button>
+                                        <button id="reloadProfileBtn" class="bg-slate-200 hover:bg-slate-300 text-gray-800 font-semibold py-2 px-4 rounded-lg h-10">Reload Profile</button>
+                                    </div>
+                                    <p id="profileStatusText" class="mt-2 text-xs text-gray-500 break-all"></p>
+                                </div>
                                 <div>
                                     <label for="validatorEventFilterInput" class="block text-sm font-medium text-gray-700 mb-1">Filter by Event Name:</label>
                                     <input type="text" id="validatorEventFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Type to filter events...">
@@ -967,8 +1072,38 @@ HTML_TEMPLATE = """
         }
 
         let validator_results_cache = [];
-        const defaultEventNames = {{ default_event_names | tojson }};
+        let defaultEventNames = {{ default_event_names | tojson }};
         let defaultEventStatusEls = {};
+        let currentProfileName = {{ current_profile_name | tojson }};
+
+        function updateProfileStatus(payload) {
+            const statusEl = document.getElementById('profileStatusText');
+            if (!statusEl) return;
+            const profileLabel = payload.current_profile ? `Active: ${payload.current_profile}` : 'No profile selected';
+            const folderLabel = payload.profile_dir ? `Folder: ${payload.profile_dir}` : '';
+            statusEl.textContent = folderLabel ? `${profileLabel} | ${folderLabel}` : profileLabel;
+        }
+
+        function renderProfileOptions(payload) {
+            const select = document.getElementById('profileSelect');
+            if (!select) return;
+            const profiles = payload.profiles || [];
+            select.innerHTML = profiles.length
+                ? profiles.map(name => `<option value="${escapeAttribute(name)}"${name === payload.current_profile ? ' selected' : ''}>${escapeHTML(name)}</option>`).join('')
+                : '<option value="">No profiles</option>';
+            select.disabled = profiles.length === 0;
+            currentProfileName = payload.current_profile || '';
+            defaultEventNames = payload.default_event_names || [];
+            renderDefaultEventStatusList();
+            updateDefaultEventStatus(validator_results_cache);
+            updateProfileStatus(payload);
+        }
+
+        async function refreshProfiles() {
+            const res = await fetch('/api/profiles');
+            const payload = await res.json();
+            renderProfileOptions(payload);
+        }
 
         function renderDefaultEventStatusList() {
             const container = document.getElementById('defaultEventStatusList');
@@ -1045,6 +1180,7 @@ HTML_TEMPLATE = """
         }
 
         renderDefaultEventStatusList();
+        refreshProfiles().catch(() => {});
 
         // Click default event to fill filter input
         document.getElementById('defaultEventStatusList')?.addEventListener('click', (e) => {
@@ -1071,6 +1207,59 @@ HTML_TEMPLATE = """
                 input.focus();
                 renderValidatorTable(validator_results_cache);
             }
+        });
+
+        document.getElementById('profileSelect')?.addEventListener('change', async (e) => {
+            const profileName = e.target.value;
+            if (!profileName || profileName === currentProfileName) return;
+            const res = await fetch('/api/profiles/select', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profile_name: profileName })
+            });
+            const payload = await res.json();
+            if (!payload.ok) {
+                alert(payload.error || 'Failed to switch profile');
+                await refreshProfiles();
+                return;
+            }
+            validator_results_cache = [];
+            renderValidatorTable(validator_results_cache);
+            renderProfileOptions(payload);
+        });
+
+        document.getElementById('reloadProfileBtn')?.addEventListener('click', async () => {
+            const res = await fetch('/api/profiles/reload', { method: 'POST' });
+            const payload = await res.json();
+            if (!payload.ok) {
+                alert(payload.error || 'Failed to reload profile');
+                return;
+            }
+            renderProfileOptions(payload);
+        });
+
+        document.getElementById('importProfileBtn')?.addEventListener('click', () => {
+            document.getElementById('profileFileInput')?.click();
+        });
+
+        document.getElementById('profileFileInput')?.addEventListener('change', async (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            const formData = new FormData();
+            formData.append('profile_file', file);
+            const res = await fetch('/api/profiles/import', {
+                method: 'POST',
+                body: formData
+            });
+            const payload = await res.json();
+            e.target.value = '';
+            if (!payload.ok) {
+                alert(payload.error || 'Failed to import profile');
+                return;
+            }
+            validator_results_cache = [];
+            renderValidatorTable(validator_results_cache);
+            renderProfileOptions(payload);
         });
 
         // --- Socket Listeners (Renderers) ---
@@ -1648,7 +1837,55 @@ HTML_TEMPLATE = """
 # --- SERVER ROUTE (QUAN TRỌNG) ---
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE, default_event_names=sorted(event_specific_params.keys()))
+    return render_template_string(
+        HTML_TEMPLATE,
+        default_event_names=sorted(event_specific_params.keys()),
+        current_profile_name=active_profile_name
+    )
+
+
+@app.get('/api/profiles')
+def get_profiles():
+    return jsonify(_profile_payload())
+
+
+@app.post('/api/profiles/select')
+def select_profile():
+    data = request.get_json(silent=True) or {}
+    profile_name = data.get('profile_name', '')
+    if not profile_name:
+        return jsonify({'ok': False, 'error': 'profile_name_required'}), 400
+    try:
+        if not _set_active_profile(profile_name):
+            return jsonify({'ok': False, 'error': 'profile_not_found'}), 404
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    return jsonify({'ok': True, **_profile_payload()})
+
+
+@app.post('/api/profiles/reload')
+def reload_profile():
+    if active_profile_name:
+        _set_active_profile(active_profile_name)
+    else:
+        _set_active_profile()
+    return jsonify({'ok': True, **_profile_payload()})
+
+
+@app.post('/api/profiles/import')
+def import_profile():
+    upload = request.files.get('profile_file')
+    if not upload or not upload.filename:
+        return jsonify({'ok': False, 'error': 'profile_file_required'}), 400
+    try:
+        filename = _sanitize_profile_filename(upload.filename)
+        target = os.path.join(PROFILE_DIR, filename)
+        os.makedirs(PROFILE_DIR, exist_ok=True)
+        upload.save(target)
+        _set_active_profile(filename)
+        return jsonify({'ok': True, **_profile_payload()})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
 
 @app.post('/restart_app')
 def restart_app():
@@ -2416,7 +2653,7 @@ def connect():
 
 # --- MAIN ---
 def run_server(host="0.0.0.0", port=5001):
-    load_default_params_config()
+    _set_active_profile()
     threading.Thread(target=device_manager, daemon=True).start()
     threading.Thread(target=package_log_emitter, daemon=True).start()
     threading.Thread(target=package_pid_monitor, daemon=True).start()
