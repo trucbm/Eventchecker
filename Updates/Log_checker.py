@@ -117,6 +117,7 @@ def _resolve_profiles_dir():
 PROFILE_DIR = _resolve_profiles_dir()
 active_profile_name = None
 active_profile_path = None
+active_profile_game_name = ""
 
 def _resolve_adb():
     adb_env = os.getenv("ADB_PATH")
@@ -285,20 +286,28 @@ def extract_json_object_from_text(text):
 
 def load_default_params_config():
     """Load default params + event-specific params from XLSX."""
-    global default_params, event_specific_params
+    global default_params, event_specific_params, active_profile_game_name
     path = active_profile_path or DEFAULT_PARAMS_XLSX
     if not path or not os.path.exists(path):
         print(f"INFO: Default params sheet not found: {path}")
         default_params = []
         event_specific_params = {}
+        active_profile_game_name = ""
         return
     try:
         wb = load_workbook(path)
         ws = wb.active
         event_map = {}
         current_event = None
+        header_row = 1
 
-        for r in range(2, ws.max_row + 1):
+        if str(ws.cell(1, 2).value or "").strip().lower() == "game":
+            active_profile_game_name = str(ws.cell(1, 3).value or "").strip()
+            header_row = 2
+        else:
+            active_profile_game_name = ""
+
+        for r in range(header_row + 1, ws.max_row + 1):
             event_val = ws.cell(r, 2).value
             param_cell = ws.cell(r, 3)
             param_val = param_cell.value
@@ -334,6 +343,7 @@ def load_default_params_config():
         print(f"ERROR: Failed to load default params sheet: {e}")
         default_params = []
         event_specific_params = {}
+        active_profile_game_name = ""
 
 
 def _sanitize_profile_filename(filename):
@@ -402,6 +412,7 @@ def _profile_payload():
     return {
         "profiles": _list_profile_names(),
         "current_profile": active_profile_name,
+        "game_name": active_profile_game_name,
         "profile_dir": PROFILE_DIR,
         "default_event_names": sorted(event_specific_params.keys()),
     }
@@ -609,12 +620,13 @@ HTML_TEMPLATE = """
                                 <div>
                                     <label for="profileSelect" class="block text-sm font-medium text-gray-700 mb-1">Game Profile:</label>
                                     <div class="flex flex-wrap items-center gap-2">
-                                        <select id="profileSelect" class="flex-1 min-w-[220px] p-2 border rounded-md shadow-sm"></select>
+                                        <select id="profileSelect" class="flex-1 min-w-[220px] h-10 px-3 border rounded-md shadow-sm text-sm"></select>
                                         <input type="file" id="profileFileInput" accept=".xlsx" class="hidden">
-                                        <button id="importProfileBtn" class="bg-slate-700 hover:bg-slate-800 text-white font-semibold py-2 px-4 rounded-lg h-10">Import Profile</button>
-                                        <button id="reloadProfileBtn" class="bg-slate-200 hover:bg-slate-300 text-gray-800 font-semibold py-2 px-4 rounded-lg h-10">Reload Profile</button>
+                                        <button id="importProfileBtn" class="bg-slate-700 hover:bg-slate-800 text-white font-semibold text-sm px-4 rounded-lg h-10">Import Profile</button>
+                                        <button id="reloadProfileBtn" class="bg-slate-200 hover:bg-slate-300 text-gray-800 font-semibold text-sm px-4 rounded-lg h-10">Reload Profile</button>
                                     </div>
-                                    <p id="profileStatusText" class="mt-2 text-xs text-gray-500 break-all"></p>
+                                    <p id="profileGameText" class="mt-2 text-sm font-medium text-indigo-700"></p>
+                                    <p id="profileStatusText" class="mt-1 text-xs text-gray-500 break-all"></p>
                                 </div>
                                 <div>
                                     <label for="validatorEventFilterInput" class="block text-sm font-medium text-gray-700 mb-1">Filter by Event Name:</label>
@@ -625,8 +637,8 @@ HTML_TEMPLATE = """
                                     <textarea id="paramInput" rows="6" class="w-full p-2 border rounded-md shadow-sm" placeholder="session_id\nfirst_open_time..."></textarea>
                                 </div>
                                 <div class="flex items-center gap-3">
-                                    <button id="startValidationBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg h-10">Start Checking</button>
-                                    <button id="clearValidatorFilterBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-5 rounded-lg h-10">Clear Filter</button>
+                                    <button id="startValidationBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm px-5 rounded-lg h-10">Start Checking</button>
+                                    <button id="clearValidatorFilterBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold text-sm px-5 rounded-lg h-10">Clear Filter</button>
                                 </div>
                             </div>
                         </div>
@@ -1078,6 +1090,10 @@ HTML_TEMPLATE = """
 
         function updateProfileStatus(payload) {
             const statusEl = document.getElementById('profileStatusText');
+            const gameEl = document.getElementById('profileGameText');
+            if (gameEl) {
+                gameEl.textContent = payload.game_name ? `Game: ${payload.game_name}` : 'Game: Unknown';
+            }
             if (!statusEl) return;
             const profileLabel = payload.current_profile ? `Active: ${payload.current_profile}` : 'No profile selected';
             const folderLabel = payload.profile_dir ? `Folder: ${payload.profile_dir}` : '';
