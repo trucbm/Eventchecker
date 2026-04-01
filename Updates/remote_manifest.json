@@ -1,0 +1,15 @@
+{
+  "version": "2026-04-01-01",
+  "files": [
+    {
+      "path": "Log_checker.py",
+      "url": "https://raw.githubusercontent.com/trucbm/Eventchecker/main/updates/Log_checker.py",
+      "sha256": ""
+    },
+    {
+      "path": "Default event + Default Params.xlsx",
+      "url": "https://raw.githubusercontent.com/trucbm/Eventchecker/main/updates/Default%20event%20+%20Default%20Params.xlsx",
+      "sha256": ""
+    }
+  ]
+}
