@@ -94,6 +94,7 @@ def _resolve_default_params_path():
 
 DEFAULT_PARAMS_XLSX = _resolve_default_params_path()
 DEFAULT_PARAM_FILL = "FFFCE5CD"
+DEFAULT_REMOTE_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates/remote_manifest.json"
 
 
 def _runtime_app_dir():
@@ -118,6 +119,37 @@ PROFILE_DIR = _resolve_profiles_dir()
 active_profile_name = None
 active_profile_path = None
 active_profile_game_name = ""
+
+
+def _user_data_dir():
+    if os.name == "nt":
+        base = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "EventInspector")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~/Library/Application Support"), "EventInspector")
+    return os.path.join(os.path.expanduser("~"), ".eventinspector")
+
+
+def _normalize_remote_update_config():
+    try:
+        user_dir = _user_data_dir()
+        os.makedirs(user_dir, exist_ok=True)
+        cfg_path = os.path.join(user_dir, "remote_update_config.json")
+        cfg = {}
+        if os.path.exists(cfg_path):
+            try:
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+            except Exception:
+                cfg = {}
+        cfg["enabled"] = True
+        cfg["manifest_url"] = DEFAULT_REMOTE_MANIFEST_URL
+        cfg["timeout_sec"] = 10
+        cfg["min_interval_sec"] = 0
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception as e:
+        print(f"WARNING: Failed to normalize updater config: {e}")
 
 def _resolve_adb():
     adb_env = os.getenv("ADB_PATH")
@@ -454,7 +486,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(15)</title>
+    <title>Event Inspector V2.0.0(17)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -520,7 +552,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-3">
                             <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(15)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(17)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2680,6 +2712,7 @@ def connect():
 
 # --- MAIN ---
 def run_server(host="0.0.0.0", port=5001):
+    _normalize_remote_update_config()
     _set_active_profile()
     threading.Thread(target=device_manager, daemon=True).start()
     threading.Thread(target=package_log_emitter, daemon=True).start()
