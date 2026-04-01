@@ -348,7 +348,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(8)</title>
+    <title>Event Inspector V2.0.0(9)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -401,11 +401,11 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-3">
                             <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(8)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(9)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
-                    <button id="helpBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-sm">HELP</button>
+                    <button id="restartAppBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-sm">Refresh</button>
                 </div>
                 <div class="flex items-center gap-4">
                     <div class="text-right p-3 rounded-lg bg-gray-50 border min-w-[280px]">
@@ -441,7 +441,6 @@ HTML_TEMPLATE = """
                  <div class="flex items-center gap-2 pb-2">
                     <button id="pauseBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-yellow-500 hover:bg-yellow-600 text-white">Pause</button>
                     <button id="clearAllBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-red-500 hover:bg-red-600 text-white ml-2">Clear All</button>
-                    <button id="restartAppBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-gray-600 hover:bg-gray-700 text-white ml-2">Restart</button>
                  </div>
             </div>
         </div>
@@ -795,29 +794,6 @@ HTML_TEMPLATE = """
     </div>
     
     <!-- MODALS -->
-    <div id="helpModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 hidden">
-        <div class="bg-white rounded-xl shadow-lg p-6 md:p-8 max-w-4xl w-full mx-4">
-             <div class="flex justify-between items-center border-b pb-3 mb-4">
-                <h2 class="text-2xl font-bold text-gray-800">Hướng dẫn sử dụng</h2>
-                <button id="closeHelpModal" class="text-gray-500 hover:text-gray-800 text-2xl font-bold">&times;</button>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
-                <div class="bg-gray-50 p-4 rounded-lg border">
-                    <h3 class="font-bold text-lg mb-2 text-indigo-600">Load Ads</h3>
-                    <p class="text-gray-600">- Hiển thị log <b>TrackingService->Track</b> (pattern cũ).<br>- Tự động nhóm theo Ad Source và Format.<br>- Hỗ trợ ghi vào Google Sheet riêng.</p>
-                </div>
-                 <div class="bg-gray-50 p-4 rounded-lg border">
-                    <h3 class="font-bold text-lg mb-2 text-indigo-600">Load Ads Ext (CP, KN)</h3>
-                    <p class="text-gray-600">- Hiển thị log <b>Event sent: ad_impression</b> (pattern mới).<br>- Hỗ trợ ghi vào Google Sheet riêng.</p>
-                </div>
-                <div class="bg-gray-50 p-4 rounded-lg border md:col-span-2">
-                    <h3 class="font-bold text-lg mb-2 text-indigo-600">Other Tabs</h3>
-                    <p class="text-gray-600">Các tab Validator, AdRevenue, Callback, SDK Check hoạt động như cũ.</p>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <div id="jsonModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 hidden">
         <div class="bg-white rounded-xl shadow-lg p-6 w-1/2 h-2/3 flex flex-col">
             <div class="flex justify-between items-center border-b pb-3 mb-4">
@@ -854,9 +830,6 @@ HTML_TEMPLATE = """
         // --- Common Elements ---
         const deviceListEl = document.getElementById('deviceList');
         const pauseBtn = document.getElementById('pauseBtn');
-        const helpBtn = document.getElementById('helpBtn');
-        const helpModal = document.getElementById('helpModal');
-        const closeHelpModal = document.getElementById('closeHelpModal');
         const jsonModal = document.getElementById('jsonModal');
         const closeJsonModal = document.getElementById('closeJsonModal');
         const jsonContent = document.getElementById('jsonContent');
@@ -1659,10 +1632,6 @@ HTML_TEMPLATE = """
             setPackageControlsEnabled(true);
         });
         
-        // Help
-        helpBtn.addEventListener('click', () => helpModal.classList.remove('hidden'));
-        closeHelpModal.addEventListener('click', () => helpModal.classList.add('hidden'));
-
     </script>
 </body>
 </html>
