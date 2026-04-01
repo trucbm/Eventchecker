@@ -486,7 +486,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(17)</title>
+    <title>Event Inspector V2.0.0(18)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -552,7 +552,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-3">
                             <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(17)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(18)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1690,7 +1690,12 @@ HTML_TEMPLATE = """
         specificEventInput.addEventListener('input', updateSpecific);
         specificParamInput.addEventListener('input', updateSpecific);
         
-        document.getElementById('adRevenueParamInput').addEventListener('input', (e) => socket.emit('update_adrevenue_filter', {params: e.target.value.split('\\n').filter(p=>p.trim())}));
+        document.getElementById('adRevenueParamInput').addEventListener('input', (e) => socket.emit('update_adrevenue_filter', {
+            params: e.target.value
+                .split('\\n')
+                .map(p => p.trim().replace(/^['"]+|['"]+$/g, ''))
+                .filter(p => p)
+        }));
         document.getElementById('adRevenueFilterInput').addEventListener('input', (e) => socket.emit('refresh_request')); // Trigger re-render
         document.getElementById('packageFilterInput2').addEventListener('input', () => socket.emit('refresh_request'));
         document.getElementById('packageTagFilterInput').addEventListener('input', () => {
@@ -2330,7 +2335,42 @@ def cache_specific_event_log(event_name, params, json_string, log_entry, device_
     _apply_specific_filter_and_emit()
 
 def _apply_adrevenue_filter_and_emit():
-    with lock: socketio.emit('update_adrevenue_table', adrevenue_logs)
+    normalized = [p.strip().strip('"').strip("'") for p in adrevenue_params_to_validate if p and p.strip()]
+    rendered = []
+    with lock:
+        for item in adrevenue_logs:
+            parsed_data = item.get("parsed_data") or {}
+            payload_data = parsed_data.get("payload") if isinstance(parsed_data.get("payload"), dict) else {}
+
+            missing = []
+            for param in normalized:
+                if param in parsed_data:
+                    continue
+                if param in payload_data:
+                    continue
+                missing.append(param)
+
+            status = "INFO"
+            if normalized:
+                status = "PASSED" if not missing else "FAILED"
+
+            summary_parts = []
+            if normalized:
+                summary_parts.append(f"<div class='mb-2 text-xs font-semibold {'text-green-600' if not missing else 'text-red-600'}'>")
+                if missing:
+                    summary_parts.append(f"Missing params: {', '.join(missing)}")
+                else:
+                    summary_parts.append("All requested params found")
+                summary_parts.append("</div>")
+
+            details_html = ''.join(summary_parts) + format_json_html(parsed_data if parsed_data else item.get("raw_details", ""))
+            rendered.append({
+                **item,
+                "status": status,
+                "details": details_html,
+            })
+
+    socketio.emit('update_adrevenue_table', rendered)
 
 def _emit_sdk_check_results():
     res = []
@@ -2379,6 +2419,7 @@ def adb_log_reader(device_id):
                     if match:
                         content = match.group(1)
                         details_html = content
+                        ad_data = {}
                         
                         # --- Logic parse AdRevenue string to JSON object ---
                         try:
@@ -2396,7 +2437,6 @@ def adb_log_reader(device_id):
                                 clean_content = content.replace(f'payload={payload_str}', '')
                             
                             # 2. Parse key=value pairs
-                            ad_data = {}
                             # Split by comma and space, but careful with empty strings
                             parts = [p.strip() for p in clean_content.split(',') if p.strip()]
                             
@@ -2413,7 +2453,17 @@ def adb_log_reader(device_id):
                         except: 
                             pass # Fallback to raw content if parsing fails
                         
-                        adrevenue_logs.append({"device_id": device_id, "device_name": get_device_name(device_id), "status": "INFO", "event_name": "AdRevenue", "details": details_html, "raw_log": line.strip(), "json_data": "{}"})
+                        adrevenue_logs.append({
+                            "device_id": device_id,
+                            "device_name": get_device_name(device_id),
+                            "status": "INFO",
+                            "event_name": "AdRevenue",
+                            "details": details_html,
+                            "raw_details": content,
+                            "raw_log": line.strip(),
+                            "json_data": json.dumps(ad_data, ensure_ascii=False) if ad_data else "{}",
+                            "parsed_data": ad_data,
+                        })
                 _apply_adrevenue_filter_and_emit()
 
             # 5. Process Callback & Events
