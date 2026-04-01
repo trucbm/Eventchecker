@@ -454,7 +454,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(11)</title>
+    <title>Event Inspector V2.0.0(12)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -507,7 +507,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-3">
                             <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(11)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(12)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -626,7 +626,6 @@ HTML_TEMPLATE = """
                                         <button id="reloadProfileBtn" class="bg-slate-200 hover:bg-slate-300 text-gray-800 font-semibold text-sm px-4 rounded-lg h-10">Reload Profile</button>
                                     </div>
                                     <p id="profileGameText" class="mt-2 text-sm font-medium text-indigo-700"></p>
-                                    <p id="profileStatusText" class="mt-1 text-xs text-gray-500 break-all"></p>
                                 </div>
                                 <div>
                                     <label for="validatorEventFilterInput" class="block text-sm font-medium text-gray-700 mb-1">Filter by Event Name:</label>
@@ -1089,15 +1088,10 @@ HTML_TEMPLATE = """
         let currentProfileName = {{ current_profile_name | tojson }};
 
         function updateProfileStatus(payload) {
-            const statusEl = document.getElementById('profileStatusText');
             const gameEl = document.getElementById('profileGameText');
             if (gameEl) {
                 gameEl.textContent = payload.game_name ? `Game: ${payload.game_name}` : 'Game: Unknown';
             }
-            if (!statusEl) return;
-            const profileLabel = payload.current_profile ? `Active: ${payload.current_profile}` : 'No profile selected';
-            const folderLabel = payload.profile_dir ? `Folder: ${payload.profile_dir}` : '';
-            statusEl.textContent = folderLabel ? `${profileLabel} | ${folderLabel}` : profileLabel;
         }
 
         function renderProfileOptions(payload) {
