@@ -348,7 +348,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(5)</title>
+    <title>Event Inspector V2.0.0(6)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -401,7 +401,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-3">
                             <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(5)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(6)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -519,8 +519,9 @@ HTML_TEMPLATE = """
                                     <label for="paramInput" class="block text-sm font-medium text-gray-700 mb-1">Required Parameters (one per line):</label>
                                     <textarea id="paramInput" rows="6" class="w-full p-2 border rounded-md shadow-sm" placeholder="session_id\nfirst_open_time..."></textarea>
                                 </div>
-                                <div>
+                                <div class="flex items-center gap-3">
                                     <button id="startValidationBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg h-10">Start Checking</button>
+                                    <button id="clearValidatorFilterBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-2 px-5 rounded-lg h-10">Clear Filter</button>
                                 </div>
                             </div>
                         </div>
