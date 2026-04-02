@@ -507,7 +507,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(24)</title>
+    <title>Event Inspector V2.0.0(25)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -565,34 +565,34 @@ HTML_TEMPLATE = """
 </head>
 <body class="bg-gray-100 text-gray-800 h-screen overflow-hidden">
 
-    <div class="container mx-auto p-4 sm:p-6 lg:p-8 h-full flex flex-col">
+    <div class="container mx-auto p-3 sm:p-4 lg:p-6 h-full flex flex-col">
         <!-- HEADER -->
-        <div class="bg-white rounded-xl shadow-md p-6 mb-6 flex-shrink-0">
+        <div class="bg-white rounded-xl shadow-md p-4 mb-4 flex-shrink-0">
             <div class="flex justify-between items-center flex-wrap gap-4">
-                <div class="flex items-center gap-4">
+                <div class="flex items-center gap-3">
                     <div>
-                        <div class="flex items-center gap-3">
-                            <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(24)</span>
+                        <div class="flex items-center gap-2.5">
+                            <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(25)</span>
                         </div>
-                        <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
+                        <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
-                    <button id="restartAppBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-sm">Refresh</button>
+                    <button id="restartAppBtn" class="bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Refresh</button>
                 </div>
                 <div class="flex items-center gap-4">
                     <div class="flex items-center gap-2">
                         <button id="pauseBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-yellow-500 hover:bg-yellow-600 text-white">Pause</button>
                         <button id="clearAllBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-red-500 hover:bg-red-600 text-white">Clear All</button>
                     </div>
-                    <div class="text-right p-3 rounded-lg bg-gray-50 border min-w-[280px]">
-                        <p class="font-semibold text-gray-700 mb-1 border-b pb-1">Connected Devices:</p>
+                    <div class="text-right p-2.5 rounded-lg bg-gray-50 border min-w-[250px]">
+                        <p class="text-sm font-semibold text-gray-700 mb-1 border-b pb-1">Connected Devices:</p>
                         <div id="deviceList" class="text-sm text-gray-600">
                              <p class="text-orange-500">WAITING...</p>
                         </div>
                     </div>
                      <div>
-                        <label for="deviceFilter" class="block text-sm font-medium text-gray-700">Filter by Device:</label>
-                        <select id="deviceFilter" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                        <label for="deviceFilter" class="block text-xs font-medium text-gray-700">Filter by Device:</label>
+                        <select id="deviceFilter" class="mt-1 block w-full pl-3 pr-10 py-1.5 text-sm border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 rounded-md">
                             <option value="all">All Devices</option>
                         </select>
                     </div>
@@ -601,18 +601,18 @@ HTML_TEMPLATE = """
         </div>
 
         <!-- TABS & ACTIONS -->
-        <div class="mb-4 flex-shrink-0">
+        <div class="mb-3 flex-shrink-0">
             <div class="flex justify-between items-end border-b border-gray-200">
                 <div class="flex flex-wrap">
-                    <button id="tabBtnLoadAds" class="tab-btn active text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAds')">Load Ads</button>
-                    <button id="tabBtnLoadAdsExt" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAdsExt')">Load Ads Ext (CP, KN)</button>
+                    <button id="tabBtnLoadAds" class="tab-btn active text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAds')">Load Ads</button>
+                    <button id="tabBtnLoadAdsExt" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAdsExt')">Load Ads Ext (CP, KN)</button>
                     
-                    <button id="tabBtnValidator" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('Validator')">Default Events/Params</button>
-                    <button id="tabBtnSpecific" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('Specific')">Specific Validator</button>
-                    <button id="tabBtnAdRevenue" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('AdRevenue')">AdRevenue</button>
-                    <button id="tabBtnCallbackAd" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('CallbackAd')">CallBack & Ads</button>
-                    <button id="tabBtnSdkCheck" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('SdkCheck')">SDK Check</button>
-                    <button id="tabBtnPackage" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('Package')">Package Logcat</button>
+                    <button id="tabBtnValidator" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Validator')">Default Events/Params</button>
+                    <button id="tabBtnSpecific" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Specific')">Specific Validator</button>
+                    <button id="tabBtnAdRevenue" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('AdRevenue')">AdRevenue</button>
+                    <button id="tabBtnCallbackAd" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('CallbackAd')">CallBack & Ads</button>
+                    <button id="tabBtnSdkCheck" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('SdkCheck')">SDK Check</button>
+                    <button id="tabBtnPackage" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Package')">Package Logcat</button>
                 </div>
             </div>
         </div>
