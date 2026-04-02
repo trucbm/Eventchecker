@@ -507,7 +507,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(31)</title>
+    <title>Event Inspector V2.0.0(32)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -573,7 +573,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(31)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(32)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -699,11 +699,7 @@ HTML_TEMPLATE = """
                                     <label for="validatorEventFilterInput" class="block text-xs font-medium text-gray-700 mb-1">Filter by Event Name:</label>
                                     <input type="text" id="validatorEventFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Type to filter events...">
                                 </div>
-                                <div>
-                                    <label for="paramInput" class="block text-xs font-medium text-gray-700 mb-1">Required Parameters (one per line):</label>
-                                    <textarea id="paramInput" rows="6" class="w-full p-2 border rounded-md shadow-sm" placeholder="session_id\nfirst_open_time..."></textarea>
-                                </div>
-                                <div class="flex items-center gap-3">
+                                <div class="flex items-center gap-3 pt-1">
                                     <button id="startValidationBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 rounded-lg h-9">Start Checking</button>
                                     <button id="clearValidatorFilterBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium text-xs px-4 rounded-lg h-9">Clear Filter</button>
                                 </div>
@@ -711,7 +707,7 @@ HTML_TEMPLATE = """
                         </div>
                         <div class="lg:col-span-2">
                             <div class="text-xs font-semibold text-gray-700 mb-2">Default Events Status</div>
-                            <div id="defaultEventStatusList" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs"></div>
+                            <div id="defaultEventStatusList" class="flex flex-wrap gap-1.5 text-xs"></div>
                         </div>
                     </div>
                 </div>
@@ -1191,10 +1187,10 @@ HTML_TEMPLATE = """
                 return;
             }
             container.innerHTML = defaultEventNames.map(name => `
-                <div class="default-event-item flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white shadow-sm cursor-pointer hover:bg-gray-50"
+                <div class="default-event-item inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-gray-200 bg-white cursor-pointer hover:bg-gray-50"
                      data-event-name="${escapeAttribute(name)}" title="Click to filter by this event">
                     <span class="event-status-icon text-gray-400 font-bold w-4 text-center" data-event="${name}" title="checking">...</span>
-                    <span class="truncate font-medium text-gray-700" title="${escapeHTML(name)}">${escapeHTML(name)}</span>
+                    <span class="truncate max-w-[180px] text-xs font-medium text-gray-700" title="${escapeHTML(name)}">${escapeHTML(name)}</span>
                 </div>
             `).join('');
             defaultEventStatusEls = {};
@@ -1682,27 +1678,23 @@ HTML_TEMPLATE = """
             if (!btn) return;
             if (isActive) {
                 btn.textContent = 'Stop';
-                btn.className = 'bg-red-500 hover:bg-red-600 text-white font-bold text-sm px-5 rounded-lg h-10';
+                btn.className = 'bg-red-500 hover:bg-red-600 text-white font-semibold text-xs px-4 rounded-lg h-9';
             } else {
                 btn.textContent = 'Start Checking';
-                btn.className = 'bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm px-5 rounded-lg h-10';
+                btn.className = 'bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 rounded-lg h-9';
             }
         }
 
         document.getElementById('startValidationBtn').addEventListener('click', () => {
-            const val = document.getElementById('paramInput').value;
-            const params = val.split('\\n').map(p=>p.trim()).filter(p=>p);
             const btn = document.getElementById('startValidationBtn');
             const isStarting = btn && btn.textContent === 'Start Checking';
-            if (isStarting) socket.emit('start_validation', params);
+            if (isStarting) socket.emit('start_validation', []);
             else socket.emit('stop_validation');
         });
 
         document.getElementById('clearValidatorFilterBtn')?.addEventListener('click', () => {
             const eventInput = document.getElementById('validatorEventFilterInput');
-            const paramInput = document.getElementById('paramInput');
             if (eventInput) eventInput.value = '';
-            if (paramInput) paramInput.value = '';
             renderValidatorTable(validator_results_cache);
         });
         
