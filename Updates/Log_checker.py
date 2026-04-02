@@ -507,7 +507,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(26)</title>
+    <title>Event Inspector V2.0.0(27)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -573,7 +573,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(26)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(27)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -626,10 +626,9 @@ HTML_TEMPLATE = """
                     <div class="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border mb-3">
                         <span class="text-sm font-semibold text-gray-700">Record Load Ads:</span>
                         <input type="text" id="sheetName_LoadAds" placeholder="Tên Sheet..." class="border p-2 rounded text-sm w-48 outline-none">
-                        <button id="btnRecord_LoadAds" onclick="toggleRecord('LoadAds')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded shadow text-sm">Start Record</button>
+                        <button id="btnRecord_LoadAds" onclick="toggleRecord('LoadAds')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-3 rounded shadow text-xs">Start Record</button>
                     </div>
 
-                    <h2 class="text-lg font-semibold mb-3">Load Ads Logs</h2>
                     <div class="overflow-x-auto">
                         <table id="packageLogTable" class="min-w-full bg-white">
                             <colgroup>
@@ -657,10 +656,9 @@ HTML_TEMPLATE = """
                     <div class="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border mb-3">
                         <span class="text-sm font-semibold text-gray-700">Record Load Ads Ext:</span>
                         <input type="text" id="sheetName_LoadAdsExt" placeholder="Tên Sheet..." class="border p-2 rounded text-sm w-48 outline-none">
-                        <button id="btnRecord_LoadAdsExt" onclick="toggleRecord('LoadAdsExt')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded shadow text-sm">Start Record</button>
+                        <button id="btnRecord_LoadAdsExt" onclick="toggleRecord('LoadAdsExt')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-3 rounded shadow text-xs">Start Record</button>
                     </div>
 
-                    <h2 class="text-lg font-semibold mb-3">Load Ads Ext Logs</h2>
                     <div class="overflow-x-auto">
                         <table class="min-w-full bg-white">
                             <thead class="bg-gray-50 sticky top-0 z-10">
@@ -692,8 +690,8 @@ HTML_TEMPLATE = """
                                         <select id="profileSelect" class="w-full h-10 px-3 border rounded-md shadow-sm text-sm"></select>
                                         <input type="file" id="profileFileInput" accept=".xlsx" class="hidden">
                                         <div class="flex flex-wrap items-center gap-3">
-                                            <button id="importProfileBtn" class="bg-slate-700 hover:bg-slate-800 text-white font-semibold text-sm px-4 rounded-lg h-10 min-w-[132px]">Import Profile</button>
-                                            <button id="reloadProfileBtn" class="bg-slate-200 hover:bg-slate-300 text-gray-800 font-semibold text-sm px-4 rounded-lg h-10 min-w-[132px]">Reload Profile</button>
+                                            <button id="importProfileBtn" class="bg-slate-700 hover:bg-slate-800 text-white font-medium text-xs px-3 rounded-lg h-9 min-w-[116px]">Import Profile</button>
+                                            <button id="reloadProfileBtn" class="bg-slate-200 hover:bg-slate-300 text-gray-800 font-medium text-xs px-3 rounded-lg h-9 min-w-[116px]">Reload Profile</button>
                                         </div>
                                     </div>
                                 </div>
@@ -706,8 +704,8 @@ HTML_TEMPLATE = """
                                     <textarea id="paramInput" rows="6" class="w-full p-2 border rounded-md shadow-sm" placeholder="session_id\nfirst_open_time..."></textarea>
                                 </div>
                                 <div class="flex items-center gap-3">
-                                    <button id="startValidationBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm px-5 rounded-lg h-10">Start Checking</button>
-                                    <button id="clearValidatorFilterBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold text-sm px-5 rounded-lg h-10">Clear Filter</button>
+                                    <button id="startValidationBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 rounded-lg h-9">Start Checking</button>
+                                    <button id="clearValidatorFilterBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium text-xs px-4 rounded-lg h-9">Clear Filter</button>
                                 </div>
                             </div>
                         </div>
@@ -886,7 +884,7 @@ HTML_TEMPLATE = """
                             <label for="packageIdInput" class="block text-xs font-medium text-gray-700 mb-1">Package ID:</label>
                             <input type="text" id="packageIdInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="com.example.app">
                             <div class="flex justify-center mt-3">
-                                <button id="startPackageLogBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg h-10">Start</button>
+                                <button id="startPackageLogBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Start</button>
                             </div>
                             <div class="flex items-center mt-4 space-x-4">
                                 <div class="flex items-center">
@@ -1144,10 +1142,10 @@ HTML_TEMPLATE = """
 
             tbody.innerHTML = filtered.map(e => `
                 <tr class="hover:bg-gray-50 border-b text-sm">
-                    <td class="py-2 px-4 text-purple-700 font-medium">${e.device_name}</td>
-                    <td class="py-2 px-4 text-blue-600 font-semibold">${e.ad_source}</td>
-                    <td class="py-2 px-4 text-green-600 font-semibold">${e.ad_format}</td>
-                    <td class="py-2 px-4 log-cell">${e.raw_log}</td>
+                    <td class="py-2 px-3 text-purple-700 text-sm font-medium">${e.device_name}</td>
+                    <td class="py-2 px-3 text-blue-600 text-sm font-medium">${e.ad_source}</td>
+                    <td class="py-2 px-3 text-green-600 text-sm font-medium">${e.ad_format}</td>
+                    <td class="py-2 px-3 log-cell text-sm font-normal text-gray-600">${e.raw_log}</td>
                 </tr>
             `).join('');
         }
@@ -1252,7 +1250,7 @@ HTML_TEMPLATE = """
                         <td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED' ? 'text-green-600' : 'text-red-600'}">${res.status}</td>
                         <td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td>
                         <td class="py-2 px-3 details-cell text-sm">${res.details}</td>
-                        <td class="py-2 px-3 log-cell text-sm">${res.raw_log}</td>
+                        <td class="py-2 px-3 log-cell text-sm font-normal text-gray-600">${res.raw_log}</td>
                         <td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td>
                     </tr>
                  `).join('');
@@ -1357,7 +1355,7 @@ HTML_TEMPLATE = """
              const filtered = (selectedDevice === 'all') ? d : d.filter(r => r.device_id === selectedDevice);
              if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
              else {
-                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-sm">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
+                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-sm font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
              }
         });
 
@@ -1368,7 +1366,7 @@ HTML_TEMPLATE = """
              const filtered = d.filter(r => (selectedDevice === 'all' || r.device_id === selectedDevice) && (!filterText || r.raw_log.toLowerCase().includes(filterText)));
              if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
              else {
-                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-sm">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
+                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-sm font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
              }
         });
 
@@ -1415,7 +1413,7 @@ HTML_TEMPLATE = """
                      const isFailed = nameLower.includes('failed');
                      const isImpression = nameLower.includes('onimpression') || nameLower.includes('_onimpression');
                      const eventClass = isFailed ? 'text-red-600' : (isImpression ? 'text-blue-600' : '');
-                     return `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.type==='Ad Event'?'text-orange-600':'text-cyan-600'}">${res.type}</td><td class="py-2 px-3 text-sm font-medium ${eventClass}">${res.event_name}</td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-sm">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`;
+                     return `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.type==='Ad Event'?'text-orange-600':'text-cyan-600'}">${res.type}</td><td class="py-2 px-3 text-sm font-medium ${eventClass}">${res.event_name}</td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-sm font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`;
                  }).join('');
              }
         }
