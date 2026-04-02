@@ -271,6 +271,7 @@ METRICA_TRACKING_PATTERN = re.compile(r'Event sent: ad_impression with value\s*(
 OLD_EVENT_LOG_PATTERN = re.compile(r'\[\s*Tracking\s*\]\s*TrackingService->Track:\s*(\{"eventName":.*)')
 CALLBACK_LOG_PATTERN = re.compile(r"(_OnImpressionDataReadyEvent|LevelPlayInterstitialAdListener|LevelPlayBannerAdViewListener|LevelPlayRewardedAdListener)")
 ADREVENUE_LOG_PATTERN = re.compile(r"AdRevenue Received:\s*AdRevenue\{(.*)\}")
+APPSFLYER_ADREVENUE_PATTERN = re.compile(r"\b(ADREVENUE)-\d+:\s*preparing data:\s*(\{.*\})", re.IGNORECASE)
 SDK_CHECK_SEARCH_PATTERN = re.compile(r'"search_pattern"\s*:\s*["\'](.*?)["\']')
 GADSME_SERVICE_KEYWORD = "GadsmeService->"
 ADVERTY5_KEYWORD = "Adverty5"
@@ -507,7 +508,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(34)</title>
+    <title>Event Inspector V2.0.0(35)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -574,7 +575,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(34)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(35)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -767,14 +768,35 @@ HTML_TEMPLATE = """
             <!-- TAB 5: AdRevenue -->
             <div id="tabContentAdRevenue" class="hidden">
                 <div class="bg-white rounded-xl shadow-md p-4 mb-4">
-                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                     <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(260px,360px)] gap-4 items-start">
                         <div>
                             <label for="adRevenueParamInput" class="block text-xs font-medium text-gray-700 mb-1">Validate Parameters:</label>
-                            <textarea id="adRevenueParamInput" rows="6" class="w-full p-2 border rounded-md shadow-sm" placeholder="adRevenue\ncurrency\npayload..."></textarea>
+                            <textarea id="adRevenueParamInput" rows="6" class="w-full p-2 border rounded-md shadow-sm" placeholder="adRevenue
+currency
+payload..."></textarea>
                         </div>
-                        <div>
-                            <label for="adRevenueFilterInput" class="block text-xs font-medium text-gray-700 mb-1">Filter logs by text:</label>
-                            <input type="text" id="adRevenueFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search in raw log...">
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700 mb-1">Source Filter:</label>
+                                <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                                    <label class="inline-flex items-center whitespace-nowrap">
+                                        <input name="adRevenueSourceFilter" type="radio" value="all" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                        <span class="ml-2 text-sm text-gray-900">All</span>
+                                    </label>
+                                    <label class="inline-flex items-center whitespace-nowrap">
+                                        <input name="adRevenueSourceFilter" type="radio" value="appmetrica" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                        <span class="ml-2 text-sm text-gray-900">Appmetrica</span>
+                                    </label>
+                                    <label class="inline-flex items-center whitespace-nowrap">
+                                        <input name="adRevenueSourceFilter" type="radio" value="appsflyer" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                        <span class="ml-2 text-sm text-gray-900">Appsflyer</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div>
+                                <label for="adRevenueFilterInput" class="block text-xs font-medium text-gray-700 mb-1">Filter logs by text:</label>
+                                <input type="text" id="adRevenueFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search in raw log...">
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1370,17 +1392,29 @@ HTML_TEMPLATE = """
                  tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
              }
         });
+        let lastAdRevenueData = [];
 
          socket.on('update_adrevenue_table', (d) => {
-             const tbody = document.getElementById('adRevenueTableBody');
-             if (!tbody) return;
-             const filterText = document.getElementById('adRevenueFilterInput').value.toLowerCase();
-             const filtered = d.filter(r => (selectedDevice === 'all' || r.device_id === selectedDevice) && (!filterText || r.raw_log.toLowerCase().includes(filterText)));
-             if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
-             else {
-                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
-             }
+             lastAdRevenueData = d || [];
+             renderAdRevenueTable();
         });
+
+        function renderAdRevenueTable() {
+            const tbody = document.getElementById('adRevenueTableBody');
+            if (!tbody) return;
+            const filterText = document.getElementById('adRevenueFilterInput').value.toLowerCase();
+            const sourceFilter = document.querySelector('input[name="adRevenueSourceFilter"]:checked')?.value || 'all';
+            const filtered = lastAdRevenueData.filter(r => {
+                if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
+                if (sourceFilter !== 'all' && (r.source || '').toLowerCase() !== sourceFilter) return false;
+                if (filterText && !(r.raw_log || '').toLowerCase().includes(filterText)) return false;
+                return true;
+            });
+            if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
+            else {
+                tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':(res.status === 'FAILED'?'text-red-600':'text-orange-500')}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
+            }
+        }
 
         // ============================================
         // === FIXED: Callback Table with Client Filter ===
@@ -1686,6 +1720,7 @@ HTML_TEMPLATE = """
             selectedDevice = e.target.value; 
             socket.emit('refresh_request'); 
             renderCallbackTable(); // Trigger client-side re-render immediately
+            renderAdRevenueTable();
         });
 
         // --- Specific Tab Logic ---
@@ -1742,7 +1777,8 @@ HTML_TEMPLATE = """
                 .map(p => p.trim().replace(/^['"]+|['"]+$/g, ''))
                 .filter(p => p)
         }));
-        document.getElementById('adRevenueFilterInput').addEventListener('input', (e) => socket.emit('refresh_request')); // Trigger re-render
+        document.getElementById('adRevenueFilterInput').addEventListener('input', renderAdRevenueTable);
+        document.querySelectorAll('input[name="adRevenueSourceFilter"]').forEach(r => r.addEventListener('change', renderAdRevenueTable));
         document.getElementById('packageFilterInput2').addEventListener('input', () => socket.emit('refresh_request'));
         document.getElementById('packageTagFilterInput').addEventListener('input', () => {
             const allOpt = document.querySelector('input[name="tagQuickFilter"][value=""]');
@@ -2386,13 +2422,22 @@ def _apply_adrevenue_filter_and_emit():
     with lock:
         for item in adrevenue_logs:
             parsed_data = item.get("parsed_data") or {}
-            payload_data = parsed_data.get("payload") if isinstance(parsed_data.get("payload"), dict) else {}
+            source = (item.get("source") or "appmetrica").lower()
+
+            if source == "appsflyer":
+                ad_network = parsed_data.get("ad_network") if isinstance(parsed_data.get("ad_network"), dict) else {}
+                payload_data = ad_network.get("payload") if isinstance(ad_network.get("payload"), dict) else {}
+                custom_params = payload_data.get("custom_parameters") if isinstance(payload_data.get("custom_parameters"), dict) else {}
+                validate_maps = [ad_network, payload_data, custom_params]
+                details_target = ad_network if ad_network else parsed_data
+            else:
+                payload_data = parsed_data.get("payload") if isinstance(parsed_data.get("payload"), dict) else {}
+                validate_maps = [parsed_data, payload_data]
+                details_target = parsed_data if parsed_data else item.get("raw_details", "")
 
             missing = []
             for param in normalized:
-                if param in parsed_data:
-                    continue
-                if param in payload_data:
+                if any(isinstance(m, dict) and param in m for m in validate_maps):
                     continue
                 missing.append(param)
 
@@ -2403,11 +2448,11 @@ def _apply_adrevenue_filter_and_emit():
             summary_parts = []
             if normalized:
                 if missing:
-                    summary_parts.append(format_param_issue_html("Missing params", missing, "text-red-600", chunk_size=3))
+                    summary_parts.append(format_param_issue_html("Missing", missing, "text-red-600", chunk_size=1))
                 else:
-                    summary_parts.append("<div class='mb-2 text-xs font-semibold text-green-600'>All requested params found</div>")
+                    summary_parts.append("<div class='mb-2 text-xs font-medium text-green-600'>All requested params found</div>")
 
-            details_html = ''.join(summary_parts) + format_json_html(parsed_data if parsed_data else item.get("raw_details", ""))
+            details_html = ''.join(summary_parts) + format_json_html(details_target)
             rendered.append({
                 **item,
                 "status": status,
@@ -2457,58 +2502,82 @@ def adb_log_reader(device_id):
                 if found: _emit_sdk_check_results()
 
             # 4. Process AdRevenue
+            handled_adrevenue = False
             if "AdRevenue Received:" in line:
                 with lock:
                     match = ADREVENUE_LOG_PATTERN.search(line)
                     if match:
                         content = match.group(1)
-                        details_html = content
                         ad_data = {}
-                        
-                        # --- Logic parse AdRevenue string to JSON object ---
+
                         try:
-                            # 1. Extract payload JSON string if exists
                             payload_obj = {}
                             payload_match = re.search(r'payload=(\{.*?\})(?:,|$)', content)
-                            
+
                             clean_content = content
                             if payload_match:
                                 payload_str = payload_match.group(1)
                                 try:
                                     payload_obj = json.loads(payload_str)
-                                except: pass
-                                # Remove payload part to parse the rest easily
+                                except:
+                                    payload_obj = {}
                                 clean_content = content.replace(f'payload={payload_str}', '')
-                            
-                            # 2. Parse key=value pairs
-                            # Split by comma and space, but careful with empty strings
+
                             parts = [p.strip() for p in clean_content.split(',') if p.strip()]
-                            
                             for part in parts:
                                 if '=' in part:
                                     k, v = part.split('=', 1)
                                     ad_data[k.strip()] = v.strip()
-                            
-                            # 3. Re-attach payload object
+
                             if payload_obj:
                                 ad_data['payload'] = payload_obj
-                                
-                            details_html = format_json_html(ad_data)
-                        except: 
-                            pass # Fallback to raw content if parsing fails
-                        
+                        except:
+                            ad_data = {}
+
                         adrevenue_logs.append({
                             "device_id": device_id,
                             "device_name": get_device_name(device_id),
                             "status": "INFO",
-                            "event_name": "AdRevenue",
-                            "details": details_html,
+                            "event_name": "AdRevenue - Appmetrica",
+                            "source": "appmetrica",
+                            "details": format_json_html(ad_data) if ad_data else content,
                             "raw_details": content,
                             "raw_log": line.strip(),
                             "json_data": json.dumps(ad_data, ensure_ascii=False) if ad_data else "{}",
                             "parsed_data": ad_data,
                         })
+                        handled_adrevenue = True
                 _apply_adrevenue_filter_and_emit()
+
+            if (not handled_adrevenue) and "AppsFlyer" in line and "ADREVENUE-" in line and "preparing data:" in line:
+                with lock:
+                    match = APPSFLYER_ADREVENUE_PATTERN.search(line)
+                    if match:
+                        event_prefix = match.group(1).upper()
+                        json_str = match.group(2)
+                        appsflyer_data = {}
+                        try:
+                            appsflyer_data = json.loads(json_str)
+                        except:
+                            appsflyer_data = {}
+
+                        ad_network_data = appsflyer_data.get("ad_network") if isinstance(appsflyer_data.get("ad_network"), dict) else {}
+                        adrevenue_logs.append({
+                            "device_id": device_id,
+                            "device_name": get_device_name(device_id),
+                            "status": "INFO",
+                            "event_name": "AdRevenue - Appsflyer",
+                            "source": "appsflyer",
+                            "details": format_json_html(ad_network_data) if ad_network_data else format_json_html(appsflyer_data),
+                            "raw_details": json_str,
+                            "raw_log": line.strip(),
+                            "json_data": json.dumps(appsflyer_data, ensure_ascii=False) if appsflyer_data else "{}",
+                            "parsed_data": appsflyer_data,
+                            "raw_event_prefix": event_prefix,
+                        })
+                        handled_adrevenue = True
+                if handled_adrevenue:
+                    _apply_adrevenue_filter_and_emit()
 
             # 5. Process Callback & Events
             process_callback_and_ad_event_log(line, device_id)
