@@ -507,7 +507,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(33)</title>
+    <title>Event Inspector V2.0.0(34)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -537,6 +537,7 @@ HTML_TEMPLATE = """
         #packageLogTableBody tr.selected { background-color: #bfdbfe !important; }
         .resizer.disabled { cursor: not-allowed; background: transparent; }
         .details-cell pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+        #logDetailContent, #logDetailContent * { user-select: text; -webkit-user-select: text; }
         @keyframes pulse { 50% { opacity: .6; } }
         .animate-pulse-green { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
         .animate-record { animation: pulse 1.5s infinite; }
@@ -573,7 +574,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(33)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(34)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -996,7 +997,7 @@ HTML_TEMPLATE = """
                 </div>
             </div>
             <div class="flex-grow overflow-auto bg-gray-50 p-4 rounded-md border">
-                <pre id="logDetailContent" class="text-sm font-mono whitespace-pre-wrap text-gray-800"></pre>
+                <pre id="logDetailContent" class="text-sm font-mono whitespace-pre-wrap text-gray-800 select-text"></pre>
             </div>
         </div>
     </div>
