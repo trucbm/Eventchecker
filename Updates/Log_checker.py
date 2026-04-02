@@ -197,12 +197,19 @@ DEVICE_NAMES = {
 
 # --- DỮ LIỆU TOÀN CỤC ---
 
+# Giới hạn cache để UI không giữ quá nhiều log trong RAM.
+MAX_LOAD_ADS_LOGS = 1000
+MAX_VALIDATOR_LOGS = 1500
+MAX_SPECIFIC_EVENT_LOGS = 1500
+MAX_CALLBACK_AD_LOGS = 1500
+MAX_ADREVENUE_LOGS = 1500
+
 # 1. Dữ liệu cho Tab Load Ads
-load_ads_events = []
+load_ads_events = deque(maxlen=MAX_LOAD_ADS_LOGS)
 unique_load_ads = set()
 
 # 2. Dữ liệu cho Tab Load Ads Ext
-load_ads_ext_events = []
+load_ads_ext_events = deque(maxlen=MAX_LOAD_ADS_LOGS)
 unique_load_ads_ext = set()
 
 # Trạng thái Recording (Google Sheet) - RIÊNG BIỆT CHO TỪNG TAB
@@ -212,14 +219,14 @@ recording_states = {
 }
 
 # 3. Dữ liệu cho Tab Validator
-validator_results = []
+validator_results = deque(maxlen=MAX_VALIDATOR_LOGS)
 required_params = []  # Manual extra params from UI
 default_params = []   # Default params from sheet (apply to all events)
 event_specific_params = {}  # event_name -> list of params
 validator_active = False
 
 # 4. Dữ liệu cho Tab Specific Event
-event_log_cache = []
+event_log_cache = deque(maxlen=MAX_SPECIFIC_EVENT_LOGS)
 specific_event_results = []
 specific_event_name_filters = []
 specific_event_params_filters = []
@@ -231,11 +238,11 @@ active_package_pids = {}
 active_logcat_processes = {}
 
 # 6. Dữ liệu cho Tab Callback & Ads Event
-callback_ad_logs = []
+callback_ad_logs = deque(maxlen=MAX_CALLBACK_AD_LOGS)
 
 # 7. Dữ liệu cho Tab AdRevenue
 adrevenue_log_cache = []
-adrevenue_logs = []
+adrevenue_logs = deque(maxlen=MAX_ADREVENUE_LOGS)
 adrevenue_params_to_validate = []
 
 # 8. Dữ liệu cho Tab SDK Check
@@ -500,7 +507,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(23)</title>
+    <title>Event Inspector V2.0.0(24)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -566,7 +573,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-3">
                             <h1 class="text-2xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(23)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(24)</span>
                         </div>
                         <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2121,7 +2128,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                     "raw_log": log_entry.strip(),
                     "json_data": json_data_for_log
                 })
-                socketio.emit('update_callback_ad_table', callback_ad_logs)
+                socketio.emit('update_callback_ad_table', list(callback_ad_logs))
             return
         except:
             pass
@@ -2154,7 +2161,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                     "raw_log": log_entry.strip(),
                     "json_data": json_data_for_log
                 })
-                socketio.emit('update_callback_ad_table', callback_ad_logs)
+                socketio.emit('update_callback_ad_table', list(callback_ad_logs))
             return
         except:
             pass
@@ -2225,7 +2232,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                         "raw_log": current_buffer.strip()[:200]+"...", 
                         "json_data": json_data_for_log
                     })
-                    socketio.emit('update_callback_ad_table', callback_ad_logs)
+                    socketio.emit('update_callback_ad_table', list(callback_ad_logs))
                     return # Done processing this line/buffer
                 else:
                      # JSON start found but not ended -> Update buffer and wait for next line
@@ -2242,7 +2249,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
             details = format_json_html(actual_params) if actual_params else "No params"
             with lock:
                 callback_ad_logs.append({"device_id": device_id, "device_name": get_device_name(device_id), "type": "Ad Event", "event_name": event_name, "details": details, "raw_log": log_entry.strip(), "json_data": json_string})
-                socketio.emit('update_callback_ad_table', callback_ad_logs)
+                socketio.emit('update_callback_ad_table', list(callback_ad_logs))
         except: pass
     
     # --- 3. Process Other Callbacks ---
@@ -2276,7 +2283,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
 
         with lock:
             callback_ad_logs.append({"device_id": device_id, "device_name": get_device_name(device_id), "type": "Callback", "event_name": display_name, "details": details, "raw_log": log_entry.strip(), "json_data": json_data_for_log})
-            socketio.emit('update_callback_ad_table', callback_ad_logs)
+            socketio.emit('update_callback_ad_table', list(callback_ad_logs))
 
 def process_event_validator_log(event_name, actual_params, json_string, log_entry, device_id):
     if is_paused or not validator_active: 
@@ -2311,7 +2318,7 @@ def process_event_validator_log(event_name, actual_params, json_string, log_entr
         details_html += format_json_html(actual_params)
         
         validator_results.append({"device_id": device_id, "event_name": event_name, "device_name": get_device_name(device_id), "status": status, "details": details_html, "raw_log": log_entry.strip(), "json_data": json_string})
-        socketio.emit('update_validator_table', validator_results)
+        socketio.emit('update_validator_table', list(validator_results))
 
 def _apply_specific_filter_and_emit():
     global specific_event_results
@@ -2673,7 +2680,7 @@ def handle_change_tab(data):
     if data.get('tab_name') == 'LoadAds': socketio.emit('update_load_ads', list(load_ads_events))
     if data.get('tab_name') == 'LoadAdsExt': socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
     if data.get('tab_name') == 'SdkCheck': _emit_sdk_check_results()
-    if data.get('tab_name') == 'CallbackAd': socketio.emit('update_callback_ad_table', callback_ad_logs)
+    if data.get('tab_name') == 'CallbackAd': socketio.emit('update_callback_ad_table', list(callback_ad_logs))
 
 @socketio.on('toggle_record')
 def tr(data):
@@ -2784,7 +2791,7 @@ def spl(d):
 def refresh():
     socketio.emit('update_load_ads', list(load_ads_events))
     socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
-    socketio.emit('update_callback_ad_table', callback_ad_logs) # Ensure callback data is refreshed
+    socketio.emit('update_callback_ad_table', list(callback_ad_logs)) # Ensure callback data is refreshed
     # ... trigger others ...
 
 @socketio.on('connect')
