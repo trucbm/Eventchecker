@@ -507,7 +507,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(28)</title>
+    <title>Event Inspector V2.0.0(29)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -573,7 +573,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(28)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(29)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -803,34 +803,34 @@ HTML_TEMPLATE = """
             <!-- TAB 6: CallbackAd -->
             <div id="tabContentCallbackAd" class="hidden">
                  <div class="bg-white rounded-xl shadow-md p-4">
-                    <div class="mb-3 grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
+                    <div class="mb-3 grid grid-cols-1 lg:grid-cols-[1fr_minmax(320px,420px)] gap-4 items-end">
                         <div>
                             <label class="block text-xs font-medium text-gray-700">Filter by Type:</label>
-                            <div class="mt-2 flex flex-wrap gap-x-4 gap-y-2">
-                                <div class="flex items-center">
+                            <div class="mt-2 flex flex-wrap lg:flex-nowrap items-center gap-x-4 gap-y-2 text-sm">
+                                <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="callbackTypeAll" name="callbackType" type="radio" value="all" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                    <label for="callbackTypeAll" class="ml-2 block text-sm text-gray-900">All</label>
-                                </div>
-                                <div class="flex items-center">
+                                    <span class="ml-2 text-sm text-gray-900">All</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="callbackTypeCallback" name="callbackType" type="radio" value="callback" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                    <label for="callbackTypeCallback" class="ml-2 block text-sm text-gray-900">Callback</label>
-                                </div>
-                                <div class="flex items-center">
+                                    <span class="ml-2 text-sm text-gray-900">Callback</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="callbackTypeGadsme" name="callbackType" type="radio" value="gadsme_callback" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                    <label for="callbackTypeGadsme" class="ml-2 block text-sm text-gray-900">Callback Gadsme</label>
-                                </div>
-                                <div class="flex items-center">
+                                    <span class="ml-2 text-sm text-gray-900">Callback Gadsme</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="callbackTypeAdverty5" name="callbackType" type="radio" value="adverty5_callback" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                    <label for="callbackTypeAdverty5" class="ml-2 block text-sm text-gray-900">Callback Adverty5</label>
-                                </div>
-                                <div class="flex items-center">
+                                    <span class="ml-2 text-sm text-gray-900">Callback Adverty5</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="callbackTypeAdEvent" name="callbackType" type="radio" value="ad_event" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                    <label for="callbackTypeAdEvent" class="ml-2 block text-sm text-gray-900">Ad Event</label>
-                                </div>
+                                    <span class="ml-2 text-sm text-gray-900">Ad Event</span>
+                                </label>
                             </div>
                         </div>
-                        <div class="md:col-span-2 md:pl-6">
-                            <label for="callbackAdFilterInput" class="block text-sm font-medium text-gray-700">Filter (in raw log):</label>
+                        <div class="lg:justify-self-end w-full lg:max-w-[420px]">
+                            <label for="callbackAdFilterInput" class="block text-xs font-medium text-gray-700">Filter (in raw log):</label>
                             <input type="text" id="callbackAdFilterInput" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" placeholder="Search...">
                         </div>
                     </div>
