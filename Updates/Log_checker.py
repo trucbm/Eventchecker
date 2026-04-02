@@ -507,7 +507,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(25)</title>
+    <title>Event Inspector V2.0.0(26)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -573,7 +573,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(25)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(26)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -622,14 +622,14 @@ HTML_TEMPLATE = """
 
             <!-- TAB 1: Load Ads -->
             <div id="tabContentLoadAds">
-                 <div class="bg-white rounded-xl shadow-md p-6">
-                    <div class="flex items-center gap-2 bg-gray-50 p-3 rounded-lg border mb-4">
-                        <span class="font-bold text-gray-700">Record Load Ads:</span>
+                 <div class="bg-white rounded-xl shadow-md p-4">
+                    <div class="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border mb-3">
+                        <span class="text-sm font-semibold text-gray-700">Record Load Ads:</span>
                         <input type="text" id="sheetName_LoadAds" placeholder="Tên Sheet..." class="border p-2 rounded text-sm w-48 outline-none">
                         <button id="btnRecord_LoadAds" onclick="toggleRecord('LoadAds')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded shadow text-sm">Start Record</button>
                     </div>
 
-                    <h2 class="text-xl font-bold mb-4">Load Ads Logs</h2>
+                    <h2 class="text-lg font-semibold mb-3">Load Ads Logs</h2>
                     <div class="overflow-x-auto">
                         <table id="packageLogTable" class="min-w-full bg-white">
                             <colgroup>
@@ -639,10 +639,10 @@ HTML_TEMPLATE = """
                             </colgroup>
                             <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Device</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Ad_source</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Format</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Raw Log</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Ad_source</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Format</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
                                 </tr>
                             </thead>
                             <tbody id="loadAdsTableBody" class="divide-y divide-gray-200"></tbody>
@@ -653,22 +653,22 @@ HTML_TEMPLATE = """
 
             <!-- TAB 2: Load Ads Ext (CP, KN)-->
             <div id="tabContentLoadAdsExt" class="hidden">
-                 <div class="bg-white rounded-xl shadow-md p-6">
-                    <div class="flex items-center gap-2 bg-gray-50 p-3 rounded-lg border mb-4">
-                        <span class="font-bold text-gray-700">Record Load Ads Ext:</span>
+                 <div class="bg-white rounded-xl shadow-md p-4">
+                    <div class="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border mb-3">
+                        <span class="text-sm font-semibold text-gray-700">Record Load Ads Ext:</span>
                         <input type="text" id="sheetName_LoadAdsExt" placeholder="Tên Sheet..." class="border p-2 rounded text-sm w-48 outline-none">
                         <button id="btnRecord_LoadAdsExt" onclick="toggleRecord('LoadAdsExt')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded shadow text-sm">Start Record</button>
                     </div>
 
-                    <h2 class="text-xl font-bold mb-4">Load Ads Ext Logs</h2>
+                    <h2 class="text-lg font-semibold mb-3">Load Ads Ext Logs</h2>
                     <div class="overflow-x-auto">
                         <table class="min-w-full bg-white">
                             <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Device</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Ad_source</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Format</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Raw Log</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Ad_source</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Format</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
                                 </tr>
                             </thead>
                             <tbody id="loadAdsExtTableBody" class="divide-y divide-gray-200"></tbody>
@@ -679,14 +679,14 @@ HTML_TEMPLATE = """
 
             <!-- TAB 3: Validator -->
             <div id="tabContentValidator" class="hidden">
-                <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div class="bg-white rounded-xl shadow-md p-4 mb-4">
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
                         <div class="lg:col-span-1">
-                            <div class="space-y-6">
+                            <div class="space-y-4">
                                 <div>
                                     <div class="flex items-center gap-3 mb-2">
-                                        <label for="profileSelect" class="text-sm font-medium text-gray-700">Game Profile:</label>
-                                        <p id="profileGameText" class="text-sm font-semibold text-indigo-700"></p>
+                                        <label for="profileSelect" class="text-xs font-medium text-gray-700">Game Profile:</label>
+                                        <p id="profileGameText" class="text-xs font-medium text-indigo-700"></p>
                                     </div>
                                     <div class="space-y-3">
                                         <select id="profileSelect" class="w-full h-10 px-3 border rounded-md shadow-sm text-sm"></select>
@@ -698,11 +698,11 @@ HTML_TEMPLATE = """
                                     </div>
                                 </div>
                                 <div>
-                                    <label for="validatorEventFilterInput" class="block text-sm font-medium text-gray-700 mb-1">Filter by Event Name:</label>
+                                    <label for="validatorEventFilterInput" class="block text-xs font-medium text-gray-700 mb-1">Filter by Event Name:</label>
                                     <input type="text" id="validatorEventFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Type to filter events...">
                                 </div>
                                 <div>
-                                    <label for="paramInput" class="block text-sm font-medium text-gray-700 mb-1">Required Parameters (one per line):</label>
+                                    <label for="paramInput" class="block text-xs font-medium text-gray-700 mb-1">Required Parameters (one per line):</label>
                                     <textarea id="paramInput" rows="6" class="w-full p-2 border rounded-md shadow-sm" placeholder="session_id\nfirst_open_time..."></textarea>
                                 </div>
                                 <div class="flex items-center gap-3">
@@ -712,22 +712,22 @@ HTML_TEMPLATE = """
                             </div>
                         </div>
                         <div class="lg:col-span-2">
-                            <div class="text-sm font-semibold text-gray-700 mb-3">Default Events Status</div>
-                            <div id="defaultEventStatusList" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm"></div>
+                            <div class="text-xs font-semibold text-gray-700 mb-2">Default Events Status</div>
+                            <div id="defaultEventStatusList" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs"></div>
                         </div>
                     </div>
                 </div>
-                <div class="bg-white rounded-xl shadow-md p-6">
+                <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="overflow-x-auto">
                         <table class="min-w-full bg-white">
                            <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Device</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Status</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Event Name</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Details</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Raw Log</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Action</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Status</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Event Name</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Details</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Action</th>
                                 </tr>
                             </thead>
                             <tbody id="validatorTableBody" class="divide-y divide-gray-200"></tbody>
@@ -738,29 +738,29 @@ HTML_TEMPLATE = """
 
             <!-- TAB 4: Specific -->
             <div id="tabContentSpecific" class="hidden">
-                <div class="bg-white rounded-xl shadow-md p-6 mb-6">
+                <div class="bg-white rounded-xl shadow-md p-4 mb-4">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
                          <div>
-                            <label for="specificEventInput" class="block text-sm font-medium text-gray-700 mb-1">Filter by Event Names:</label>
+                            <label for="specificEventInput" class="block text-xs font-medium text-gray-700 mb-1">Filter by Event Names:</label>
                             <textarea id="specificEventInput" rows="4" class="w-full p-2 border rounded-md shadow-sm" placeholder="Leave empty to show all events..."></textarea>
                          </div>
                          <div>
-                            <label for="specificParamInput" class="block text-sm font-medium text-gray-700 mb-1">Validate Parameters:</label>
+                            <label for="specificParamInput" class="block text-xs font-medium text-gray-700 mb-1">Validate Parameters:</label>
                             <textarea id="specificParamInput" rows="4" class="w-full p-2 border rounded-md shadow-sm" placeholder="Leave empty to display all params..."></textarea>
                          </div>
                     </div>
                 </div>
-                <div class="bg-white rounded-xl shadow-md p-6">
+                <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="overflow-x-auto">
                         <table class="min-w-full bg-white">
                            <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Device</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Status</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Event Name</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Details</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Raw Log</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Action</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Status</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Event Name</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Details</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Action</th>
                                 </tr>
                             </thead>
                             <tbody id="specificEventTableBody" class="divide-y divide-gray-200"></tbody>
@@ -771,29 +771,29 @@ HTML_TEMPLATE = """
 
             <!-- TAB 5: AdRevenue -->
             <div id="tabContentAdRevenue" class="hidden">
-                <div class="bg-white rounded-xl shadow-md p-6 mb-6">
+                <div class="bg-white rounded-xl shadow-md p-4 mb-4">
                      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
                         <div>
-                            <label for="adRevenueParamInput" class="block text-sm font-medium text-gray-700 mb-1">Validate Parameters:</label>
+                            <label for="adRevenueParamInput" class="block text-xs font-medium text-gray-700 mb-1">Validate Parameters:</label>
                             <textarea id="adRevenueParamInput" rows="6" class="w-full p-2 border rounded-md shadow-sm" placeholder="adRevenue\ncurrency\npayload..."></textarea>
                         </div>
                         <div>
-                            <label for="adRevenueFilterInput" class="block text-sm font-medium text-gray-700 mb-1">Filter logs by text:</label>
+                            <label for="adRevenueFilterInput" class="block text-xs font-medium text-gray-700 mb-1">Filter logs by text:</label>
                             <input type="text" id="adRevenueFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search in raw log...">
                         </div>
                     </div>
                 </div>
-                <div class="bg-white rounded-xl shadow-md p-6">
+                <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="overflow-x-auto">
                         <table class="min-w-full bg-white">
                            <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Device</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Status</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Event Name</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Details</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Raw Log</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Action</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Status</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Event Name</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Details</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Action</th>
                                 </tr>
                             </thead>
                             <tbody id="adRevenueTableBody" class="divide-y divide-gray-200"></tbody>
@@ -804,11 +804,11 @@ HTML_TEMPLATE = """
 
             <!-- TAB 6: CallbackAd -->
             <div id="tabContentCallbackAd" class="hidden">
-                 <div class="bg-white rounded-xl shadow-md p-6">
-                    <div class="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                 <div class="bg-white rounded-xl shadow-md p-4">
+                    <div class="mb-3 grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
                         <div>
-                            <label class="block text-sm font-medium text-gray-700">Filter by Type:</label>
-                            <div class="mt-2 flex space-x-4">
+                            <label class="block text-xs font-medium text-gray-700">Filter by Type:</label>
+                            <div class="mt-2 flex flex-wrap gap-x-4 gap-y-2">
                                 <div class="flex items-center">
                                     <input id="callbackTypeAll" name="callbackType" type="radio" value="all" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
                                     <label for="callbackTypeAll" class="ml-2 block text-sm text-gray-900">All</label>
@@ -831,7 +831,7 @@ HTML_TEMPLATE = """
                                 </div>
                             </div>
                         </div>
-                        <div>
+                        <div class="md:col-span-2 md:pl-6">
                             <label for="callbackAdFilterInput" class="block text-sm font-medium text-gray-700">Filter (in raw log):</label>
                             <input type="text" id="callbackAdFilterInput" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" placeholder="Search...">
                         </div>
@@ -840,12 +840,12 @@ HTML_TEMPLATE = """
                         <table class="min-w-full bg-white">
                             <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Device</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Type</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Event / Key</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Details</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Raw Log</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Action</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Type</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Event / Key</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Details</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Action</th>
                                 </tr>
                             </thead>
                             <tbody id="callbackAdTableBody" class="divide-y divide-gray-200"></tbody>
@@ -856,20 +856,20 @@ HTML_TEMPLATE = """
 
             <!-- TAB 7: SDK Check -->
             <div id="tabContentSdkCheck" class="hidden">
-                <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-                    <h2 class="text-xl font-bold mb-2">SDK Check Setup</h2>
+                <div class="bg-white rounded-xl shadow-md p-4 mb-4">
+                    <h2 class="text-lg font-semibold mb-2">SDK Check Setup</h2>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                          <div class="md:col-span-2">
-                            <label for="sdkCheckInput" class="block text-sm font-medium text-gray-700 mb-1">SDKs to Check (dán nội dung):</label>
+                            <label for="sdkCheckInput" class="block text-xs font-medium text-gray-700 mb-1">SDKs to Check (dán nội dung):</label>
                             <textarea id="sdkCheckInput" rows="8" class="w-full p-2 border rounded-md shadow-sm font-mono text-sm" placeholder="AppLovin\n&quot;Adapter 4.3.54&quot;, &quot;search_pattern&quot;: &quot;Adapter 4.3.54&quot;\n..."></textarea>
                          </div>
                          <div>
-                            <button id="startSdkCheckBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg w-full h-10">Start Checking</button>
+                            <button id="startSdkCheckBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold py-2 px-4 rounded-lg w-full h-10">Start Checking</button>
                          </div>
                     </div>
                 </div>
-                <div class="bg-white rounded-xl shadow-md p-6">
-                    <h2 class="text-xl font-bold mb-2">SDK Check Results</h2>
+                <div class="bg-white rounded-xl shadow-md p-4">
+                    <h2 class="text-lg font-semibold mb-2">SDK Check Results</h2>
                     <div class="overflow-x-auto">
                         <table class="min-w-full bg-white">
                             <tbody id="sdkCheckTableBody" class="divide-y divide-gray-200"></tbody>
@@ -880,10 +880,10 @@ HTML_TEMPLATE = """
             
             <!-- TAB 8: Package -->
             <div id="tabContentPackage" class="hidden">
-                 <div class="bg-white rounded-xl shadow-md p-6 mb-6">
+                 <div class="bg-white rounded-xl shadow-md p-4 mb-4">
                      <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
                         <div>
-                            <label for="packageIdInput" class="block text-sm font-medium text-gray-700 mb-1">Package ID:</label>
+                            <label for="packageIdInput" class="block text-xs font-medium text-gray-700 mb-1">Package ID:</label>
                             <input type="text" id="packageIdInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="com.example.app">
                             <div class="flex justify-center mt-3">
                                 <button id="startPackageLogBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg h-10">Start</button>
@@ -900,7 +900,7 @@ HTML_TEMPLATE = """
                             </div>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Quick Select:</label>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">Quick Select:</label>
                             <div class="grid grid-cols-1 gap-1 text-sm text-gray-700">
                                 <label class="inline-flex items-center gap-2">
                                     <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.nonogram">
@@ -923,7 +923,7 @@ HTML_TEMPLATE = """
                         <div class="lg:col-span-2">
                             <div class="grid grid-cols-2 gap-3 items-start">
                                 <div>
-                                    <label for="packageTagFilterInput" class="block text-sm font-medium text-gray-700 mb-1">Tag Filter:</label>
+                                    <label for="packageTagFilterInput" class="block text-xs font-medium text-gray-700 mb-1">Tag Filter:</label>
                                     <input type="text" id="packageTagFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Tag...">
                                     <div class="mt-2 grid grid-cols-2 gap-4 text-sm text-gray-700">
                                         <label class="inline-flex items-center gap-2">
@@ -945,10 +945,10 @@ HTML_TEMPLATE = """
                                     </div>
                                 </div>
                                 <div>
-                                    <label for="packageFilterInput" class="block text-sm font-medium text-gray-700 mb-1">Message Filter 1:</label>
+                                    <label for="packageFilterInput" class="block text-xs font-medium text-gray-700 mb-1">Message Filter 1:</label>
                                     <input type="text" id="packageFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 1...">
                                     <div class="mt-2">
-                                        <label for="packageFilterInput2" class="block text-sm font-medium text-gray-700 mb-1">Message Filter 2:</label>
+                                        <label for="packageFilterInput2" class="block text-xs font-medium text-gray-700 mb-1">Message Filter 2:</label>
                                         <input type="text" id="packageFilterInput2" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 2...">
                                     </div>
                                 </div>
@@ -959,15 +959,15 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
                 </div>
-                <div class="bg-white rounded-xl shadow-md p-6">
-                    <h2 class="text-xl font-bold mb-2">Package Log Stream</h2>
+                <div class="bg-white rounded-xl shadow-md p-4">
+                    <h2 class="text-lg font-semibold mb-2">Package Log Stream</h2>
                     <div id="packageLogContainer" class="overflow-auto overflow-x-auto" style="height: 50vh;">
                         <table class="min-w-full bg-white">
                            <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-2 border-b time-header resizable col-time">Time<div class="resizer" data-col="time"></div></th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 pr-1 pl-2 border-b tag-header resizable col-tag">Tag<div class="resizer" data-col="tag"></div></th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 pl-1 pr-3 border-b resizable col-message">Message<div class="resizer" data-col="message"></div></th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b time-header resizable col-time">Time<div class="resizer" data-col="time"></div></th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 pr-1 pl-2 border-b tag-header resizable col-tag">Tag<div class="resizer" data-col="tag"></div></th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 pl-1 pr-3 border-b resizable col-message">Message<div class="resizer" data-col="message"></div></th>
                                 </tr>
                             </thead>
                             <tbody id="packageLogTableBody" class="divide-y divide-gray-200"></tbody>
@@ -1247,13 +1247,13 @@ HTML_TEMPLATE = """
                  tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>';
              } else {
                  tbody.innerHTML = filtered.map(res => `
-                    <tr class="hover:bg-gray-50 border-b">
-                        <td class="py-3 px-4 text-purple-700">${res.device_name}</td>
-                        <td class="py-3 px-4 font-bold ${res.status === 'PASSED' ? 'text-green-600' : 'text-red-600'}">${res.status}</td>
-                        <td class="py-3 px-4 font-semibold"><span class="event-name-link cursor-pointer text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td>
-                        <td class="py-3 px-4 details-cell">${res.details}</td>
-                        <td class="py-3 px-4 log-cell">${res.raw_log}</td>
-                        <td class="py-3 px-4"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td>
+                    <tr class="hover:bg-gray-50 border-b text-sm">
+                        <td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td>
+                        <td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED' ? 'text-green-600' : 'text-red-600'}">${res.status}</td>
+                        <td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td>
+                        <td class="py-2 px-3 details-cell text-sm">${res.details}</td>
+                        <td class="py-2 px-3 log-cell text-sm">${res.raw_log}</td>
+                        <td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td>
                     </tr>
                  `).join('');
              }
@@ -1357,7 +1357,7 @@ HTML_TEMPLATE = """
              const filtered = (selectedDevice === 'all') ? d : d.filter(r => r.device_id === selectedDevice);
              if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
              else {
-                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b"><td class="py-3 px-4 text-purple-700">${res.device_name}</td><td class="py-3 px-4 font-bold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-3 px-4 font-semibold"><span class="event-name-link cursor-pointer text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-3 px-4 details-cell">${res.details}</td><td class="py-3 px-4 log-cell">${res.raw_log}</td><td class="py-3 px-4"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
+                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-sm">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
              }
         });
 
@@ -1368,7 +1368,7 @@ HTML_TEMPLATE = """
              const filtered = d.filter(r => (selectedDevice === 'all' || r.device_id === selectedDevice) && (!filterText || r.raw_log.toLowerCase().includes(filterText)));
              if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
              else {
-                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b"><td class="py-3 px-4 text-purple-700">${res.device_name}</td><td class="py-3 px-4 font-bold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-3 px-4 font-semibold"><span class="event-name-link cursor-pointer text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-3 px-4 details-cell">${res.details}</td><td class="py-3 px-4 log-cell">${res.raw_log}</td><td class="py-3 px-4"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
+                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-sm">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
              }
         });
 
@@ -1415,7 +1415,7 @@ HTML_TEMPLATE = """
                      const isFailed = nameLower.includes('failed');
                      const isImpression = nameLower.includes('onimpression') || nameLower.includes('_onimpression');
                      const eventClass = isFailed ? 'text-red-600' : (isImpression ? 'text-blue-600' : '');
-                     return `<tr class="hover:bg-gray-50 border-b"><td class="py-3 px-4 text-purple-700">${res.device_name}</td><td class="py-3 px-4 font-bold ${res.type==='Ad Event'?'text-orange-600':'text-cyan-600'}">${res.type}</td><td class="py-3 px-4 font-semibold ${eventClass}">${res.event_name}</td><td class="py-3 px-4 details-cell">${res.details}</td><td class="py-3 px-4 log-cell">${res.raw_log}</td><td class="py-3 px-4"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`;
+                     return `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.type==='Ad Event'?'text-orange-600':'text-cyan-600'}">${res.type}</td><td class="py-2 px-3 text-sm font-medium ${eventClass}">${res.event_name}</td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-sm">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`;
                  }).join('');
              }
         }
@@ -1432,8 +1432,8 @@ HTML_TEMPLATE = """
                  let statusText = '';
                  if (res.status === 'PASSED') statusText = '<span class="font-semibold text-green-600"> - PASSED</span>';
                  else if (res.status === 'NOT_FOUND') statusText = '<span class="font-semibold text-red-600"> - Not Found</span>';
-                 else if (res.status === 'HEADER') rowClass += ' font-bold text-lg text-indigo-600 bg-gray-50';
-                 else if (res.status === 'LABEL') rowClass += ' font-bold text-gray-800 pt-2';
+                 else if (res.status === 'HEADER') rowClass += ' font-semibold text-sm text-indigo-600 bg-gray-50';
+                 else if (res.status === 'LABEL') rowClass += ' font-medium text-sm text-gray-800 pt-2';
                  
                  // Filter
                  if (selectedDevice !== 'all' && res.device_id !== selectedDevice && res.status !== 'LABEL' && res.status !== 'WAITING') return '';
