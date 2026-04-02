@@ -507,7 +507,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(27)</title>
+    <title>Event Inspector V2.0.0(28)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -573,7 +573,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(27)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(28)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -881,7 +881,7 @@ HTML_TEMPLATE = """
                  <div class="bg-white rounded-xl shadow-md p-4 mb-4">
                      <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
                         <div>
-                            <label for="packageIdInput" class="block text-xs font-medium text-gray-700 mb-1">Package ID:</label>
+                            <label for="packageIdInput" class="block text-[11px] font-medium text-gray-700 mb-1">Package ID:</label>
                             <input type="text" id="packageIdInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="com.example.app">
                             <div class="flex justify-center mt-3">
                                 <button id="startPackageLogBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Start</button>
@@ -889,17 +889,17 @@ HTML_TEMPLATE = """
                             <div class="flex items-center mt-4 space-x-4">
                                 <div class="flex items-center">
                                     <input id="showErrorsOnly" type="checkbox" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
-                                    <label for="showErrorsOnly" class="ml-2 block text-sm text-gray-900">Show errors only</label>
+                                    <label for="showErrorsOnly" class="ml-2 block text-xs text-gray-900">Show errors only</label>
                                 </div>
                                 <div class="flex items-center">
                                     <input id="autoScroll" type="checkbox" checked class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
-                                    <label for="autoScroll" class="ml-2 block text-sm text-gray-900">Auto-scroll</label>
+                                    <label for="autoScroll" class="ml-2 block text-xs text-gray-900">Auto-scroll</label>
                                 </div>
                             </div>
                         </div>
                         <div>
-                            <label class="block text-xs font-medium text-gray-700 mb-1">Quick Select:</label>
-                            <div class="grid grid-cols-1 gap-1 text-sm text-gray-700">
+                            <label class="block text-[11px] font-medium text-gray-700 mb-1">Quick Select:</label>
+                            <div class="grid grid-cols-1 gap-1 text-xs text-gray-700">
                                 <label class="inline-flex items-center gap-2">
                                     <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.nonogram">
                                     <span>NG - com.indiez.nonogram</span>
@@ -921,9 +921,9 @@ HTML_TEMPLATE = """
                         <div class="lg:col-span-2">
                             <div class="grid grid-cols-2 gap-3 items-start">
                                 <div>
-                                    <label for="packageTagFilterInput" class="block text-xs font-medium text-gray-700 mb-1">Tag Filter:</label>
+                                    <label for="packageTagFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Tag Filter:</label>
                                     <input type="text" id="packageTagFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Tag...">
-                                    <div class="mt-2 grid grid-cols-2 gap-4 text-sm text-gray-700">
+                                    <div class="mt-2 grid grid-cols-2 gap-4 text-xs text-gray-700">
                                         <label class="inline-flex items-center gap-2">
                                             <input type="radio" name="tagQuickFilter" value="" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
                                             <span>All</span>
@@ -943,10 +943,10 @@ HTML_TEMPLATE = """
                                     </div>
                                 </div>
                                 <div>
-                                    <label for="packageFilterInput" class="block text-xs font-medium text-gray-700 mb-1">Message Filter 1:</label>
+                                    <label for="packageFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 1:</label>
                                     <input type="text" id="packageFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 1...">
                                     <div class="mt-2">
-                                        <label for="packageFilterInput2" class="block text-xs font-medium text-gray-700 mb-1">Message Filter 2:</label>
+                                        <label for="packageFilterInput2" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 2:</label>
                                         <input type="text" id="packageFilterInput2" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 2...">
                                     </div>
                                 </div>
@@ -1145,7 +1145,7 @@ HTML_TEMPLATE = """
                     <td class="py-2 px-3 text-purple-700 text-sm font-medium">${e.device_name}</td>
                     <td class="py-2 px-3 text-blue-600 text-sm font-medium">${e.ad_source}</td>
                     <td class="py-2 px-3 text-green-600 text-sm font-medium">${e.ad_format}</td>
-                    <td class="py-2 px-3 log-cell text-sm font-normal text-gray-600">${e.raw_log}</td>
+                    <td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${e.raw_log}</td>
                 </tr>
             `).join('');
         }
@@ -1250,7 +1250,7 @@ HTML_TEMPLATE = """
                         <td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED' ? 'text-green-600' : 'text-red-600'}">${res.status}</td>
                         <td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td>
                         <td class="py-2 px-3 details-cell text-sm">${res.details}</td>
-                        <td class="py-2 px-3 log-cell text-sm font-normal text-gray-600">${res.raw_log}</td>
+                        <td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${res.raw_log}</td>
                         <td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td>
                     </tr>
                  `).join('');
@@ -1355,7 +1355,7 @@ HTML_TEMPLATE = """
              const filtered = (selectedDevice === 'all') ? d : d.filter(r => r.device_id === selectedDevice);
              if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
              else {
-                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-sm font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
+                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
              }
         });
 
@@ -1366,7 +1366,7 @@ HTML_TEMPLATE = """
              const filtered = d.filter(r => (selectedDevice === 'all' || r.device_id === selectedDevice) && (!filterText || r.raw_log.toLowerCase().includes(filterText)));
              if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
              else {
-                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-sm font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
+                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
              }
         });
 
@@ -1413,7 +1413,7 @@ HTML_TEMPLATE = """
                      const isFailed = nameLower.includes('failed');
                      const isImpression = nameLower.includes('onimpression') || nameLower.includes('_onimpression');
                      const eventClass = isFailed ? 'text-red-600' : (isImpression ? 'text-blue-600' : '');
-                     return `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.type==='Ad Event'?'text-orange-600':'text-cyan-600'}">${res.type}</td><td class="py-2 px-3 text-sm font-medium ${eventClass}">${res.event_name}</td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-sm font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`;
+                     return `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.type==='Ad Event'?'text-orange-600':'text-cyan-600'}">${res.type}</td><td class="py-2 px-3 text-sm font-medium ${eventClass}">${res.event_name}</td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`;
                  }).join('');
              }
         }
