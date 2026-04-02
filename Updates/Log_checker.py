@@ -508,7 +508,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(38)</title>
+    <title>Event Inspector V2.0.0(39)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -575,7 +575,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(38)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(39)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -715,15 +715,15 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="overflow-x-auto">
-                        <table class="min-w-full bg-white">
+                        <table class="min-w-full bg-white table-fixed">
                            <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Status</th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Event Name</th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Details</th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Action</th>
+                                    <th class="w-24 text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="w-20 text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Status</th>
+                                    <th class="w-52 text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Event Name</th>
+                                    <th class="w-[34rem] text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Details</th>
+                                    <th class="w-[34rem] text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
+                                    <th class="w-24 text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Action</th>
                                 </tr>
                             </thead>
                             <tbody id="validatorTableBody" class="divide-y divide-gray-200"></tbody>
@@ -1412,7 +1412,7 @@ payload..."></textarea>
             });
             if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
             else {
-                tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':(res.status === 'FAILED'?'text-red-600':'text-orange-500')}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-xs font-normal text-gray-600"><div class="w-[34rem] max-w-[34rem] overflow-x-auto overflow-y-hidden whitespace-nowrap leading-5 rounded border border-gray-200 bg-gray-50 p-2">${res.raw_log}</div></td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
+                tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="w-24 py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="w-20 py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':(res.status === 'FAILED'?'text-red-600':'text-orange-500')}">${res.status}</td><td class="w-52 py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="w-[34rem] py-2 px-3 details-cell text-sm">${res.details}</td><td class="w-[34rem] py-2 px-3 log-cell text-xs font-normal text-gray-600 align-top"><div class="w-[34rem] max-w-[34rem] overflow-x-auto overflow-y-hidden whitespace-nowrap leading-5 rounded border border-gray-200 bg-gray-50 p-2">${res.raw_log}</div></td><td class="w-24 py-2 px-3 align-top"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
             }
         }
 
