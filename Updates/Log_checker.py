@@ -508,7 +508,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(49)</title>
+    <title>Event Inspector V2.0.0(46)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -579,7 +579,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(49)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(46)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1636,7 +1636,6 @@ payload..."></textarea>
             return header;
         }
 
-
         function convertSelectedLogsToJson() {
             if (logDetailIsJsonView) {
                 logDetailContent.textContent = logDetailRawText;
@@ -1664,12 +1663,12 @@ payload..."></textarea>
                         metaLines.push('');
                         metaLines.push('extracted_json:');
                         metaLines.push(pretty);
-                        return `--- #${idx + 1} (JSON) ---\n${metaLines.join('\n')}`;
+                        return `--- #${idx + 1} (JSON) ---\\n${metaLines.join('\\n')}`;
                     } catch (e) {
-                        return `--- #${idx + 1} ---\n${line}`;
+                        return `--- #${idx + 1} ---\\n${line}`;
                     }
                 }
-                return `--- #${idx + 1} ---\n${line}`;
+                return `--- #${idx + 1} ---\\n${line}`;
             });
             logDetailContent.textContent = outputs.join('\\n\\n');
             logDetailIsJsonView = true;
