@@ -508,7 +508,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(47)</title>
+    <title>Event Inspector V2.0.0(48)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -579,7 +579,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(47)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(48)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1636,39 +1636,6 @@ payload..."></textarea>
             return header;
         }
 
-        function parseAppMetricaAdRevenue(line) {
-            if (!line || !line.includes('AdRevenue Received:')) return null;
-            const marker = 'AdRevenue Received: AdRevenue{';
-            const start = line.indexOf(marker);
-            if (start === -1) return null;
-            const content = line.slice(start + marker.length);
-            const end = content.lastIndexOf('}');
-            const body = (end >= 0 ? content.slice(0, end) : content).trim();
-            if (!body) return null;
-
-            const result = {};
-            let cleanBody = body;
-            const payloadIdx = cleanBody.indexOf('payload=');
-            if (payloadIdx !== -1) {
-                const payloadSection = cleanBody.slice(payloadIdx + 'payload='.length);
-                const payloadJson = extractJsonFromText(payloadSection);
-                if (payloadJson) {
-                    try { result.payload = JSON.parse(payloadJson); } catch (e) {}
-                    cleanBody = cleanBody.replace(`payload=${payloadJson}`, '');
-                }
-            }
-
-            cleanBody.split(',').map(p => p.trim()).filter(Boolean).forEach(part => {
-                const eq = part.indexOf('=');
-                if (eq === -1) return;
-                const key = part.slice(0, eq).trim();
-                const value = part.slice(eq + 1).trim();
-                if (!key) return;
-                result[key] = value;
-            });
-
-            return Object.keys(result).length ? result : null;
-        }
 
         function convertSelectedLogsToJson() {
             if (logDetailIsJsonView) {
@@ -1681,23 +1648,9 @@ payload..."></textarea>
             const outputs = rows.map((row, idx) => {
                 const line = getRowText(row);
                 const msg = getRowMessageText(row);
-                const adRevenueParsed = parseAppMetricaAdRevenue(line);
-                const jsonStr = adRevenueParsed ? null : extractJsonFromText(msg || line);
+                const jsonStr = extractJsonFromText(msg || line);
                 const evt = extractEventName(line);
                 const headerLine = extractHeaderBeforeJson(line);
-                if (adRevenueParsed) {
-                    const pretty = JSON.stringify(adRevenueParsed, null, 2);
-                    const metaLines = [];
-                    if (headerLine) metaLines.push(`context: ${headerLine}`);
-                    else if (evt) metaLines.push(`event_name: ${evt}`);
-                    metaLines.push('');
-                    metaLines.push('raw_log:');
-                    metaLines.push(line);
-                    metaLines.push('');
-                    metaLines.push('extracted_json:');
-                    metaLines.push(pretty);
-                    return `--- #${idx + 1} (JSON) ---\n${metaLines.join('\n')}`;
-                }
                 if (jsonStr) {
                     try {
                         const parsed = JSON.parse(jsonStr);
