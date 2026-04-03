@@ -8,7 +8,11 @@ import logging
 import traceback
 import webbrowser
 
-from Log_checker import run_server
+# Remote update loader (optional)
+try:
+    import remote_update
+except Exception:
+    remote_update = None
 
 HOST = "127.0.0.1"
 PORT = 5001
@@ -41,6 +45,32 @@ def _wait_for_server(host, port, timeout=15):
 def main():
     log_path = _setup_logging()
 
+    # Provide restart command for in-app restart
+    restart_cmd = sys.executable
+    restart_args = ''
+    if getattr(sys, 'frozen', False):
+        restart_cmd = sys.executable
+        restart_args = ''
+    else:
+        restart_cmd = sys.executable
+        restart_args = os.path.abspath(__file__)
+    os.environ['EVENTINSPECTOR_RESTART_CMD'] = restart_cmd
+    os.environ['EVENTINSPECTOR_RESTART_ARGS'] = restart_args
+
+    # Try remote update before importing app logic
+    if remote_update:
+        try:
+            update_dir = remote_update.check_and_prepare_updates()
+            if update_dir:
+                os.environ["EVENTINSPECTOR_UPDATE_DIR"] = update_dir
+                if update_dir not in sys.path:
+                    sys.path.insert(0, update_dir)
+                logging.info("Loaded updates from: %s", update_dir)
+        except Exception:
+            logging.exception("Remote update failed:\n%s", traceback.format_exc())
+
+    from Log_checker import run_server
+
     def _server_entry():
         try:
             run_server(host=HOST, port=PORT)
@@ -56,12 +86,22 @@ def main():
         "Event Inspector",
         f"http://{HOST}:{PORT}",
         width=1400,
-        height=900
+        height=900,
+        maximized=True
     )
     try:
-        webview.start()
+        if sys.platform.startswith("win"):
+            webview.start(gui="qt")
+        else:
+            webview.start()
     except Exception:
         logging.exception("WebView crashed:\n%s", traceback.format_exc())
+        if sys.platform.startswith("win"):
+            url = f"http://{HOST}:{PORT}"
+            logging.info("Falling back to browser launcher on Windows: %s", url)
+            webbrowser.open(url)
+            while True:
+                time.sleep(1)
         raise
 
 

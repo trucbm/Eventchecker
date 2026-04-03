@@ -25,6 +25,7 @@ pyinstaller --noconfirm --clean --windowed --icon assets\\app.ico --name "EventI
   --collect-submodules "engineio" ^
   --collect-submodules "socketio" ^
   --add-data "Default event + Default Params.xlsx;." ^
+  --add-data "remote_update_config.json;." ^
   desktop_app.py
 
 REM Build installer (requires Inno Setup installed and ISCC on PATH)
