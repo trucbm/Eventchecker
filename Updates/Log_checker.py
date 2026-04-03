@@ -508,7 +508,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(46)</title>
+    <title>Event Inspector V2.0.0(48)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -579,7 +579,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(46)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(48)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -719,15 +719,23 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="overflow-x-auto">
-                        <table class="min-w-[120rem] bg-white">
+                        <table class="min-w-full w-full bg-white table-fixed">
+                            <colgroup>
+                                <col style="width: 6.5rem;">
+                                <col style="width: 5.5rem;">
+                                <col style="width: 13rem;">
+                                <col style="width: 36%;">
+                                <col style="width: 31%;">
+                                <col style="width: 5.5rem;">
+                            </colgroup>
                            <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b" style="width: 7rem;">Device</th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b" style="width: 6rem;">Status</th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b" style="width: 16rem;">Event Name</th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b" style="width: 34%;">Details</th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b" style="width: 34%;">Raw Log</th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b" style="width: 6rem;">Action</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Status</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Event Name</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Details</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Action</th>
                                 </tr>
                             </thead>
                             <tbody id="validatorTableBody" class="divide-y divide-gray-200"></tbody>
