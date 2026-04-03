@@ -266,6 +266,9 @@ UNITY_TRACKING_PATTERN = re.compile(r'\[\s*Tracking\s*\]\s*TrackingService->Trac
 
 # Pattern cho Load Ads Ext (AppMetrica)
 METRICA_TRACKING_PATTERN = re.compile(r'Event sent: ad_impression with value\s*(\{.*\})')
+METRICA_REGULAR_EVENT_PATTERN = re.compile(
+    r'Event received on service:\s*EVENT_TYPE_REGULAR\s+with name\s+([A-Za-z0-9_.$-]+)\s+with value\s*(\{.*\})'
+)
 
 # Patterns cũ của Log Checker
 OLD_EVENT_LOG_PATTERN = re.compile(r'\[\s*Tracking\s*\]\s*TrackingService->Track:\s*(\{"eventName":.*)')
@@ -508,7 +511,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(49)</title>
+    <title>Event Inspector V2.0.0(50)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -579,7 +582,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(49)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(50)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2142,7 +2145,7 @@ def process_load_ads_ext_log(line, device_id):
         except: pass
 
 def find_and_parse_event(log_entry):
-    """Parse log sự kiện chung (TrackingService->Track only)"""
+    """Parse log sự kiện chung từ TrackingService->Track và AppMetrica regular event."""
     match = OLD_EVENT_LOG_PATTERN.search(log_entry)
     if match:
         try:
@@ -2152,6 +2155,20 @@ def find_and_parse_event(log_entry):
             if event_name:
                 return event_name, params, match.group(1)
         except: pass
+
+    match = METRICA_REGULAR_EVENT_PATTERN.search(log_entry)
+    if match:
+        try:
+            event_name = match.group(1)
+            params = json.loads(match.group(2))
+            wrapped = {
+                "eventName": event_name,
+                "e": params,
+                "source": "appmetrica",
+            }
+            return event_name, params, json.dumps(wrapped, ensure_ascii=False)
+        except:
+            pass
     return None, None, None
 
 def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, actual_params=None, json_string=None):
