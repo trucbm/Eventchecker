@@ -520,7 +520,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(51)</title>
+    <title>Event Inspector V2.0.0(52)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -591,7 +591,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(51)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(52)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -720,6 +720,11 @@ HTML_TEMPLATE = """
                                 <div class="flex items-center gap-3 pt-1">
                                     <button id="startValidationBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 rounded-lg h-9">Start Checking</button>
                                     <button id="clearValidatorFilterBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium text-xs px-4 rounded-lg h-9">Clear Filter</button>
+                                    <div class="flex items-center gap-3 text-xs text-gray-700 ml-1">
+                                        <label class="inline-flex items-center gap-1.5"><input type="radio" name="validatorSourceFilter" value="all" checked> <span>All</span></label>
+                                        <label class="inline-flex items-center gap-1.5"><input type="radio" name="validatorSourceFilter" value="appmetrica"> <span>Appmetrica</span></label>
+                                        <label class="inline-flex items-center gap-1.5"><input type="radio" name="validatorSourceFilter" value="firebase"> <span>Firebase</span></label>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1278,9 +1283,11 @@ payload..."></textarea>
              const tbody = document.getElementById('validatorTableBody');
              if (!tbody) return;
              const filterText = (document.getElementById('validatorEventFilterInput')?.value || '').toLowerCase().trim();
+             const sourceFilter = document.querySelector('input[name="validatorSourceFilter"]:checked')?.value || 'all';
              const filtered = results.filter(r => {
                  if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
                  if (filterText && !(r.event_name || '').toLowerCase().includes(filterText)) return false;
+                 if (sourceFilter !== 'all' && (r.source || 'firebase') !== sourceFilter) return false;
                  return true;
              });
              
@@ -1770,11 +1777,17 @@ payload..."></textarea>
         document.getElementById('clearValidatorFilterBtn')?.addEventListener('click', () => {
             const eventInput = document.getElementById('validatorEventFilterInput');
             if (eventInput) eventInput.value = '';
+            const allRadio = document.querySelector('input[name="validatorSourceFilter"][value="all"]');
+            if (allRadio) allRadio.checked = true;
             renderValidatorTable(validator_results_cache);
         });
         
         document.getElementById('validatorEventFilterInput').addEventListener('input', () => {
             renderValidatorTable(validator_results_cache);
+        });
+
+        document.querySelectorAll('input[name="validatorSourceFilter"]').forEach(r => {
+            r.addEventListener('change', () => renderValidatorTable(validator_results_cache));
         });
 
         socket.on('validator_status', (data) => {
@@ -2162,7 +2175,12 @@ def find_and_parse_event(log_entry):
             event_name = data.get("eventName")
             params = data.get("e", {})
             if event_name:
-                return event_name, params, match.group(1)
+                wrapped = {
+                    "eventName": event_name,
+                    "e": params,
+                    "source": "firebase",
+                }
+                return event_name, params, json.dumps(wrapped, ensure_ascii=False)
         except: pass
 
     match = METRICA_REGULAR_EVENT_PATTERN.search(log_entry)
@@ -2369,6 +2387,12 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
 def process_event_validator_log(event_name, actual_params, json_string, log_entry, device_id):
     if is_paused or not validator_active: 
         return
+    source = "firebase"
+    try:
+        payload = json.loads(json_string)
+        source = payload.get("source", "firebase")
+    except:
+        pass
     with lock:
         required_all = []
         required_all.extend(default_params)
@@ -2398,7 +2422,7 @@ def process_event_validator_log(event_name, actual_params, json_string, log_entr
         
         details_html += format_json_html(actual_params)
         
-        validator_results.append({"device_id": device_id, "event_name": event_name, "device_name": get_device_name(device_id), "status": status, "details": details_html, "raw_log": log_entry.strip(), "json_data": json_string})
+        validator_results.append({"device_id": device_id, "event_name": event_name, "device_name": get_device_name(device_id), "status": status, "details": details_html, "raw_log": log_entry.strip(), "json_data": json_string, "source": source})
         socketio.emit('update_validator_table', list(validator_results))
 
 def _apply_specific_filter_and_emit():
@@ -2411,6 +2435,8 @@ def _apply_specific_filter_and_emit():
                  evt = data.get('eventName')
                  params = data.get('e', {})
                  
+                 source = data.get('source', 'firebase')
+
                  # Name Filter
                  if specific_event_name_filters and not any(evt.startswith(f) for f in specific_event_name_filters):
                      continue
@@ -2445,7 +2471,7 @@ def _apply_specific_filter_and_emit():
                      # Show all params json
                      details = format_json_html(params)
 
-                 res.append({"device_id": item['device_id'], "device_name": get_device_name(item['device_id']), "status": status, "event_name": evt, "details": details, "raw_log": item['log'], "json_data": item['json_data']})
+                 res.append({"device_id": item['device_id'], "device_name": get_device_name(item['device_id']), "status": status, "event_name": evt, "details": details, "raw_log": item['log'], "json_data": item['json_data'], "source": source})
              except: pass
         specific_event_results = res
     socketio.emit('update_specific_event_table', specific_event_results)
