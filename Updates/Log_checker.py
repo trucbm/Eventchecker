@@ -290,6 +290,15 @@ CALLBACK_DISPLAY_NAMES = {
 def get_device_name(device_id):
     return DEVICE_NAMES.get(device_id, device_id)
 
+def _normalize_sdk_search_text(text):
+    if text is None:
+        return ""
+    normalized = str(text).lower()
+    normalized = normalized.replace("–", "-").replace("—", "-").replace("−", "-")
+    normalized = normalized.replace('"', '').replace("'", '')
+    normalized = re.sub(r'\s+', ' ', normalized)
+    return normalized.strip()
+
 # --- HELPER FUNCTIONS FOR FORMATTING ---
 def format_json_html(data):
     """Format JSON object to HTML string with indentation and colors"""
@@ -511,7 +520,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(50)</title>
+    <title>Event Inspector V2.0.0(51)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -582,7 +591,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(50)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(51)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2523,8 +2532,10 @@ def adb_log_reader(device_id):
             # 3. Process SDK Check
             if not is_paused and sdk_check_search_list:
                 found = False
+                normalized_line = _normalize_sdk_search_text(line)
                 for item in sdk_check_search_list:
-                    if item["search_pattern"] in line:
+                    search_pattern = item.get("search_pattern_normalized") or _normalize_sdk_search_text(item.get("search_pattern", ""))
+                    if search_pattern and search_pattern in normalized_line:
                         with lock:
                             if (device_id, item["search_pattern"]) not in sdk_check_results:
                                 sdk_check_results[(device_id, item["search_pattern"])] = True
@@ -2881,7 +2892,12 @@ def sdk_check(data):
             if match:
                  pat = match.group(1)
                  disp = line[:match.start()].rstrip(', ').strip().strip('"') or pat
-                 item = {"type": "search", "display_name": disp, "search_pattern": pat}
+                 item = {
+                     "type": "search",
+                     "display_name": disp,
+                     "search_pattern": pat,
+                     "search_pattern_normalized": _normalize_sdk_search_text(pat),
+                 }
                  sdk_check_search_list.append(item); sdk_check_input_list.append(item)
             else: sdk_check_input_list.append({"type": "label", "display_name": line})
     _emit_sdk_check_results()
