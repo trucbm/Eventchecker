@@ -20,7 +20,7 @@ if exist "dist\EventInspector" rmdir /s /q "dist\EventInspector"
 if exist "build\EventInspector" rmdir /s /q "build\EventInspector"
 
 REM Build portable EXE folder
-pip install pyinstaller
+pip install pyinstaller PySide6
 pyinstaller --noconfirm --clean --windowed --icon assets\app.ico --name "EventInspector" ^
   --collect-submodules "engineio" ^
   --collect-submodules "socketio" ^

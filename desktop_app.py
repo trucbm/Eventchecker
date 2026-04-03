@@ -6,6 +6,7 @@ import os
 import sys
 import logging
 import traceback
+import webbrowser
 
 from Log_checker import run_server
 
