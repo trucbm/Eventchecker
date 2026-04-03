@@ -4,6 +4,7 @@ import subprocess
 import threading
 import time
 import requests
+import html
 from collections import deque
 from flask import Flask, render_template_string, request, jsonify, Response
 from flask_socketio import SocketIO
@@ -13,6 +14,7 @@ import os
 import sys
 import shutil
 import logging
+from pathlib import Path
 
 # Khởi tạo ứng dụng Flask và SocketIO
 app = Flask(__name__)
@@ -33,6 +35,12 @@ def _resolve_default_params_path():
         return env_path
 
     filename = "Default event + Default Params.xlsx"
+
+    update_dir = os.getenv("EVENTINSPECTOR_UPDATE_DIR")
+    if update_dir:
+        upd = os.path.join(update_dir, filename)
+        if os.path.exists(upd):
+            return upd
 
     candidates = []
 
@@ -87,6 +95,62 @@ def _resolve_default_params_path():
 
 DEFAULT_PARAMS_XLSX = _resolve_default_params_path()
 DEFAULT_PARAM_FILL = "FFFCE5CD"
+DEFAULT_REMOTE_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates/remote_manifest.json"
+
+
+def _runtime_app_dir():
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return SCRIPT_DIR
+
+
+def _resolve_profiles_dir():
+    base_dir = _runtime_app_dir()
+    profiles_dir = os.path.join(base_dir, "profiles")
+    try:
+        os.makedirs(profiles_dir, exist_ok=True)
+        return profiles_dir
+    except Exception:
+        fallback = os.path.join(SCRIPT_DIR, "profiles")
+        os.makedirs(fallback, exist_ok=True)
+        return fallback
+
+
+PROFILE_DIR = _resolve_profiles_dir()
+active_profile_name = None
+active_profile_path = None
+active_profile_game_name = ""
+
+
+def _user_data_dir():
+    if os.name == "nt":
+        base = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "EventInspector")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~/Library/Application Support"), "EventInspector")
+    return os.path.join(os.path.expanduser("~"), ".eventinspector")
+
+
+def _normalize_remote_update_config():
+    try:
+        user_dir = _user_data_dir()
+        os.makedirs(user_dir, exist_ok=True)
+        cfg_path = os.path.join(user_dir, "remote_update_config.json")
+        cfg = {}
+        if os.path.exists(cfg_path):
+            try:
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+            except Exception:
+                cfg = {}
+        cfg["enabled"] = True
+        cfg["manifest_url"] = DEFAULT_REMOTE_MANIFEST_URL
+        cfg["timeout_sec"] = 10
+        cfg["min_interval_sec"] = 0
+        with open(cfg_path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+    except Exception as e:
+        print(f"WARNING: Failed to normalize updater config: {e}")
 
 def _resolve_adb():
     adb_env = os.getenv("ADB_PATH")
@@ -133,12 +197,19 @@ DEVICE_NAMES = {
 
 # --- DỮ LIỆU TOÀN CỤC ---
 
+# Giới hạn cache để UI không giữ quá nhiều log trong RAM.
+MAX_LOAD_ADS_LOGS = 1000
+MAX_VALIDATOR_LOGS = 1500
+MAX_SPECIFIC_EVENT_LOGS = 1500
+MAX_CALLBACK_AD_LOGS = 1500
+MAX_ADREVENUE_LOGS = 1500
+
 # 1. Dữ liệu cho Tab Load Ads
-load_ads_events = []
+load_ads_events = deque(maxlen=MAX_LOAD_ADS_LOGS)
 unique_load_ads = set()
 
 # 2. Dữ liệu cho Tab Load Ads Ext
-load_ads_ext_events = []
+load_ads_ext_events = deque(maxlen=MAX_LOAD_ADS_LOGS)
 unique_load_ads_ext = set()
 
 # Trạng thái Recording (Google Sheet) - RIÊNG BIỆT CHO TỪNG TAB
@@ -148,14 +219,14 @@ recording_states = {
 }
 
 # 3. Dữ liệu cho Tab Validator
-validator_results = []
+validator_results = deque(maxlen=MAX_VALIDATOR_LOGS)
 required_params = []  # Manual extra params from UI
 default_params = []   # Default params from sheet (apply to all events)
 event_specific_params = {}  # event_name -> list of params
 validator_active = False
 
 # 4. Dữ liệu cho Tab Specific Event
-event_log_cache = []
+event_log_cache = deque(maxlen=MAX_SPECIFIC_EVENT_LOGS)
 specific_event_results = []
 specific_event_name_filters = []
 specific_event_params_filters = []
@@ -167,11 +238,11 @@ active_package_pids = {}
 active_logcat_processes = {}
 
 # 6. Dữ liệu cho Tab Callback & Ads Event
-callback_ad_logs = []
+callback_ad_logs = deque(maxlen=MAX_CALLBACK_AD_LOGS)
 
 # 7. Dữ liệu cho Tab AdRevenue
 adrevenue_log_cache = []
-adrevenue_logs = []
+adrevenue_logs = deque(maxlen=MAX_ADREVENUE_LOGS)
 adrevenue_params_to_validate = []
 
 # 8. Dữ liệu cho Tab SDK Check
@@ -200,6 +271,7 @@ METRICA_TRACKING_PATTERN = re.compile(r'Event sent: ad_impression with value\s*(
 OLD_EVENT_LOG_PATTERN = re.compile(r'\[\s*Tracking\s*\]\s*TrackingService->Track:\s*(\{"eventName":.*)')
 CALLBACK_LOG_PATTERN = re.compile(r"(_OnImpressionDataReadyEvent|LevelPlayInterstitialAdListener|LevelPlayBannerAdViewListener|LevelPlayRewardedAdListener)")
 ADREVENUE_LOG_PATTERN = re.compile(r"AdRevenue Received:\s*AdRevenue\{(.*)\}")
+APPSFLYER_ADREVENUE_PATTERN = re.compile(r"\b(ADREVENUE)-\d+:\s*preparing data:\s*(\{.*\})", re.IGNORECASE)
 SDK_CHECK_SEARCH_PATTERN = re.compile(r'"search_pattern"\s*:\s*["\'](.*?)["\']')
 GADSME_SERVICE_KEYWORD = "GadsmeService->"
 ADVERTY5_KEYWORD = "Adverty5"
@@ -230,10 +302,23 @@ def format_json_html(data):
         if isinstance(data, (dict, list)):
             # ensure_ascii=False để hiển thị tiếng Việt đúng
             json_str = json.dumps(data, indent=2, ensure_ascii=False)
-            return f'<pre class="text-xs bg-gray-50 p-2 rounded border border-gray-200 overflow-x-auto font-mono text-gray-700">{json_str}</pre>'
+            return f'<pre class="text-xs bg-gray-50 p-2 rounded border border-gray-200 overflow-x-auto font-mono text-gray-700">{html.escape(json_str)}</pre>'
         return str(data)
     except:
         return str(data)
+
+
+def format_param_issue_html(title, items, color_class, chunk_size=4):
+    if not items:
+        return ""
+    ordered = [html.escape(str(x)) for x in sorted(items)]
+    lines = "<br>".join(f"&nbsp;&nbsp;{item}" for item in ordered)
+    return (
+        f'<div class="{color_class} text-xs mb-2 break-words leading-5">'
+        f'<div>{html.escape(title)}:</div>'
+        f'<div class="font-normal">{lines}</div>'
+        f'</div>'
+    )
 
 def extract_json_object_from_text(text):
     """Extract first JSON object substring from text by brace matching."""
@@ -255,20 +340,28 @@ def extract_json_object_from_text(text):
 
 def load_default_params_config():
     """Load default params + event-specific params from XLSX."""
-    global default_params, event_specific_params
-    path = DEFAULT_PARAMS_XLSX
+    global default_params, event_specific_params, active_profile_game_name
+    path = active_profile_path or DEFAULT_PARAMS_XLSX
     if not path or not os.path.exists(path):
         print(f"INFO: Default params sheet not found: {path}")
         default_params = []
         event_specific_params = {}
+        active_profile_game_name = ""
         return
     try:
         wb = load_workbook(path)
         ws = wb.active
         event_map = {}
         current_event = None
+        header_row = 1
 
-        for r in range(2, ws.max_row + 1):
+        if str(ws.cell(1, 2).value or "").strip().lower() == "game":
+            active_profile_game_name = str(ws.cell(1, 3).value or "").strip()
+            header_row = 2
+        else:
+            active_profile_game_name = ""
+
+        for r in range(header_row + 1, ws.max_row + 1):
             event_val = ws.cell(r, 2).value
             param_cell = ws.cell(r, 3)
             param_val = param_cell.value
@@ -304,6 +397,79 @@ def load_default_params_config():
         print(f"ERROR: Failed to load default params sheet: {e}")
         default_params = []
         event_specific_params = {}
+        active_profile_game_name = ""
+
+
+def _sanitize_profile_filename(filename):
+    name = os.path.basename((filename or "").strip())
+    name = name.replace("\\", "_").replace("/", "_")
+    if not name.lower().endswith(".xlsx"):
+        raise ValueError("Only .xlsx files are supported")
+    return name
+
+
+def _list_profile_names():
+    try:
+        files = [
+            p.name for p in Path(PROFILE_DIR).glob("*.xlsx")
+            if p.is_file()
+        ]
+        return sorted(files, key=lambda x: x.lower())
+    except Exception:
+        return []
+
+
+def _ensure_default_profile_seed():
+    source = DEFAULT_PARAMS_XLSX
+    if not source or not os.path.exists(source):
+        return
+    target = os.path.join(PROFILE_DIR, os.path.basename(source))
+    if os.path.abspath(source) == os.path.abspath(target):
+        return
+    if not os.path.exists(target):
+        try:
+            shutil.copyfile(source, target)
+        except Exception as e:
+            print(f"WARNING: Failed to seed default profile: {e}")
+
+
+def _set_active_profile(profile_name=None):
+    global active_profile_name, active_profile_path
+    _ensure_default_profile_seed()
+    names = _list_profile_names()
+    if not names:
+        active_profile_name = None
+        active_profile_path = None
+        load_default_params_config()
+        return False
+
+    selected = None
+    if profile_name:
+        clean = _sanitize_profile_filename(profile_name)
+        if clean in names:
+            selected = clean
+
+    if not selected:
+        preferred = os.path.basename(DEFAULT_PARAMS_XLSX) if DEFAULT_PARAMS_XLSX else None
+        if preferred in names:
+            selected = preferred
+        else:
+            selected = names[0]
+
+    active_profile_name = selected
+    active_profile_path = os.path.join(PROFILE_DIR, selected)
+    load_default_params_config()
+    return True
+
+
+def _profile_payload():
+    return {
+        "profiles": _list_profile_names(),
+        "current_profile": active_profile_name,
+        "game_name": active_profile_game_name,
+        "profile_dir": PROFILE_DIR,
+        "default_event_names": sorted(event_specific_params.keys()),
+    }
 
 def _levenshtein_distance_limit(a, b, limit=2):
     """Compute Levenshtein distance with early exit if > limit."""
@@ -342,7 +508,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>HuyềnRabbit - Event Validator V2.0.0(7)</title>
+    <title>Event Inspector V2.0.0(49)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -352,7 +518,7 @@ HTML_TEMPLATE = """
         #packageLogTable { table-layout: fixed; width: 100%; }
         #packageLogTable col.col-time { width: 110px; }
         #packageLogTable col.col-tag { width: 90px; }
-        .details-cell { font-family: monospace; font-size: 0.8rem; line-height: 1.4; min-width: 350px; }
+        .details-cell { font-family: monospace; font-size: 0.8rem; line-height: 1.4; min-width: 260px; max-width: 640px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
         .tag-cell { max-width: 90px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .tag-header { max-width: 90px; }
         .time-cell { white-space: nowrap; width: 1%; max-width: 110px; font-size: 0.75rem; }
@@ -371,13 +537,31 @@ HTML_TEMPLATE = """
         .resizer:hover { background: rgba(59, 130, 246, 0.15); }
         #packageLogTableBody tr.selected { background-color: #bfdbfe !important; }
         .resizer.disabled { cursor: not-allowed; background: transparent; }
-        .details-cell pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; }
+        .details-cell pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+        .adrevenue-panel { border: 1px solid #e5e7eb; background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem; }
+        .adrevenue-details-panel { max-height: none; overflow: visible; }
+        .adrevenue-details-panel pre { margin: 0 !important; background: transparent !important; border: 0 !important; padding: 0 !important; border-radius: 0 !important; overflow: visible !important; }
+        .adrevenue-raw-panel { height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+        #logDetailContent, #logDetailContent * { user-select: text; -webkit-user-select: text; }
         @keyframes pulse { 50% { opacity: .6; } }
         .animate-pulse-green { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
         .animate-record { animation: pulse 1.5s infinite; }
         .tab-btn { transition: all 0.2s ease-in-out; }
         .tab-btn.active { border-color: #4f46e5; color: #4f46e5; background-color: #eef2ff; }
         .log-row.selected { background-color: #dbeafe; }
+        .log-cell,
+        .details-cell,
+        .details-cell *,
+        #loadAdsTableBody td,
+        #loadAdsExtTableBody td,
+        #validatorTableBody td,
+        #specificEventTableBody td,
+        #adRevenueTableBody td,
+        #callbackAdTableBody td,
+        #sdkCheckTableBody td {
+            user-select: text;
+            -webkit-user-select: text;
+        }
         
         /* Custom scrollbar for pre blocks */
         pre::-webkit-scrollbar { height: 6px; width: 6px; }
@@ -387,30 +571,34 @@ HTML_TEMPLATE = """
 </head>
 <body class="bg-gray-100 text-gray-800 h-screen overflow-hidden">
 
-    <div class="container mx-auto p-4 sm:p-6 lg:p-8 h-full flex flex-col">
+    <div class="container mx-auto p-3 sm:p-4 lg:p-6 h-full flex flex-col">
         <!-- HEADER -->
-        <div class="bg-white rounded-xl shadow-md p-6 mb-6 flex-shrink-0">
+        <div class="bg-white rounded-xl shadow-md p-4 mb-4 flex-shrink-0">
             <div class="flex justify-between items-center flex-wrap gap-4">
-                <div class="flex items-center gap-4">
+                <div class="flex items-center gap-3">
                     <div>
-                        <div class="flex items-center gap-3">
-                            <h1 class="text-2xl font-bold text-gray-700">HuyềnRabbit - Event Validator</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(7)</span>
+                        <div class="flex items-center gap-2.5">
+                            <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(49)</span>
                         </div>
-                        <p class="text-gray-500">Integrates Load Ads & Event Validation.</p>
+                        <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
-                    <button id="helpBtn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-colors shadow-sm">HELP</button>
+                    <button id="restartAppBtn" class="bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Refresh</button>
                 </div>
                 <div class="flex items-center gap-4">
-                    <div class="text-right p-3 rounded-lg bg-gray-50 border min-w-[280px]">
-                        <p class="font-semibold text-gray-700 mb-1 border-b pb-1">Connected Devices:</p>
+                    <div class="flex items-center gap-2">
+                        <button id="pauseBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-yellow-500 hover:bg-yellow-600 text-white">Pause</button>
+                        <button id="clearAllBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-red-500 hover:bg-red-600 text-white">Clear All</button>
+                    </div>
+                    <div class="text-right p-2.5 rounded-lg bg-gray-50 border min-w-[250px]">
+                        <p class="text-sm font-semibold text-gray-700 mb-1 border-b pb-1">Connected Devices:</p>
                         <div id="deviceList" class="text-sm text-gray-600">
                              <p class="text-orange-500">WAITING...</p>
                         </div>
                     </div>
                      <div>
-                        <label for="deviceFilter" class="block text-sm font-medium text-gray-700">Filter by Device:</label>
-                        <select id="deviceFilter" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md">
+                        <label for="deviceFilter" class="block text-xs font-medium text-gray-700">Filter by Device:</label>
+                        <select id="deviceFilter" class="mt-1 block w-full pl-3 pr-10 py-1.5 text-sm border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 rounded-md">
                             <option value="all">All Devices</option>
                         </select>
                     </div>
@@ -419,23 +607,19 @@ HTML_TEMPLATE = """
         </div>
 
         <!-- TABS & ACTIONS -->
-        <div class="mb-4 flex-shrink-0">
+        <div class="mb-3 flex-shrink-0">
             <div class="flex justify-between items-end border-b border-gray-200">
                 <div class="flex flex-wrap">
-                    <button id="tabBtnLoadAds" class="tab-btn active text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAds')">Load Ads</button>
-                    <button id="tabBtnLoadAdsExt" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAdsExt')">Load Ads Ext (CP, KN)</button>
+                    <button id="tabBtnLoadAds" class="tab-btn active text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAds')">Load Ads</button>
+                    <button id="tabBtnLoadAdsExt" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAdsExt')">Load Ads Ext (CP, KN)</button>
                     
-                    <button id="tabBtnValidator" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('Validator')">Default Events/Params</button>
-                    <button id="tabBtnSpecific" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('Specific')">Specific Validator</button>
-                    <button id="tabBtnAdRevenue" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('AdRevenue')">AdRevenue</button>
-                    <button id="tabBtnCallbackAd" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('CallbackAd')">CallBack & Ads</button>
-                    <button id="tabBtnSdkCheck" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('SdkCheck')">SDK Check</button>
-                    <button id="tabBtnPackage" class="tab-btn text-base font-semibold py-2 px-5 -mb-px border-b-2 border-transparent" onclick="switchTab('Package')">Package Logcat</button>
+                    <button id="tabBtnValidator" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Validator')">Default Events/Params</button>
+                    <button id="tabBtnSpecific" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Specific')">Specific Validator</button>
+                    <button id="tabBtnAdRevenue" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('AdRevenue')">AdRevenue</button>
+                    <button id="tabBtnCallbackAd" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('CallbackAd')">CallBack & Ads</button>
+                    <button id="tabBtnSdkCheck" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('SdkCheck')">SDK Check</button>
+                    <button id="tabBtnPackage" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Package')">Package Logcat</button>
                 </div>
-                 <div class="flex items-center gap-2 pb-2">
-                    <button id="pauseBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-yellow-500 hover:bg-yellow-600 text-white">Pause</button>
-                    <button id="clearAllBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-red-500 hover:bg-red-600 text-white ml-2">Clear All</button>
-                 </div>
             </div>
         </div>
 
@@ -444,14 +628,13 @@ HTML_TEMPLATE = """
 
             <!-- TAB 1: Load Ads -->
             <div id="tabContentLoadAds">
-                 <div class="bg-white rounded-xl shadow-md p-6">
-                    <div class="flex items-center gap-2 bg-gray-50 p-3 rounded-lg border mb-4">
-                        <span class="font-bold text-gray-700">Record Load Ads:</span>
+                 <div class="bg-white rounded-xl shadow-md p-4">
+                    <div class="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border mb-3">
+                        <span class="text-sm font-semibold text-gray-700">Record Load Ads:</span>
                         <input type="text" id="sheetName_LoadAds" placeholder="Tên Sheet..." class="border p-2 rounded text-sm w-48 outline-none">
-                        <button id="btnRecord_LoadAds" onclick="toggleRecord('LoadAds')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded shadow text-sm">Start Record</button>
+                        <button id="btnRecord_LoadAds" onclick="toggleRecord('LoadAds')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-3 rounded shadow text-xs">Start Record</button>
                     </div>
 
-                    <h2 class="text-xl font-bold mb-4">Load Ads Logs</h2>
                     <div class="overflow-x-auto">
                         <table id="packageLogTable" class="min-w-full bg-white">
                             <colgroup>
@@ -461,10 +644,10 @@ HTML_TEMPLATE = """
                             </colgroup>
                             <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Device</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Ad_source</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Format</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Raw Log</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Ad_source</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Format</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
                                 </tr>
                             </thead>
                             <tbody id="loadAdsTableBody" class="divide-y divide-gray-200"></tbody>
@@ -475,22 +658,21 @@ HTML_TEMPLATE = """
 
             <!-- TAB 2: Load Ads Ext (CP, KN)-->
             <div id="tabContentLoadAdsExt" class="hidden">
-                 <div class="bg-white rounded-xl shadow-md p-6">
-                    <div class="flex items-center gap-2 bg-gray-50 p-3 rounded-lg border mb-4">
-                        <span class="font-bold text-gray-700">Record Load Ads Ext:</span>
+                 <div class="bg-white rounded-xl shadow-md p-4">
+                    <div class="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border mb-3">
+                        <span class="text-sm font-semibold text-gray-700">Record Load Ads Ext:</span>
                         <input type="text" id="sheetName_LoadAdsExt" placeholder="Tên Sheet..." class="border p-2 rounded text-sm w-48 outline-none">
-                        <button id="btnRecord_LoadAdsExt" onclick="toggleRecord('LoadAdsExt')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded shadow text-sm">Start Record</button>
+                        <button id="btnRecord_LoadAdsExt" onclick="toggleRecord('LoadAdsExt')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-3 rounded shadow text-xs">Start Record</button>
                     </div>
 
-                    <h2 class="text-xl font-bold mb-4">Load Ads Ext Logs</h2>
                     <div class="overflow-x-auto">
-                        <table class="min-w-full bg-white">
+                        <table class="min-w-full w-full bg-white table-fixed">
                             <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Device</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Ad_source</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Format</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Raw Log</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Ad_source</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Format</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
                                 </tr>
                             </thead>
                             <tbody id="loadAdsExtTableBody" class="divide-y divide-gray-200"></tbody>
@@ -501,40 +683,59 @@ HTML_TEMPLATE = """
 
             <!-- TAB 3: Validator -->
             <div id="tabContentValidator" class="hidden">
-                <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div class="bg-white rounded-xl shadow-md p-4 mb-4">
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
                         <div class="lg:col-span-1">
-                            <div class="space-y-6">
+                            <div class="space-y-4">
                                 <div>
-                                    <label for="validatorEventFilterInput" class="block text-sm font-medium text-gray-700 mb-1">Filter by Event Name:</label>
+                                    <div class="flex items-center gap-3 mb-2">
+                                        <label for="profileSelect" class="text-xs font-medium text-gray-700">Game Profile:</label>
+                                        <p id="profileGameText" class="text-xs font-medium text-indigo-700"></p>
+                                    </div>
+                                    <div class="space-y-3">
+                                        <select id="profileSelect" class="w-full h-10 px-3 border rounded-md shadow-sm text-sm"></select>
+                                        <input type="file" id="profileFileInput" accept=".xlsx" class="hidden">
+                                        <div class="flex flex-wrap items-center gap-3">
+                                            <button id="importProfileBtn" class="bg-slate-700 hover:bg-slate-800 text-white font-medium text-xs px-3 rounded-lg h-9 min-w-[116px]">Import Profile</button>
+                                            <button id="reloadProfileBtn" class="bg-slate-200 hover:bg-slate-300 text-gray-800 font-medium text-xs px-3 rounded-lg h-9 min-w-[116px]">Reload Profile</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label for="validatorEventFilterInput" class="block text-xs font-medium text-gray-700 mb-1">Filter by Event Name:</label>
                                     <input type="text" id="validatorEventFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Type to filter events...">
                                 </div>
-                                <div>
-                                    <label for="paramInput" class="block text-sm font-medium text-gray-700 mb-1">Required Parameters (one per line):</label>
-                                    <textarea id="paramInput" rows="6" class="w-full p-2 border rounded-md shadow-sm" placeholder="session_id\nfirst_open_time..."></textarea>
-                                </div>
-                                <div>
-                                    <button id="startValidationBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg h-10">Start Checking</button>
+                                <div class="flex items-center gap-3 pt-1">
+                                    <button id="startValidationBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 rounded-lg h-9">Start Checking</button>
+                                    <button id="clearValidatorFilterBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium text-xs px-4 rounded-lg h-9">Clear Filter</button>
                                 </div>
                             </div>
                         </div>
                         <div class="lg:col-span-2">
-                            <div class="text-sm font-semibold text-gray-700 mb-3">Default Events Status</div>
-                            <div id="defaultEventStatusList" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm"></div>
+                            <div class="text-xs font-semibold text-gray-700 mb-2">Default Events Status</div>
+                            <div id="defaultEventStatusList" class="flex flex-wrap gap-1.5 text-xs"></div>
                         </div>
                     </div>
                 </div>
-                <div class="bg-white rounded-xl shadow-md p-6">
+                <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="overflow-x-auto">
-                        <table class="min-w-full bg-white">
+                        <table class="min-w-full w-full bg-white table-fixed">
+                            <colgroup>
+                                <col style="width: 6.5rem;">
+                                <col style="width: 5.5rem;">
+                                <col style="width: 13rem;">
+                                <col style="width: 36%;">
+                                <col style="width: 31%;">
+                                <col style="width: 5.5rem;">
+                            </colgroup>
                            <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Device</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Status</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Event Name</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Details</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Raw Log</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Action</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Status</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Event Name</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Details</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Action</th>
                                 </tr>
                             </thead>
                             <tbody id="validatorTableBody" class="divide-y divide-gray-200"></tbody>
@@ -545,29 +746,29 @@ HTML_TEMPLATE = """
 
             <!-- TAB 4: Specific -->
             <div id="tabContentSpecific" class="hidden">
-                <div class="bg-white rounded-xl shadow-md p-6 mb-6">
+                <div class="bg-white rounded-xl shadow-md p-4 mb-4">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
                          <div>
-                            <label for="specificEventInput" class="block text-sm font-medium text-gray-700 mb-1">Filter by Event Names:</label>
+                            <label for="specificEventInput" class="block text-xs font-medium text-gray-700 mb-1">Filter by Event Names:</label>
                             <textarea id="specificEventInput" rows="4" class="w-full p-2 border rounded-md shadow-sm" placeholder="Leave empty to show all events..."></textarea>
                          </div>
                          <div>
-                            <label for="specificParamInput" class="block text-sm font-medium text-gray-700 mb-1">Validate Parameters:</label>
+                            <label for="specificParamInput" class="block text-xs font-medium text-gray-700 mb-1">Validate Parameters:</label>
                             <textarea id="specificParamInput" rows="4" class="w-full p-2 border rounded-md shadow-sm" placeholder="Leave empty to display all params..."></textarea>
                          </div>
                     </div>
                 </div>
-                <div class="bg-white rounded-xl shadow-md p-6">
+                <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="overflow-x-auto">
                         <table class="min-w-full bg-white">
                            <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Device</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Status</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Event Name</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Details</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Raw Log</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Action</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Status</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Event Name</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Details</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Action</th>
                                 </tr>
                             </thead>
                             <tbody id="specificEventTableBody" class="divide-y divide-gray-200"></tbody>
@@ -578,29 +779,50 @@ HTML_TEMPLATE = """
 
             <!-- TAB 5: AdRevenue -->
             <div id="tabContentAdRevenue" class="hidden">
-                <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                <div class="bg-white rounded-xl shadow-md p-4 mb-4">
+                     <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(260px,360px)] gap-4 items-start">
                         <div>
-                            <label for="adRevenueParamInput" class="block text-sm font-medium text-gray-700 mb-1">Validate Parameters:</label>
-                            <textarea id="adRevenueParamInput" rows="6" class="w-full p-2 border rounded-md shadow-sm" placeholder="adRevenue\ncurrency\npayload..."></textarea>
+                            <label for="adRevenueParamInput" class="block text-xs font-medium text-gray-700 mb-1">Validate Parameters:</label>
+                            <textarea id="adRevenueParamInput" rows="6" class="w-full p-2 border rounded-md shadow-sm" placeholder="adRevenue
+currency
+payload..."></textarea>
                         </div>
-                        <div>
-                            <label for="adRevenueFilterInput" class="block text-sm font-medium text-gray-700 mb-1">Filter logs by text:</label>
-                            <input type="text" id="adRevenueFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search in raw log...">
+                        <div class="space-y-3">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-700 mb-1">Source Filter:</label>
+                                <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                                    <label class="inline-flex items-center whitespace-nowrap">
+                                        <input name="adRevenueSourceFilter" type="radio" value="all" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                        <span class="ml-2 text-sm text-gray-900">All</span>
+                                    </label>
+                                    <label class="inline-flex items-center whitespace-nowrap">
+                                        <input name="adRevenueSourceFilter" type="radio" value="appmetrica" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                        <span class="ml-2 text-sm text-gray-900">Appmetrica</span>
+                                    </label>
+                                    <label class="inline-flex items-center whitespace-nowrap">
+                                        <input name="adRevenueSourceFilter" type="radio" value="appsflyer" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                        <span class="ml-2 text-sm text-gray-900">Appsflyer</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div>
+                                <label for="adRevenueFilterInput" class="block text-xs font-medium text-gray-700 mb-1">Filter logs by text:</label>
+                                <input type="text" id="adRevenueFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search in raw log...">
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="bg-white rounded-xl shadow-md p-6">
+                <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="overflow-x-auto">
                         <table class="min-w-full bg-white">
                            <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Device</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Status</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Event Name</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Details</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Raw Log</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Action</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Status</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Event Name</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Details</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Action</th>
                                 </tr>
                             </thead>
                             <tbody id="adRevenueTableBody" class="divide-y divide-gray-200"></tbody>
@@ -611,35 +833,35 @@ HTML_TEMPLATE = """
 
             <!-- TAB 6: CallbackAd -->
             <div id="tabContentCallbackAd" class="hidden">
-                 <div class="bg-white rounded-xl shadow-md p-6">
-                    <div class="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                 <div class="bg-white rounded-xl shadow-md p-4">
+                    <div class="mb-3 grid grid-cols-1 lg:grid-cols-[1fr_minmax(320px,420px)] gap-4 items-end">
                         <div>
-                            <label class="block text-sm font-medium text-gray-700">Filter by Type:</label>
-                            <div class="mt-2 flex space-x-4">
-                                <div class="flex items-center">
+                            <label class="block text-xs font-medium text-gray-700">Filter by Type:</label>
+                            <div class="mt-2 flex flex-wrap lg:flex-nowrap items-center gap-x-4 gap-y-2 text-sm">
+                                <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="callbackTypeAll" name="callbackType" type="radio" value="all" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                    <label for="callbackTypeAll" class="ml-2 block text-sm text-gray-900">All</label>
-                                </div>
-                                <div class="flex items-center">
+                                    <span class="ml-2 text-sm text-gray-900">All</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="callbackTypeCallback" name="callbackType" type="radio" value="callback" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                    <label for="callbackTypeCallback" class="ml-2 block text-sm text-gray-900">Callback</label>
-                                </div>
-                                <div class="flex items-center">
+                                    <span class="ml-2 text-sm text-gray-900">Callback</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="callbackTypeGadsme" name="callbackType" type="radio" value="gadsme_callback" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                    <label for="callbackTypeGadsme" class="ml-2 block text-sm text-gray-900">Callback Gadsme</label>
-                                </div>
-                                <div class="flex items-center">
+                                    <span class="ml-2 text-sm text-gray-900">Callback Gadsme</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="callbackTypeAdverty5" name="callbackType" type="radio" value="adverty5_callback" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                    <label for="callbackTypeAdverty5" class="ml-2 block text-sm text-gray-900">Callback Adverty5</label>
-                                </div>
-                                <div class="flex items-center">
+                                    <span class="ml-2 text-sm text-gray-900">Callback Adverty5</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="callbackTypeAdEvent" name="callbackType" type="radio" value="ad_event" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                    <label for="callbackTypeAdEvent" class="ml-2 block text-sm text-gray-900">Ad Event</label>
-                                </div>
+                                    <span class="ml-2 text-sm text-gray-900">Ad Event</span>
+                                </label>
                             </div>
                         </div>
-                        <div>
-                            <label for="callbackAdFilterInput" class="block text-sm font-medium text-gray-700">Filter (in raw log):</label>
+                        <div class="lg:justify-self-end w-full lg:max-w-[420px]">
+                            <label for="callbackAdFilterInput" class="block text-xs font-medium text-gray-700">Filter (in raw log):</label>
                             <input type="text" id="callbackAdFilterInput" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" placeholder="Search...">
                         </div>
                     </div>
@@ -647,12 +869,12 @@ HTML_TEMPLATE = """
                         <table class="min-w-full bg-white">
                             <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Device</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Type</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Event / Key</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Details</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Raw Log</th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-4 border-b">Action</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Type</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Event / Key</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Details</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Action</th>
                                 </tr>
                             </thead>
                             <tbody id="callbackAdTableBody" class="divide-y divide-gray-200"></tbody>
@@ -663,20 +885,20 @@ HTML_TEMPLATE = """
 
             <!-- TAB 7: SDK Check -->
             <div id="tabContentSdkCheck" class="hidden">
-                <div class="bg-white rounded-xl shadow-md p-6 mb-6">
-                    <h2 class="text-xl font-bold mb-2">SDK Check Setup</h2>
+                <div class="bg-white rounded-xl shadow-md p-4 mb-4">
+                    <h2 class="text-lg font-semibold mb-2">SDK Check Setup</h2>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                          <div class="md:col-span-2">
-                            <label for="sdkCheckInput" class="block text-sm font-medium text-gray-700 mb-1">SDKs to Check (dán nội dung):</label>
+                            <label for="sdkCheckInput" class="block text-xs font-medium text-gray-700 mb-1">SDKs to Check (dán nội dung):</label>
                             <textarea id="sdkCheckInput" rows="8" class="w-full p-2 border rounded-md shadow-sm font-mono text-sm" placeholder="AppLovin\n&quot;Adapter 4.3.54&quot;, &quot;search_pattern&quot;: &quot;Adapter 4.3.54&quot;\n..."></textarea>
                          </div>
                          <div>
-                            <button id="startSdkCheckBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg w-full h-10">Start Checking</button>
+                            <button id="startSdkCheckBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold py-2 px-4 rounded-lg w-full h-10">Start Checking</button>
                          </div>
                     </div>
                 </div>
-                <div class="bg-white rounded-xl shadow-md p-6">
-                    <h2 class="text-xl font-bold mb-2">SDK Check Results</h2>
+                <div class="bg-white rounded-xl shadow-md p-4">
+                    <h2 class="text-lg font-semibold mb-2">SDK Check Results</h2>
                     <div class="overflow-x-auto">
                         <table class="min-w-full bg-white">
                             <tbody id="sdkCheckTableBody" class="divide-y divide-gray-200"></tbody>
@@ -687,28 +909,28 @@ HTML_TEMPLATE = """
             
             <!-- TAB 8: Package -->
             <div id="tabContentPackage" class="hidden">
-                 <div class="bg-white rounded-xl shadow-md p-6 mb-6">
+                 <div class="bg-white rounded-xl shadow-md p-4 mb-4">
                      <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
                         <div>
-                            <label for="packageIdInput" class="block text-sm font-medium text-gray-700 mb-1">Package ID:</label>
+                            <label for="packageIdInput" class="block text-[11px] font-medium text-gray-700 mb-1">Package ID:</label>
                             <input type="text" id="packageIdInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="com.example.app">
                             <div class="flex justify-center mt-3">
-                                <button id="startPackageLogBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-6 rounded-lg h-10">Start</button>
+                                <button id="startPackageLogBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Start</button>
                             </div>
                             <div class="flex items-center mt-4 space-x-4">
                                 <div class="flex items-center">
                                     <input id="showErrorsOnly" type="checkbox" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
-                                    <label for="showErrorsOnly" class="ml-2 block text-sm text-gray-900">Show errors only</label>
+                                    <label for="showErrorsOnly" class="ml-2 block text-xs text-gray-900">Show errors only</label>
                                 </div>
                                 <div class="flex items-center">
                                     <input id="autoScroll" type="checkbox" checked class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
-                                    <label for="autoScroll" class="ml-2 block text-sm text-gray-900">Auto-scroll</label>
+                                    <label for="autoScroll" class="ml-2 block text-xs text-gray-900">Auto-scroll</label>
                                 </div>
                             </div>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Quick Select:</label>
-                            <div class="grid grid-cols-1 gap-1 text-sm text-gray-700">
+                            <label class="block text-[11px] font-medium text-gray-700 mb-1">Quick Select:</label>
+                            <div class="grid grid-cols-1 gap-1 text-xs text-gray-700">
                                 <label class="inline-flex items-center gap-2">
                                     <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.nonogram">
                                     <span>NG - com.indiez.nonogram</span>
@@ -730,9 +952,9 @@ HTML_TEMPLATE = """
                         <div class="lg:col-span-2">
                             <div class="grid grid-cols-2 gap-3 items-start">
                                 <div>
-                                    <label for="packageTagFilterInput" class="block text-sm font-medium text-gray-700 mb-1">Tag Filter:</label>
+                                    <label for="packageTagFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Tag Filter:</label>
                                     <input type="text" id="packageTagFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Tag...">
-                                    <div class="mt-2 grid grid-cols-2 gap-4 text-sm text-gray-700">
+                                    <div class="mt-2 grid grid-cols-2 gap-4 text-xs text-gray-700">
                                         <label class="inline-flex items-center gap-2">
                                             <input type="radio" name="tagQuickFilter" value="" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
                                             <span>All</span>
@@ -752,10 +974,10 @@ HTML_TEMPLATE = """
                                     </div>
                                 </div>
                                 <div>
-                                    <label for="packageFilterInput" class="block text-sm font-medium text-gray-700 mb-1">Message Filter 1:</label>
+                                    <label for="packageFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 1:</label>
                                     <input type="text" id="packageFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 1...">
                                     <div class="mt-2">
-                                        <label for="packageFilterInput2" class="block text-sm font-medium text-gray-700 mb-1">Message Filter 2:</label>
+                                        <label for="packageFilterInput2" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 2:</label>
                                         <input type="text" id="packageFilterInput2" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 2...">
                                     </div>
                                 </div>
@@ -766,15 +988,15 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
                 </div>
-                <div class="bg-white rounded-xl shadow-md p-6">
-                    <h2 class="text-xl font-bold mb-2">Package Log Stream</h2>
+                <div class="bg-white rounded-xl shadow-md p-4">
+                    <h2 class="text-lg font-semibold mb-2">Package Log Stream</h2>
                     <div id="packageLogContainer" class="overflow-auto overflow-x-auto" style="height: 50vh;">
                         <table class="min-w-full bg-white">
                            <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left font-semibold text-gray-600 py-3 px-2 border-b time-header resizable col-time">Time<div class="resizer" data-col="time"></div></th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 pr-1 pl-2 border-b tag-header resizable col-tag">Tag<div class="resizer" data-col="tag"></div></th>
-                                    <th class="text-left font-semibold text-gray-600 py-3 pl-1 pr-3 border-b resizable col-message">Message<div class="resizer" data-col="message"></div></th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b time-header resizable col-time">Time<div class="resizer" data-col="time"></div></th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 pr-1 pl-2 border-b tag-header resizable col-tag">Tag<div class="resizer" data-col="tag"></div></th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 pl-1 pr-3 border-b resizable col-message">Message<div class="resizer" data-col="message"></div></th>
                                 </tr>
                             </thead>
                             <tbody id="packageLogTableBody" class="divide-y divide-gray-200"></tbody>
@@ -787,29 +1009,6 @@ HTML_TEMPLATE = """
     </div>
     
     <!-- MODALS -->
-    <div id="helpModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 hidden">
-        <div class="bg-white rounded-xl shadow-lg p-6 md:p-8 max-w-4xl w-full mx-4">
-             <div class="flex justify-between items-center border-b pb-3 mb-4">
-                <h2 class="text-2xl font-bold text-gray-800">Hướng dẫn sử dụng</h2>
-                <button id="closeHelpModal" class="text-gray-500 hover:text-gray-800 text-2xl font-bold">&times;</button>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
-                <div class="bg-gray-50 p-4 rounded-lg border">
-                    <h3 class="font-bold text-lg mb-2 text-indigo-600">Load Ads</h3>
-                    <p class="text-gray-600">- Hiển thị log <b>TrackingService->Track</b> (pattern cũ).<br>- Tự động nhóm theo Ad Source và Format.<br>- Hỗ trợ ghi vào Google Sheet riêng.</p>
-                </div>
-                 <div class="bg-gray-50 p-4 rounded-lg border">
-                    <h3 class="font-bold text-lg mb-2 text-indigo-600">Load Ads Ext (CP, KN)</h3>
-                    <p class="text-gray-600">- Hiển thị log <b>Event sent: ad_impression</b> (pattern mới).<br>- Hỗ trợ ghi vào Google Sheet riêng.</p>
-                </div>
-                <div class="bg-gray-50 p-4 rounded-lg border md:col-span-2">
-                    <h3 class="font-bold text-lg mb-2 text-indigo-600">Other Tabs</h3>
-                    <p class="text-gray-600">Các tab Validator, AdRevenue, Callback, SDK Check hoạt động như cũ.</p>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <div id="jsonModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 hidden">
         <div class="bg-white rounded-xl shadow-lg p-6 w-1/2 h-2/3 flex flex-col">
             <div class="flex justify-between items-center border-b pb-3 mb-4">
@@ -832,7 +1031,7 @@ HTML_TEMPLATE = """
                 </div>
             </div>
             <div class="flex-grow overflow-auto bg-gray-50 p-4 rounded-md border">
-                <pre id="logDetailContent" class="text-sm font-mono whitespace-pre-wrap text-gray-800"></pre>
+                <pre id="logDetailContent" class="text-sm font-mono whitespace-pre-wrap text-gray-800 select-text"></pre>
             </div>
         </div>
     </div>
@@ -846,9 +1045,6 @@ HTML_TEMPLATE = """
         // --- Common Elements ---
         const deviceListEl = document.getElementById('deviceList');
         const pauseBtn = document.getElementById('pauseBtn');
-        const helpBtn = document.getElementById('helpBtn');
-        const helpModal = document.getElementById('helpModal');
-        const closeHelpModal = document.getElementById('closeHelpModal');
         const jsonModal = document.getElementById('jsonModal');
         const closeJsonModal = document.getElementById('closeJsonModal');
         const jsonContent = document.getElementById('jsonContent');
@@ -858,6 +1054,7 @@ HTML_TEMPLATE = """
         const convertLogJsonBtn = document.getElementById('convertLogJsonBtn');
         const deviceFilter = document.getElementById('deviceFilter');
         const clearAllBtn = document.getElementById('clearAllBtn');
+        const restartAppBtn = document.getElementById('restartAppBtn');
 
         // --- Tab Logic ---
         function switchTab(tabName) {
@@ -892,6 +1089,12 @@ HTML_TEMPLATE = """
         clearAllBtn.addEventListener('click', () => {
             if (confirm('Are you sure you want to clear ALL logs?')) {
                 socket.emit('clear_all_logs');
+            }
+        });
+
+        restartAppBtn?.addEventListener('click', () => {
+            if (confirm('Restart app now to check for updates?')) {
+                fetch('/restart_app', { method: 'POST' });
             }
         });
         
@@ -970,17 +1173,46 @@ HTML_TEMPLATE = """
 
             tbody.innerHTML = filtered.map(e => `
                 <tr class="hover:bg-gray-50 border-b text-sm">
-                    <td class="py-2 px-4 text-purple-700 font-medium">${e.device_name}</td>
-                    <td class="py-2 px-4 text-blue-600 font-semibold">${e.ad_source}</td>
-                    <td class="py-2 px-4 text-green-600 font-semibold">${e.ad_format}</td>
-                    <td class="py-2 px-4 log-cell">${e.raw_log}</td>
+                    <td class="py-2 px-3 text-purple-700 text-sm font-medium">${e.device_name}</td>
+                    <td class="py-2 px-3 text-blue-600 text-sm font-medium">${e.ad_source}</td>
+                    <td class="py-2 px-3 text-green-600 text-sm font-medium">${e.ad_format}</td>
+                    <td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${e.raw_log}</td>
                 </tr>
             `).join('');
         }
 
         let validator_results_cache = [];
-        const defaultEventNames = {{ default_event_names | tojson }};
+        let defaultEventNames = {{ default_event_names | tojson }};
         let defaultEventStatusEls = {};
+        let currentProfileName = {{ current_profile_name | tojson }};
+
+        function updateProfileStatus(payload) {
+            const gameEl = document.getElementById('profileGameText');
+            if (gameEl) {
+                gameEl.textContent = payload.game_name || 'Unknown';
+            }
+        }
+
+        function renderProfileOptions(payload) {
+            const select = document.getElementById('profileSelect');
+            if (!select) return;
+            const profiles = payload.profiles || [];
+            select.innerHTML = profiles.length
+                ? profiles.map(name => `<option value="${escapeAttribute(name)}"${name === payload.current_profile ? ' selected' : ''}>${escapeHTML(name)}</option>`).join('')
+                : '<option value="">No profiles</option>';
+            select.disabled = profiles.length === 0;
+            currentProfileName = payload.current_profile || '';
+            defaultEventNames = payload.default_event_names || [];
+            renderDefaultEventStatusList();
+            updateDefaultEventStatus(validator_results_cache);
+            updateProfileStatus(payload);
+        }
+
+        async function refreshProfiles() {
+            const res = await fetch('/api/profiles');
+            const payload = await res.json();
+            renderProfileOptions(payload);
+        }
 
         function renderDefaultEventStatusList() {
             const container = document.getElementById('defaultEventStatusList');
@@ -990,9 +1222,10 @@ HTML_TEMPLATE = """
                 return;
             }
             container.innerHTML = defaultEventNames.map(name => `
-                <div class="flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white shadow-sm">
+                <div class="default-event-item inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-gray-200 bg-white cursor-pointer hover:bg-gray-50"
+                     data-event-name="${escapeAttribute(name)}" title="Click to filter by this event">
                     <span class="event-status-icon text-gray-400 font-bold w-4 text-center" data-event="${name}" title="checking">...</span>
-                    <span class="truncate font-medium text-gray-700" title="${escapeHTML(name)}">${escapeHTML(name)}</span>
+                    <span class="truncate max-w-[180px] text-xs font-medium text-gray-700" title="${escapeHTML(name)}">${escapeHTML(name)}</span>
                 </div>
             `).join('');
             defaultEventStatusEls = {};
@@ -1043,19 +1276,115 @@ HTML_TEMPLATE = """
                  tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>';
              } else {
                  tbody.innerHTML = filtered.map(res => `
-                    <tr class="hover:bg-gray-50 border-b">
-                        <td class="py-3 px-4 text-purple-700">${res.device_name}</td>
-                        <td class="py-3 px-4 font-bold ${res.status === 'PASSED' ? 'text-green-600' : 'text-red-600'}">${res.status}</td>
-                        <td class="py-3 px-4 font-semibold">${res.event_name}</td>
-                        <td class="py-3 px-4 details-cell">${res.details}</td>
-                        <td class="py-3 px-4 log-cell">${res.raw_log}</td>
-                        <td class="py-3 px-4"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td>
+                    <tr class="hover:bg-gray-50 border-b text-sm">
+                        <td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td>
+                        <td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED' ? 'text-green-600' : 'text-red-600'}">${res.status}</td>
+                        <td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td>
+                        <td class="py-2 px-3 details-cell text-sm">${res.details}</td>
+                        <td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${res.raw_log}</td>
+                        <td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td>
                     </tr>
                  `).join('');
              }
         }
 
         renderDefaultEventStatusList();
+        refreshProfiles().catch(() => {});
+
+        // Click default event to fill filter input
+        document.getElementById('defaultEventStatusList')?.addEventListener('click', (e) => {
+            const item = e.target.closest('.default-event-item');
+            if (!item) return;
+            const name = item.getAttribute('data-event-name') || '';
+            const input = document.getElementById('validatorEventFilterInput');
+            if (input) {
+                input.value = name;
+                input.focus();
+                renderValidatorTable(validator_results_cache);
+            }
+        });
+
+
+        // Click event name in results table to fill filter input
+        document.getElementById('validatorTableBody')?.addEventListener('click', (e) => {
+            const el = e.target.closest('.event-name-link');
+            if (!el) return;
+            const name = el.getAttribute('data-event-name') || '';
+            const input = document.getElementById('validatorEventFilterInput');
+            if (input) {
+                input.value = name;
+                input.focus();
+                renderValidatorTable(validator_results_cache);
+            }
+        });
+
+        document.getElementById('specificEventTableBody')?.addEventListener('click', (e) => {
+            const el = e.target.closest('.event-name-link');
+            if (!el) return;
+            const name = el.getAttribute('data-event-name') || '';
+            const input = document.getElementById('specificEventInput');
+            if (input) {
+                input.value = name;
+                input.focus();
+                socket.emit('update_specific_filter', {
+                    eventNames: [name],
+                    params: parseParamList(document.getElementById('specificParamInput')?.value || '')
+                });
+            }
+        });
+
+        document.getElementById('profileSelect')?.addEventListener('change', async (e) => {
+            const profileName = e.target.value;
+            if (!profileName || profileName === currentProfileName) return;
+            const res = await fetch('/api/profiles/select', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ profile_name: profileName })
+            });
+            const payload = await res.json();
+            if (!payload.ok) {
+                alert(payload.error || 'Failed to switch profile');
+                await refreshProfiles();
+                return;
+            }
+            validator_results_cache = [];
+            renderValidatorTable(validator_results_cache);
+            renderProfileOptions(payload);
+        });
+
+        document.getElementById('reloadProfileBtn')?.addEventListener('click', async () => {
+            const res = await fetch('/api/profiles/reload', { method: 'POST' });
+            const payload = await res.json();
+            if (!payload.ok) {
+                alert(payload.error || 'Failed to reload profile');
+                return;
+            }
+            renderProfileOptions(payload);
+        });
+
+        document.getElementById('importProfileBtn')?.addEventListener('click', () => {
+            document.getElementById('profileFileInput')?.click();
+        });
+
+        document.getElementById('profileFileInput')?.addEventListener('change', async (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            const formData = new FormData();
+            formData.append('profile_file', file);
+            const res = await fetch('/api/profiles/import', {
+                method: 'POST',
+                body: formData
+            });
+            const payload = await res.json();
+            e.target.value = '';
+            if (!payload.ok) {
+                alert(payload.error || 'Failed to import profile');
+                return;
+            }
+            validator_results_cache = [];
+            renderValidatorTable(validator_results_cache);
+            renderProfileOptions(payload);
+        });
 
         // --- Socket Listeners (Renderers) ---
         socket.on('update_load_ads', (d) => renderSimpleTable('loadAdsTableBody', d));
@@ -1072,20 +1401,32 @@ HTML_TEMPLATE = """
              const filtered = (selectedDevice === 'all') ? d : d.filter(r => r.device_id === selectedDevice);
              if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
              else {
-                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b"><td class="py-3 px-4 text-purple-700">${res.device_name}</td><td class="py-3 px-4 font-bold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-3 px-4 font-semibold">${res.event_name}</td><td class="py-3 px-4 details-cell">${res.details}</td><td class="py-3 px-4 log-cell">${res.raw_log}</td><td class="py-3 px-4"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
+                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
              }
         });
+        let lastAdRevenueData = [];
 
          socket.on('update_adrevenue_table', (d) => {
-             const tbody = document.getElementById('adRevenueTableBody');
-             if (!tbody) return;
-             const filterText = document.getElementById('adRevenueFilterInput').value.toLowerCase();
-             const filtered = d.filter(r => (selectedDevice === 'all' || r.device_id === selectedDevice) && (!filterText || r.raw_log.toLowerCase().includes(filterText)));
-             if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
-             else {
-                 tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b"><td class="py-3 px-4 text-purple-700">${res.device_name}</td><td class="py-3 px-4 font-bold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-3 px-4 font-semibold">${res.event_name}</td><td class="py-3 px-4 details-cell">${res.details}</td><td class="py-3 px-4 log-cell">${res.raw_log}</td><td class="py-3 px-4"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
-             }
+             lastAdRevenueData = d || [];
+             renderAdRevenueTable();
         });
+
+        function renderAdRevenueTable() {
+            const tbody = document.getElementById('adRevenueTableBody');
+            if (!tbody) return;
+            const filterText = document.getElementById('adRevenueFilterInput').value.toLowerCase();
+            const sourceFilter = document.querySelector('input[name="adRevenueSourceFilter"]:checked')?.value || 'all';
+            const filtered = lastAdRevenueData.filter(r => {
+                if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
+                if (sourceFilter !== 'all' && (r.source || '').toLowerCase() !== sourceFilter) return false;
+                if (filterText && !(r.raw_log || '').toLowerCase().includes(filterText)) return false;
+                return true;
+            });
+            if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
+            else {
+                tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm align-top whitespace-nowrap">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':(res.status === 'FAILED'?'text-red-600':'text-orange-500')} align-top whitespace-nowrap">${res.status}</td><td class="py-2 px-3 align-top"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm align-top"><div class="adrevenue-panel adrevenue-details-panel">${res.details}</div></td><td class="py-2 px-3 log-cell text-xs font-normal text-gray-600 align-top"><div class="adrevenue-panel adrevenue-raw-panel">${escapeHTML(res.raw_log || '')}</div></td><td class="py-2 px-3 align-top whitespace-nowrap"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
+            }
+        }
 
         // ============================================
         // === FIXED: Callback Table with Client Filter ===
@@ -1130,7 +1471,7 @@ HTML_TEMPLATE = """
                      const isFailed = nameLower.includes('failed');
                      const isImpression = nameLower.includes('onimpression') || nameLower.includes('_onimpression');
                      const eventClass = isFailed ? 'text-red-600' : (isImpression ? 'text-blue-600' : '');
-                     return `<tr class="hover:bg-gray-50 border-b"><td class="py-3 px-4 text-purple-700">${res.device_name}</td><td class="py-3 px-4 font-bold ${res.type==='Ad Event'?'text-orange-600':'text-cyan-600'}">${res.type}</td><td class="py-3 px-4 font-semibold ${eventClass}">${res.event_name}</td><td class="py-3 px-4 details-cell">${res.details}</td><td class="py-3 px-4 log-cell">${res.raw_log}</td><td class="py-3 px-4"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-semibold py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`;
+                     return `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.type==='Ad Event'?'text-orange-600':'text-cyan-600'}">${res.type}</td><td class="py-2 px-3 text-sm font-medium ${eventClass}">${res.event_name}</td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`;
                  }).join('');
              }
         }
@@ -1147,8 +1488,8 @@ HTML_TEMPLATE = """
                  let statusText = '';
                  if (res.status === 'PASSED') statusText = '<span class="font-semibold text-green-600"> - PASSED</span>';
                  else if (res.status === 'NOT_FOUND') statusText = '<span class="font-semibold text-red-600"> - Not Found</span>';
-                 else if (res.status === 'HEADER') rowClass += ' font-bold text-lg text-indigo-600 bg-gray-50';
-                 else if (res.status === 'LABEL') rowClass += ' font-bold text-gray-800 pt-2';
+                 else if (res.status === 'HEADER') rowClass += ' font-semibold text-sm text-indigo-600 bg-gray-50';
+                 else if (res.status === 'LABEL') rowClass += ' font-medium text-sm text-gray-800 pt-2';
                  
                  // Filter
                  if (selectedDevice !== 'all' && res.device_id !== selectedDevice && res.status !== 'LABEL' && res.status !== 'WAITING') return '';
@@ -1187,7 +1528,7 @@ HTML_TEMPLATE = """
                 const msgClass = isErrorLevel ? 'text-red-500' : '';
                 const rowKey = `${l.time_display || l.time || ''}||${l.tag || ''}||${msgText}`;
                 const selectedClass = selectedPackageRowKeys.has(rowKey) ? 'selected' : '';
-                return `<tr class="package-log-row hover:bg-gray-50 ${rowClass} ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${idx}"><td class="py-2 px-2 font-mono text-xs time-cell col-time">${l.time_display || l.time || ''}</td><td class="py-2 pr-1 pl-2 font-mono text-xs tag-cell col-tag" title="${escapeHTML(l.tag || '')}">${l.tag || ''}</td><td class="py-2 pl-1 pr-3 log-cell message-cell col-message ${msgClass}">${msgText}</td></tr>`;
+                return `<tr class="package-log-row hover:bg-gray-50 ${rowClass} ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${idx}"><td class="py-2 px-2 font-mono text-xs time-cell col-time">${escapeHTML(l.time_display || l.time || '')}</td><td class="py-2 pr-1 pl-2 font-mono text-xs tag-cell col-tag" title="${escapeHTML(l.tag || '')}">${escapeHTML(l.tag || '')}</td><td class="py-2 pl-1 pr-3 log-cell message-cell col-message ${msgClass}">${escapeHTML(msgText)}</td></tr>`;
             }).join('');
             if(document.getElementById('autoScroll').checked) document.getElementById('packageLogContainer').scrollTop = document.getElementById('packageLogContainer').scrollHeight;
         }
@@ -1321,8 +1662,16 @@ HTML_TEMPLATE = """
                     try {
                         const parsed = JSON.parse(jsonStr);
                         const pretty = JSON.stringify(parsed, null, 2);
-                        const evtLine = headerLine ? `${headerLine}\\n` : (evt ? `event_name: ${evt}\\n` : '');
-                        return `--- #${idx + 1} (JSON) ---\\n${evtLine}${pretty}`;
+                        const metaLines = [];
+                        if (headerLine) metaLines.push(`context: ${headerLine}`);
+                        else if (evt) metaLines.push(`event_name: ${evt}`);
+                        metaLines.push('');
+                        metaLines.push('raw_log:');
+                        metaLines.push(line);
+                        metaLines.push('');
+                        metaLines.push('extracted_json:');
+                        metaLines.push(pretty);
+                        return `--- #${idx + 1} (JSON) ---\\n${metaLines.join('\\n')}`;
                     } catch (e) {
                         return `--- #${idx + 1} ---\\n${line}`;
                     }
@@ -1383,17 +1732,41 @@ HTML_TEMPLATE = """
             selectedDevice = e.target.value; 
             socket.emit('refresh_request'); 
             renderCallbackTable(); // Trigger client-side re-render immediately
+            renderAdRevenueTable();
         });
 
         // --- Specific Tab Logic ---
+        function setValidationButtonState(isActive) {
+            const btn = document.getElementById('startValidationBtn');
+            if (!btn) return;
+            if (isActive) {
+                btn.textContent = 'Stop';
+                btn.className = 'bg-red-500 hover:bg-red-600 text-white font-semibold text-xs px-4 rounded-lg h-9';
+            } else {
+                btn.textContent = 'Start Checking';
+                btn.className = 'bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 rounded-lg h-9';
+            }
+        }
+
         document.getElementById('startValidationBtn').addEventListener('click', () => {
-            const val = document.getElementById('paramInput').value;
-            const params = val.split('\\n').map(p=>p.trim()).filter(p=>p);
-            socket.emit('start_validation', params);
+            const btn = document.getElementById('startValidationBtn');
+            const isStarting = btn && btn.textContent === 'Start Checking';
+            if (isStarting) socket.emit('start_validation', []);
+            else socket.emit('stop_validation');
+        });
+
+        document.getElementById('clearValidatorFilterBtn')?.addEventListener('click', () => {
+            const eventInput = document.getElementById('validatorEventFilterInput');
+            if (eventInput) eventInput.value = '';
+            renderValidatorTable(validator_results_cache);
         });
         
         document.getElementById('validatorEventFilterInput').addEventListener('input', () => {
             renderValidatorTable(validator_results_cache);
+        });
+
+        socket.on('validator_status', (data) => {
+            setValidationButtonState(!!(data && data.active));
         });
 
         const specificEventInput = document.getElementById('specificEventInput');
@@ -1410,18 +1783,25 @@ HTML_TEMPLATE = """
         specificEventInput.addEventListener('input', updateSpecific);
         specificParamInput.addEventListener('input', updateSpecific);
         
-        document.getElementById('adRevenueParamInput').addEventListener('input', (e) => socket.emit('update_adrevenue_filter', {params: e.target.value.split('\\n').filter(p=>p.trim())}));
-        document.getElementById('adRevenueFilterInput').addEventListener('input', (e) => socket.emit('refresh_request')); // Trigger re-render
-        document.getElementById('packageFilterInput2').addEventListener('input', () => socket.emit('refresh_request'));
+        document.getElementById('adRevenueParamInput').addEventListener('input', (e) => socket.emit('update_adrevenue_filter', {
+            params: e.target.value
+                .split('\\n')
+                .map(p => p.trim().replace(/^['"]+|['"]+$/g, ''))
+                .filter(p => p)
+        }));
+        document.getElementById('adRevenueFilterInput').addEventListener('input', renderAdRevenueTable);
+        document.querySelectorAll('input[name="adRevenueSourceFilter"]').forEach(r => r.addEventListener('change', renderAdRevenueTable));
+        document.getElementById('packageFilterInput').addEventListener('input', renderPackageLogTable);
+        document.getElementById('packageFilterInput2').addEventListener('input', renderPackageLogTable);
         document.getElementById('packageTagFilterInput').addEventListener('input', () => {
             const allOpt = document.querySelector('input[name="tagQuickFilter"][value=""]');
             if (allOpt) allOpt.checked = true;
-            socket.emit('refresh_request');
+            renderPackageLogTable();
         });
         document.querySelectorAll('input[name="tagQuickFilter"]').forEach(r => r.addEventListener('change', (e) => {
             const tagInput = document.getElementById('packageTagFilterInput');
             if (tagInput && e.target.value) tagInput.value = '';
-            socket.emit('refresh_request');
+            renderPackageLogTable();
         }));
         document.getElementById('packageFilterInput').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(); }
@@ -1608,10 +1988,6 @@ HTML_TEMPLATE = """
             setPackageControlsEnabled(true);
         });
         
-        // Help
-        helpBtn.addEventListener('click', () => helpModal.classList.remove('hidden'));
-        closeHelpModal.addEventListener('click', () => helpModal.classList.add('hidden'));
-
     </script>
 </body>
 </html>
@@ -1620,7 +1996,70 @@ HTML_TEMPLATE = """
 # --- SERVER ROUTE (QUAN TRỌNG) ---
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE, default_event_names=sorted(event_specific_params.keys()))
+    return render_template_string(
+        HTML_TEMPLATE,
+        default_event_names=sorted(event_specific_params.keys()),
+        current_profile_name=active_profile_name
+    )
+
+
+@app.get('/api/profiles')
+def get_profiles():
+    return jsonify(_profile_payload())
+
+
+@app.post('/api/profiles/select')
+def select_profile():
+    data = request.get_json(silent=True) or {}
+    profile_name = data.get('profile_name', '')
+    if not profile_name:
+        return jsonify({'ok': False, 'error': 'profile_name_required'}), 400
+    try:
+        if not _set_active_profile(profile_name):
+            return jsonify({'ok': False, 'error': 'profile_not_found'}), 404
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    return jsonify({'ok': True, **_profile_payload()})
+
+
+@app.post('/api/profiles/reload')
+def reload_profile():
+    if active_profile_name:
+        _set_active_profile(active_profile_name)
+    else:
+        _set_active_profile()
+    return jsonify({'ok': True, **_profile_payload()})
+
+
+@app.post('/api/profiles/import')
+def import_profile():
+    upload = request.files.get('profile_file')
+    if not upload or not upload.filename:
+        return jsonify({'ok': False, 'error': 'profile_file_required'}), 400
+    try:
+        filename = _sanitize_profile_filename(upload.filename)
+        target = os.path.join(PROFILE_DIR, filename)
+        os.makedirs(PROFILE_DIR, exist_ok=True)
+        upload.save(target)
+        _set_active_profile(filename)
+        return jsonify({'ok': True, **_profile_payload()})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+@app.post('/restart_app')
+def restart_app():
+    cmd = os.getenv('EVENTINSPECTOR_RESTART_CMD')
+    args = os.getenv('EVENTINSPECTOR_RESTART_ARGS', '')
+    if not cmd:
+        return jsonify({'ok': False, 'error': 'restart_cmd_missing'})
+    argv = [cmd]
+    if args:
+        argv.append(args)
+    try:
+        subprocess.Popen(argv, creationflags=creation_flags)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
+    os._exit(0)
 
 # --- BACKEND LOGIC ---
 
@@ -1744,7 +2183,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                     "raw_log": log_entry.strip(),
                     "json_data": json_data_for_log
                 })
-                socketio.emit('update_callback_ad_table', callback_ad_logs)
+                socketio.emit('update_callback_ad_table', list(callback_ad_logs))
             return
         except:
             pass
@@ -1777,7 +2216,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                     "raw_log": log_entry.strip(),
                     "json_data": json_data_for_log
                 })
-                socketio.emit('update_callback_ad_table', callback_ad_logs)
+                socketio.emit('update_callback_ad_table', list(callback_ad_logs))
             return
         except:
             pass
@@ -1848,7 +2287,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                         "raw_log": current_buffer.strip()[:200]+"...", 
                         "json_data": json_data_for_log
                     })
-                    socketio.emit('update_callback_ad_table', callback_ad_logs)
+                    socketio.emit('update_callback_ad_table', list(callback_ad_logs))
                     return # Done processing this line/buffer
                 else:
                      # JSON start found but not ended -> Update buffer and wait for next line
@@ -1865,7 +2304,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
             details = format_json_html(actual_params) if actual_params else "No params"
             with lock:
                 callback_ad_logs.append({"device_id": device_id, "device_name": get_device_name(device_id), "type": "Ad Event", "event_name": event_name, "details": details, "raw_log": log_entry.strip(), "json_data": json_string})
-                socketio.emit('update_callback_ad_table', callback_ad_logs)
+                socketio.emit('update_callback_ad_table', list(callback_ad_logs))
         except: pass
     
     # --- 3. Process Other Callbacks ---
@@ -1899,7 +2338,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
 
         with lock:
             callback_ad_logs.append({"device_id": device_id, "device_name": get_device_name(device_id), "type": "Callback", "event_name": display_name, "details": details, "raw_log": log_entry.strip(), "json_data": json_data_for_log})
-            socketio.emit('update_callback_ad_table', callback_ad_logs)
+            socketio.emit('update_callback_ad_table', list(callback_ad_logs))
 
 def process_event_validator_log(event_name, actual_params, json_string, log_entry, device_id):
     if is_paused or not validator_active: 
@@ -1929,12 +2368,12 @@ def process_event_validator_log(event_name, actual_params, json_string, log_entr
             if closest and best_dist <= 2:
                 details_html += f'<div class="text-orange-600 font-bold mb-2">Possible typo: "{event_name}" ~ "{closest}"</div>'
         if missing:
-            details_html += f'<div class="text-red-600 font-bold mb-2">Missing: {list(missing)}</div>'
+            details_html += format_param_issue_html("Missing", missing, "text-red-600")
         
         details_html += format_json_html(actual_params)
         
         validator_results.append({"device_id": device_id, "event_name": event_name, "device_name": get_device_name(device_id), "status": status, "details": details_html, "raw_log": log_entry.strip(), "json_data": json_string})
-        socketio.emit('update_validator_table', validator_results)
+        socketio.emit('update_validator_table', list(validator_results))
 
 def _apply_specific_filter_and_emit():
     global specific_event_results
@@ -1969,10 +2408,10 @@ def _apply_specific_filter_and_emit():
                      status = "PASSED" if not missing else "FAILED"
                      
                      if missing:
-                         details += f'<div class="text-red-600 font-bold mb-2">Missing: {list(missing)}</div>'
+                         details += format_param_issue_html("Missing", missing, "text-red-600")
                      
                      if strange:
-                         details += f'<div class="text-orange-600 font-bold mb-2">Strange: {list(strange)}</div>'
+                         details += format_param_issue_html("Strange", strange, "text-orange-600")
                      
                      # Show full JSON
                      details += format_json_html(params)
@@ -1991,7 +2430,49 @@ def cache_specific_event_log(event_name, params, json_string, log_entry, device_
     _apply_specific_filter_and_emit()
 
 def _apply_adrevenue_filter_and_emit():
-    with lock: socketio.emit('update_adrevenue_table', adrevenue_logs)
+    normalized = [p.strip().strip('"').strip("'") for p in adrevenue_params_to_validate if p and p.strip()]
+    rendered = []
+    with lock:
+        for item in adrevenue_logs:
+            parsed_data = item.get("parsed_data") or {}
+            source = (item.get("source") or "appmetrica").lower()
+
+            if source == "appsflyer":
+                ad_network = parsed_data.get("ad_network") if isinstance(parsed_data.get("ad_network"), dict) else {}
+                payload_data = ad_network.get("payload") if isinstance(ad_network.get("payload"), dict) else {}
+                custom_params = payload_data.get("custom_parameters") if isinstance(payload_data.get("custom_parameters"), dict) else {}
+                validate_maps = [ad_network, payload_data, custom_params]
+                details_target = ad_network if ad_network else parsed_data
+            else:
+                payload_data = parsed_data.get("payload") if isinstance(parsed_data.get("payload"), dict) else {}
+                validate_maps = [parsed_data, payload_data]
+                details_target = parsed_data if parsed_data else item.get("raw_details", "")
+
+            missing = []
+            for param in normalized:
+                if any(isinstance(m, dict) and param in m for m in validate_maps):
+                    continue
+                missing.append(param)
+
+            status = "INFO"
+            if normalized:
+                status = "PASSED" if not missing else "FAILED"
+
+            summary_parts = []
+            if normalized:
+                if missing:
+                    summary_parts.append(format_param_issue_html("Missing", missing, "text-red-600", chunk_size=1))
+                else:
+                    summary_parts.append("<div class='mb-2 text-xs font-medium text-green-600'>All requested params found</div>")
+
+            details_html = ''.join(summary_parts) + format_json_html(details_target)
+            rendered.append({
+                **item,
+                "status": status,
+                "details": details_html,
+            })
+
+    socketio.emit('update_adrevenue_table', rendered)
 
 def _emit_sdk_check_results():
     res = []
@@ -2034,48 +2515,82 @@ def adb_log_reader(device_id):
                 if found: _emit_sdk_check_results()
 
             # 4. Process AdRevenue
+            handled_adrevenue = False
             if "AdRevenue Received:" in line:
                 with lock:
                     match = ADREVENUE_LOG_PATTERN.search(line)
                     if match:
                         content = match.group(1)
-                        details_html = content
-                        
-                        # --- Logic parse AdRevenue string to JSON object ---
+                        ad_data = {}
+
                         try:
-                            # 1. Extract payload JSON string if exists
                             payload_obj = {}
                             payload_match = re.search(r'payload=(\{.*?\})(?:,|$)', content)
-                            
+
                             clean_content = content
                             if payload_match:
                                 payload_str = payload_match.group(1)
                                 try:
                                     payload_obj = json.loads(payload_str)
-                                except: pass
-                                # Remove payload part to parse the rest easily
+                                except:
+                                    payload_obj = {}
                                 clean_content = content.replace(f'payload={payload_str}', '')
-                            
-                            # 2. Parse key=value pairs
-                            ad_data = {}
-                            # Split by comma and space, but careful with empty strings
+
                             parts = [p.strip() for p in clean_content.split(',') if p.strip()]
-                            
                             for part in parts:
                                 if '=' in part:
                                     k, v = part.split('=', 1)
                                     ad_data[k.strip()] = v.strip()
-                            
-                            # 3. Re-attach payload object
+
                             if payload_obj:
                                 ad_data['payload'] = payload_obj
-                                
-                            details_html = format_json_html(ad_data)
-                        except: 
-                            pass # Fallback to raw content if parsing fails
-                        
-                        adrevenue_logs.append({"device_id": device_id, "device_name": get_device_name(device_id), "status": "INFO", "event_name": "AdRevenue", "details": details_html, "raw_log": line.strip(), "json_data": "{}"})
+                        except:
+                            ad_data = {}
+
+                        adrevenue_logs.append({
+                            "device_id": device_id,
+                            "device_name": get_device_name(device_id),
+                            "status": "INFO",
+                            "event_name": "AdRevenue - Appmetrica",
+                            "source": "appmetrica",
+                            "details": format_json_html(ad_data) if ad_data else content,
+                            "raw_details": content,
+                            "raw_log": line.strip(),
+                            "json_data": json.dumps(ad_data, ensure_ascii=False) if ad_data else "{}",
+                            "parsed_data": ad_data,
+                        })
+                        handled_adrevenue = True
                 _apply_adrevenue_filter_and_emit()
+
+            if (not handled_adrevenue) and "AppsFlyer" in line and "ADREVENUE-" in line and "preparing data:" in line:
+                with lock:
+                    match = APPSFLYER_ADREVENUE_PATTERN.search(line)
+                    if match:
+                        event_prefix = match.group(1).upper()
+                        json_str = match.group(2)
+                        appsflyer_data = {}
+                        try:
+                            appsflyer_data = json.loads(json_str)
+                        except:
+                            appsflyer_data = {}
+
+                        ad_network_data = appsflyer_data.get("ad_network") if isinstance(appsflyer_data.get("ad_network"), dict) else {}
+                        adrevenue_logs.append({
+                            "device_id": device_id,
+                            "device_name": get_device_name(device_id),
+                            "status": "INFO",
+                            "event_name": "AdRevenue - Appsflyer",
+                            "source": "appsflyer",
+                            "details": format_json_html(ad_network_data) if ad_network_data else format_json_html(appsflyer_data),
+                            "raw_details": json_str,
+                            "raw_log": line.strip(),
+                            "json_data": json.dumps(appsflyer_data, ensure_ascii=False) if appsflyer_data else "{}",
+                            "parsed_data": appsflyer_data,
+                            "raw_event_prefix": event_prefix,
+                        })
+                        handled_adrevenue = True
+                if handled_adrevenue:
+                    _apply_adrevenue_filter_and_emit()
 
             # 5. Process Callback & Events
             process_callback_and_ad_event_log(line, device_id)
@@ -2161,26 +2676,81 @@ def package_pid_monitor():
     global active_package_pids
     while True:
         time.sleep(3)
+
         with lock:
-            if not target_package_name:
-                for p in active_logcat_processes.values(): p.terminate()
-                active_logcat_processes.clear(); active_package_pids.clear()
-                continue
-            
-            # (Giản lược logic PID monitor một chút để code gọn hơn nhưng vẫn đủ chức năng)
-            for device in connected_devices_info:
-                did = device['id']
-                try:
-                    res = subprocess.run([ADB_EXECUTABLE, '-s', did, 'shell', 'pidof', '-s', target_package_name], capture_output=True, text=True, creationflags=creation_flags)
-                    pid = res.stdout.strip()
-                    if pid and pid != active_package_pids.get(did):
-                        if did in active_logcat_processes: active_logcat_processes[did].terminate()
+            pkg = target_package_name
+            devices_snapshot = list(connected_devices_info)
+
+        if not pkg:
+            with lock:
+                for p in active_logcat_processes.values():
+                    try:
+                        p.terminate()
+                    except Exception:
+                        pass
+                active_logcat_processes.clear()
+                active_package_pids.clear()
+            continue
+
+        current_ids = {d['id'] for d in devices_snapshot}
+
+        # Clean up disconnected devices
+        with lock:
+            for did in list(active_logcat_processes.keys()):
+                if did not in current_ids:
+                    try:
+                        active_logcat_processes[did].terminate()
+                    except Exception:
+                        pass
+                    active_logcat_processes.pop(did, None)
+                    active_package_pids.pop(did, None)
+
+        for device in devices_snapshot:
+            did = device['id']
+            try:
+                res = subprocess.run([ADB_EXECUTABLE, '-s', did, 'shell', 'pidof', '-s', pkg],
+                                     capture_output=True, text=True, creationflags=creation_flags)
+                pid = res.stdout.strip()
+
+                if not pid:
+                    with lock:
+                        if did in active_logcat_processes:
+                            try:
+                                active_logcat_processes[did].terminate()
+                            except Exception:
+                                pass
+                            active_logcat_processes.pop(did, None)
+                        active_package_pids.pop(did, None)
+                    continue
+
+                with lock:
+                    proc = active_logcat_processes.get(did)
+                    prev_pid = active_package_pids.get(did)
+
+                restart = (pid != prev_pid) or (proc is None) or (proc.poll() is not None)
+
+                if restart:
+                    with lock:
+                        if did in active_logcat_processes:
+                            try:
+                                active_logcat_processes[did].terminate()
+                            except Exception:
+                                pass
                         cmd = [ADB_EXECUTABLE, '-s', did, 'logcat', f'--pid={pid}']
                         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=creation_flags)
                         active_logcat_processes[did] = proc
                         active_package_pids[did] = pid
                         threading.Thread(target=package_log_consumer, args=(did, proc), daemon=True).start()
-                except: pass
+            except Exception:
+                with lock:
+                    if did in active_logcat_processes:
+                        try:
+                            active_logcat_processes[did].terminate()
+                        except Exception:
+                            pass
+                        active_logcat_processes.pop(did, None)
+                    active_package_pids.pop(did, None)
+
 
 def package_log_emitter():
     while True:
@@ -2198,7 +2768,7 @@ def handle_change_tab(data):
     if data.get('tab_name') == 'LoadAds': socketio.emit('update_load_ads', list(load_ads_events))
     if data.get('tab_name') == 'LoadAdsExt': socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
     if data.get('tab_name') == 'SdkCheck': _emit_sdk_check_results()
-    if data.get('tab_name') == 'CallbackAd': socketio.emit('update_callback_ad_table', callback_ad_logs)
+    if data.get('tab_name') == 'CallbackAd': socketio.emit('update_callback_ad_table', list(callback_ad_logs))
 
 @socketio.on('toggle_record')
 def tr(data):
@@ -2260,6 +2830,13 @@ def val(p):
     validator_active = True
     validator_results.clear()
     socketio.emit('update_validator_table', [])
+    socketio.emit('validator_status', {'active': True})
+
+@socketio.on('stop_validation')
+def stop_val():
+    global validator_active
+    validator_active = False
+    socketio.emit('validator_status', {'active': False})
 
 @socketio.on('update_specific_filter')
 def usf(d):
@@ -2302,12 +2879,13 @@ def spl(d):
 def refresh():
     socketio.emit('update_load_ads', list(load_ads_events))
     socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
-    socketio.emit('update_callback_ad_table', callback_ad_logs) # Ensure callback data is refreshed
+    socketio.emit('update_callback_ad_table', list(callback_ad_logs)) # Ensure callback data is refreshed
     # ... trigger others ...
 
 @socketio.on('connect')
 def connect(): 
     socketio.emit('pause_status', {'is_paused': is_paused})
+    socketio.emit('validator_status', {'active': validator_active})
     # Sync recording buttons on connect
     for tab, state in recording_states.items():
         socketio.emit('record_status', {
@@ -2318,7 +2896,8 @@ def connect():
 
 # --- MAIN ---
 def run_server(host="0.0.0.0", port=5001):
-    load_default_params_config()
+    _normalize_remote_update_config()
+    _set_active_profile()
     threading.Thread(target=device_manager, daemon=True).start()
     threading.Thread(target=package_log_emitter, daemon=True).start()
     threading.Thread(target=package_pid_monitor, daemon=True).start()
