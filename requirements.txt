@@ -6,3 +6,4 @@ openpyxl
 pywebview
 
 PySide6
+qtpy

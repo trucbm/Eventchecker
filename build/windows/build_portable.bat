@@ -20,10 +20,13 @@ if exist "dist\EventInspector" rmdir /s /q "dist\EventInspector"
 if exist "build\EventInspector" rmdir /s /q "build\EventInspector"
 
 REM Build portable EXE folder
-pip install pyinstaller PySide6
+pip install pyinstaller PySide6 qtpy
 pyinstaller --noconfirm --clean --windowed --icon assets\app.ico --name "EventInspector" ^
   --collect-submodules "engineio" ^
   --collect-submodules "socketio" ^
+  --collect-submodules "webview" ^
+  --collect-submodules "qtpy" ^
+  --collect-submodules "PySide6" ^
   --add-data "Default event + Default Params.xlsx;." ^
   --add-data "remote_update_config.json;." ^
   desktop_app.py

@@ -1,12 +1,15 @@
 import socket
 import threading
 import time
-import webview
 import os
 import sys
 import logging
 import traceback
-import webbrowser
+
+if sys.platform.startswith("win"):
+    os.environ["PYWEBVIEW_GUI"] = "qt"
+
+import webview
 
 # Remote update loader (optional)
 try:
@@ -91,17 +94,12 @@ def main():
     )
     try:
         if sys.platform.startswith("win"):
+            # Force Qt on Windows so we never silently fall back to browser mode.
             webview.start(gui="qt")
         else:
             webview.start()
     except Exception:
         logging.exception("WebView crashed:\n%s", traceback.format_exc())
-        if sys.platform.startswith("win"):
-            url = f"http://{HOST}:{PORT}"
-            logging.info("Falling back to browser launcher on Windows: %s", url)
-            webbrowser.open(url)
-            while True:
-                time.sleep(1)
         raise
 
 
