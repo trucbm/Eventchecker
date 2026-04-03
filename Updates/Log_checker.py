@@ -232,7 +232,7 @@ specific_event_name_filters = []
 specific_event_params_filters = []
 
 # 5. Dữ liệu cho Tab Package Logcat
-package_log_cache = deque(maxlen=3000)
+package_log_cache = deque(maxlen=15000)
 target_package_name = ""
 active_package_pids = {}
 active_logcat_processes = {}
@@ -508,7 +508,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(49)</title>
+    <title>Event Inspector V2.0.0(48)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -579,7 +579,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(49)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(48)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1500,9 +1500,6 @@ payload..."></textarea>
 
         let lastPackageLogs = [];
         let selectedPackageRowKeys = new Set();
-        let packageRenderPending = false;
-        const PACKAGE_RENDER_LIMIT = 800;
-
         function renderPackageLogTable() {
             const tbody = document.getElementById('packageLogTableBody');
             if (!tbody) return;
@@ -1511,7 +1508,7 @@ payload..."></textarea>
             const tagFilter = document.getElementById('packageTagFilterInput').value.toLowerCase();
             const quickTag = document.querySelector('input[name="tagQuickFilter"]:checked')?.value || '';
             const errorsOnly = document.getElementById('showErrorsOnly').checked;
-
+            
             const filtered = lastPackageLogs.filter(l => {
                 if (selectedDevice !== 'all' && l.device_id !== selectedDevice) return false;
                 if (errorsOnly && !l.is_error) return false;
@@ -1523,9 +1520,8 @@ payload..."></textarea>
                 if (filterText2 && !messageHaystack.includes(filterText2)) return false;
                 return true;
             });
-
-            const visibleRows = filtered.slice(-PACKAGE_RENDER_LIMIT);
-            tbody.innerHTML = visibleRows.map((l, idx) => {
+            
+            tbody.innerHTML = filtered.map((l, idx) => {
                 const msgText = (l.message || l.log || '');
                 const isErrorLevel = (l.level === 'E' || l.level === 'F');
                 const rowClass = isErrorLevel ? 'text-red-500' : '';
@@ -1537,18 +1533,9 @@ payload..."></textarea>
             if(document.getElementById('autoScroll').checked) document.getElementById('packageLogContainer').scrollTop = document.getElementById('packageLogContainer').scrollHeight;
         }
 
-        function schedulePackageLogRender() {
-            if (packageRenderPending) return;
-            packageRenderPending = true;
-            requestAnimationFrame(() => {
-                packageRenderPending = false;
-                renderPackageLogTable();
-            });
-        }
-
         socket.on('package_log_cache', (logs) => {
             lastPackageLogs = logs || [];
-            schedulePackageLogRender();
+            renderPackageLogTable();
         });
 
         // --- JSON Modal Handler ---
@@ -2767,10 +2754,12 @@ def package_pid_monitor():
 
 def package_log_emitter():
     while True:
-        time.sleep(0.5)
+        time.sleep(1)
         with lock:
             if not is_paused and target_package_name:
-                socketio.emit('package_log_cache', list(package_log_cache)[-800:])
+                now = time.time()
+                while package_log_cache and now - package_log_cache[0]['timestamp'] > 1000: package_log_cache.popleft()
+                socketio.emit('package_log_cache', list(package_log_cache))
 
 # --- SOCKET HANDLERS ---
 @socketio.on('change_tab')
