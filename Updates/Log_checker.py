@@ -591,7 +591,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(57)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(58)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -736,15 +736,7 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="overflow-x-auto">
-                        <table class="min-w-full w-full bg-white table-fixed">
-                            <colgroup>
-                                <col style="width: 6.5rem;">
-                                <col style="width: 5.5rem;">
-                                <col style="width: 13rem;">
-                                <col style="width: 36%;">
-                                <col style="width: 31%;">
-                                <col style="width: 5.5rem;">
-                            </colgroup>
+                        <table class="min-w-full bg-white">
                            <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
