@@ -729,7 +729,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.1.0(10)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.1.0(11)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2691,20 +2691,31 @@ def process_load_ads_ext_log(line, device_id):
 
 def find_and_parse_event(log_entry):
     """Parse log sự kiện chung từ TrackingService->Track và AppMetrica regular event."""
-    match = OLD_EVENT_LOG_PATTERN.search(log_entry)
-    if match:
+    if 'TrackingService->Track:' in log_entry:
         try:
-            data = json.loads(match.group(1))
-            event_name = data.get("eventName")
-            params = data.get("e", {})
-            if event_name:
-                wrapped = {
-                    "eventName": event_name,
-                    "e": params,
-                    "source": "firebase",
-                }
-                return event_name, params, json.dumps(wrapped, ensure_ascii=False)
-        except: pass
+            after_keyword = log_entry.split('TrackingService->Track:', 1)[1]
+            json_str = extract_json_object_from_text(after_keyword)
+            if not json_str:
+                match = OLD_EVENT_LOG_PATTERN.search(log_entry)
+                json_str = match.group(1) if match else None
+            if json_str:
+                data = json.loads(json_str)
+                event_name = data.get('eventName') or data.get('event_name')
+                params = data.get('e', {})
+                if isinstance(params, str):
+                    try:
+                        params = json.loads(params)
+                    except Exception:
+                        params = {}
+                if event_name and isinstance(params, dict):
+                    wrapped = {
+                        'eventName': event_name,
+                        'e': params,
+                        'source': 'firebase',
+                    }
+                    return event_name, params, json.dumps(wrapped, ensure_ascii=False)
+        except Exception:
+            pass
 
     match = METRICA_REGULAR_EVENT_PATTERN.search(log_entry)
     if match:
@@ -2712,12 +2723,12 @@ def find_and_parse_event(log_entry):
             event_name = match.group(1)
             params = json.loads(match.group(2))
             wrapped = {
-                "eventName": event_name,
-                "e": params,
-                "source": "appmetrica",
+                'eventName': event_name,
+                'e': params,
+                'source': 'appmetrica',
             }
             return event_name, params, json.dumps(wrapped, ensure_ascii=False)
-        except:
+        except Exception:
             pass
     return None, None, None
 
