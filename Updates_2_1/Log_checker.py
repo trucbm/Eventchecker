@@ -729,7 +729,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.1.0(11)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.1.0(12)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2700,8 +2700,14 @@ def find_and_parse_event(log_entry):
                 json_str = match.group(1) if match else None
             if json_str:
                 data = json.loads(json_str)
-                event_name = data.get('eventName') or data.get('event_name')
-                params = data.get('e', {})
+                event_name = (
+                    data.get('eventName')
+                    or data.get('EventName')
+                    or data.get('event_name')
+                )
+                params = data.get('e')
+                if params is None:
+                    params = data.get('params', {})
                 if isinstance(params, str):
                     try:
                         params = json.loads(params)
