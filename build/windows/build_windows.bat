@@ -25,8 +25,22 @@ pyinstaller --noconfirm --clean --windowed --icon assets\\app.ico --name "EventI
   --collect-submodules "engineio" ^
   --collect-submodules "socketio" ^
   --collect-submodules "webview" ^
-  --collect-submodules "qtpy" ^
-  --collect-submodules "PySide6" ^
+  --hidden-import "qtpy" ^
+  --hidden-import "qtpy.QtCore" ^
+  --hidden-import "qtpy.QtGui" ^
+  --hidden-import "qtpy.QtWidgets" ^
+  --hidden-import "qtpy.QtNetwork" ^
+  --hidden-import "qtpy.QtWebChannel" ^
+  --hidden-import "qtpy.QtWebEngineCore" ^
+  --hidden-import "qtpy.QtWebEngineWidgets" ^
+  --hidden-import "PySide6.QtCore" ^
+  --hidden-import "PySide6.QtGui" ^
+  --hidden-import "PySide6.QtWidgets" ^
+  --hidden-import "PySide6.QtNetwork" ^
+  --hidden-import "PySide6.QtWebChannel" ^
+  --hidden-import "PySide6.QtWebEngineCore" ^
+  --hidden-import "PySide6.QtWebEngineWidgets" ^
+  --hidden-import "shiboken6" ^
   --add-data "Default event + Default Params.xlsx;." ^
   --add-data "remote_update_config.json;." ^
   desktop_app.py
