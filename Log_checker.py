@@ -729,7 +729,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.1.0(4)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.1.0(5)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1166,8 +1166,9 @@ payload..."></textarea>
                                 </div>
                             </div>
                         </div>
-                        <div>
+                        <div class="flex items-center gap-2">
                              <button id="copyPackageBtn" class="hidden text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-blue-500 hover:bg-blue-600 text-white">Copy Selected</button>
+                             <button id="openPackageHistoryBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-slate-600 hover:bg-slate-700 text-white">Recorded Log</button>
                         </div>
                     </div>
                 </div>
@@ -1186,36 +1187,6 @@ payload..."></textarea>
                         </table>
                     </div>
                 </div>
-                <div class="bg-white rounded-xl shadow-md p-4 mt-4">
-                    <div class="flex flex-col lg:flex-row lg:items-end gap-4 mb-3">
-                        <div class="lg:w-72">
-                            <label for="packageHistorySessionSelect" class="block text-[11px] font-medium text-gray-700 mb-1">Saved Sessions:</label>
-                            <select id="packageHistorySessionSelect" class="w-full p-2 text-[11px] border rounded-md shadow-sm"></select>
-                        </div>
-                        <div class="flex-1">
-                            <label for="packageHistoryFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Keyword Filter:</label>
-                            <input type="text" id="packageHistoryFilterInput" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search full saved log...">
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <button id="loadPackageHistoryBtn" class="bg-slate-600 hover:bg-slate-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Load</button>
-                            <button id="refreshPackageSessionsBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold text-xs py-2 px-4 rounded-lg h-9">Refresh Sessions</button>
-                        </div>
-                    </div>
-                    <p id="packageHistoryMeta" class="text-[11px] text-gray-500 mb-2">No session selected.</p>
-                    <div class="overflow-auto border rounded-md" style="height: 32vh;">
-                        <table class="min-w-full bg-white">
-                            <thead class="bg-gray-50 sticky top-0 z-10">
-                                <tr>
-                                    <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Time</th>
-                                    <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Device</th>
-                                    <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Tag</th>
-                                    <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Message</th>
-                                </tr>
-                            </thead>
-                            <tbody id="packageHistoryTableBody" class="divide-y divide-gray-200"></tbody>
-                        </table>
-                    </div>
-                </div>
             </div>
 
         </div>
@@ -1230,6 +1201,51 @@ payload..."></textarea>
             </div>
             <div class="flex-grow overflow-auto bg-gray-800 text-white p-4 rounded-md">
                 <pre><code id="jsonContent"></code></pre>
+            </div>
+        </div>
+    </div>
+
+    <div id="packageHistoryModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 hidden">
+        <div class="bg-white rounded-xl shadow-lg p-6 w-[88vw] h-[82vh] flex flex-col">
+            <div class="flex justify-between items-center border-b pb-3 mb-4">
+                <h2 class="text-xl font-bold text-gray-800">Recorded Package Logs</h2>
+                <button id="closePackageHistoryModal" class="text-gray-500 hover:text-gray-800 text-2xl font-bold">&times;</button>
+            </div>
+            <div class="flex flex-col gap-4">
+                <div class="flex flex-col xl:flex-row xl:items-end gap-4">
+                    <div class="xl:w-72">
+                        <label for="packageHistorySessionSelect" class="block text-[11px] font-medium text-gray-700 mb-1">Saved Sessions:</label>
+                        <select id="packageHistorySessionSelect" class="w-full p-2 text-[11px] border rounded-md shadow-sm"></select>
+                    </div>
+                    <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label for="packageHistoryFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 1:</label>
+                            <input type="text" id="packageHistoryFilterInput" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search saved log text 1...">
+                        </div>
+                        <div>
+                            <label for="packageHistoryFilterInput2" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 2:</label>
+                            <input type="text" id="packageHistoryFilterInput2" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search saved log text 2...">
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="loadPackageHistoryBtn" class="bg-slate-600 hover:bg-slate-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Load</button>
+                        <button id="refreshPackageSessionsBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold text-xs py-2 px-4 rounded-lg h-9">Refresh Sessions</button>
+                    </div>
+                </div>
+                <p id="packageHistoryMeta" class="text-[11px] text-gray-500">No session selected.</p>
+            </div>
+            <div class="overflow-auto border rounded-md mt-3 flex-1">
+                <table class="min-w-full bg-white">
+                    <thead class="bg-gray-50 sticky top-0 z-10">
+                        <tr>
+                            <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Time</th>
+                            <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Device</th>
+                            <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Tag</th>
+                            <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Message</th>
+                        </tr>
+                    </thead>
+                    <tbody id="packageHistoryTableBody" class="divide-y divide-gray-200"></tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -1905,14 +1921,16 @@ payload..."></textarea>
 
         function loadSelectedPackageHistory() {
             const select = document.getElementById('packageHistorySessionSelect');
-            const keyword = document.getElementById('packageHistoryFilterInput')?.value || '';
+            const keyword1 = document.getElementById('packageHistoryFilterInput')?.value || '';
+            const keyword2 = document.getElementById('packageHistoryFilterInput2')?.value || '';
             if (!select || !select.value) {
                 renderPackageHistoryRows([]);
                 return;
             }
             const query = new URLSearchParams({
                 session_id: select.value,
-                q: keyword,
+                q1: keyword1,
+                q2: keyword2,
             });
             fetch(`/api/package-log/logs?${query.toString()}`)
                 .then(r => r.json())
@@ -1921,7 +1939,8 @@ payload..."></textarea>
                     const current = packageHistorySessions.find(s => String(s.id) === String(data.session_id));
                     const meta = document.getElementById('packageHistoryMeta');
                     if (meta && current) {
-                        meta.textContent = `Selected: ${current.package_id} | Started: ${current.started_label} | Status: ${current.status} | Showing: ${data.rows.length}${keyword ? ` | Filter: ${keyword}` : ''}`;
+                        const filters = [keyword1, keyword2].filter(Boolean).join(' | ');
+                        meta.textContent = `Selected: ${current.package_id} | Started: ${current.started_label} | Status: ${current.status} | Showing: ${data.rows.length}${filters ? ` | Filter: ${filters}` : ''}`;
                     }
                     renderPackageHistoryRows(data.rows || []);
                 })
@@ -2228,6 +2247,25 @@ payload..."></textarea>
                 loadSelectedPackageHistory();
             }
         });
+        document.getElementById('packageHistoryFilterInput2').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                loadSelectedPackageHistory();
+            }
+        });
+        const packageHistoryModal = document.getElementById('packageHistoryModal');
+        const openPackageHistoryBtn = document.getElementById('openPackageHistoryBtn');
+        const closePackageHistoryModal = document.getElementById('closePackageHistoryModal');
+        openPackageHistoryBtn?.addEventListener('click', () => {
+            packageHistoryModal?.classList.remove('hidden');
+            loadPackageHistorySessions();
+        });
+        closePackageHistoryModal?.addEventListener('click', () => {
+            packageHistoryModal?.classList.add('hidden');
+        });
+        packageHistoryModal?.addEventListener('click', (e) => {
+            if (e.target === packageHistoryModal) packageHistoryModal.classList.add('hidden');
+        });
 
         // --- Row Selection for Package Log (click + drag) ---
         let isSelectingRows = false;
@@ -2526,39 +2564,43 @@ def package_log_sessions_api():
 @app.get('/api/package-log/logs')
 def package_log_rows_api():
     session_id = request.args.get('session_id', type=int)
-    keyword = (request.args.get('q') or '').strip().lower()
+    keyword1 = (request.args.get('q1') or request.args.get('q') or '').strip().lower()
+    keyword2 = (request.args.get('q2') or '').strip().lower()
     if not session_id:
         return jsonify({"ok": False, "error": "session_id_required"}), 400
     conn = _get_package_db_connection()
     try:
-        if keyword:
-            rows = conn.execute(
-                """
-                SELECT time_display, device_id, device_name, tag, message, raw_log
-                FROM package_log_entries
-                WHERE session_id = ?
-                  AND (
-                    lower(coalesce(raw_log, '')) LIKE ?
-                    OR lower(coalesce(message, '')) LIKE ?
-                    OR lower(coalesce(tag, '')) LIKE ?
-                    OR lower(coalesce(device_name, '')) LIKE ?
-                  )
-                ORDER BY id ASC
-                LIMIT 2000
-                """,
-                (session_id, f"%{keyword}%", f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT time_display, device_id, device_name, tag, message, raw_log
-                FROM package_log_entries
-                WHERE session_id = ?
-                ORDER BY id ASC
-                LIMIT 2000
-                """,
-                (session_id,),
-            ).fetchall()
+        sql = """
+            SELECT time_display, device_id, device_name, tag, message, raw_log
+            FROM package_log_entries
+            WHERE session_id = ?
+        """
+        params = [session_id]
+
+        def search_clause():
+            return """
+              AND (
+                lower(coalesce(raw_log, '')) LIKE ?
+                OR lower(coalesce(message, '')) LIKE ?
+                OR lower(coalesce(tag, '')) LIKE ?
+                OR lower(coalesce(device_name, '')) LIKE ?
+              )
+            """
+
+        if keyword1:
+            sql += search_clause()
+            like1 = f"%{keyword1}%"
+            params.extend([like1, like1, like1, like1])
+        if keyword2:
+            sql += search_clause()
+            like2 = f"%{keyword2}%"
+            params.extend([like2, like2, like2, like2])
+
+        sql += """
+            ORDER BY id ASC
+            LIMIT 2000
+        """
+        rows = conn.execute(sql, params).fetchall()
         return jsonify({
             "ok": True,
             "session_id": session_id,
