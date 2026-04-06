@@ -592,11 +592,14 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.1.0(1)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.1.0(2)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
+                    <div class="flex items-center gap-2">
                     <button id="restartAppBtn" class="bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Check Update</button>
+                    <button id="manualRestartBtn" class="bg-slate-500 hover:bg-slate-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Restart</button>
+                </div>
                 </div>
                 <div class="flex items-center gap-4">
                     <div class="flex items-center gap-2">
@@ -1161,6 +1164,22 @@ payload..."></textarea>
                 .finally(() => {
                     restartAppBtn.disabled = false;
                     restartAppBtn.textContent = originalText;
+                });
+        });
+
+        const manualRestartBtn = document.getElementById('manualRestartBtn');
+        manualRestartBtn?.addEventListener('click', () => {
+            if (manualRestartBtn.disabled) return;
+            const originalText = manualRestartBtn.textContent;
+            manualRestartBtn.disabled = true;
+            manualRestartBtn.textContent = 'Restarting...';
+            fetch('/restart_app', { method: 'POST' })
+                .catch(err => {
+                    alert('Restart failed: ' + err);
+                })
+                .finally(() => {
+                    manualRestartBtn.disabled = false;
+                    manualRestartBtn.textContent = originalText;
                 });
         });
         
