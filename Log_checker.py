@@ -591,7 +591,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(54)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(55)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -947,35 +947,39 @@ payload..."></textarea>
                         </div>
                         <div>
                             <label class="block text-[11px] font-medium text-gray-700 mb-1">Quick Select:</label>
-                            <div class="grid grid-cols-1 xl:grid-cols-2 gap-x-8 gap-y-1 text-[11px] text-gray-700">
-                                <label class="inline-flex items-center gap-2">
-                                    <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.nonogram">
-                                    <span>NG - com.indiez.nonogram</span>
-                                </label>
-                                <label class="inline-flex items-center gap-2">
-                                    <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.train.miner">
-                                    <span>TM - com.indiez.train.miner</span>
-                                </label>
-                                <label class="inline-flex items-center gap-2">
-                                    <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.idletycoon.horse.racing">
-                                    <span>HR - com.indiez.idletycoon.horse.racing</span>
-                                </label>
-                                <label class="inline-flex items-center gap-2">
-                                    <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.solitaire.food">
-                                    <span>SC - com.indiez.solitaire.food</span>
-                                </label>
-                                <label class="inline-flex items-center gap-2">
-                                    <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.dot.line.puzzle">
-                                    <span>KN - com.nostel.dot.line.puzzle</span>
-                                </label>
-                                <label class="inline-flex items-center gap-2">
-                                    <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.parking.car">
-                                    <span>CP - com.nostel.parking.car</span>
-                                </label>
-                                <label class="inline-flex items-center gap-2">
-                                    <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.jigblock">
-                                    <span>JS - com.nostel.jigblock</span>
-                                </label>
+                            <div class="grid grid-cols-1 xl:grid-cols-2 gap-x-10 gap-y-1 text-[11px] text-gray-700">
+                                <div class="space-y-1">
+                                    <label class="inline-flex items-center gap-2">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.nonogram">
+                                        <span>NG - com.indiez.nonogram</span>
+                                    </label>
+                                    <label class="inline-flex items-center gap-2">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.train.miner">
+                                        <span>TM - com.indiez.train.miner</span>
+                                    </label>
+                                    <label class="inline-flex items-center gap-2">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.idletycoon.horse.racing">
+                                        <span>HR - com.indiez.idletycoon.horse.racing</span>
+                                    </label>
+                                    <label class="inline-flex items-center gap-2">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.solitaire.food">
+                                        <span>SC - com.indiez.solitaire.food</span>
+                                    </label>
+                                </div>
+                                <div class="space-y-1">
+                                    <label class="inline-flex items-center gap-2">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.dot.line.puzzle">
+                                        <span>KN - com.nostel.dot.line.puzzle</span>
+                                    </label>
+                                    <label class="inline-flex items-center gap-2">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.parking.car">
+                                        <span>CP - com.nostel.parking.car</span>
+                                    </label>
+                                    <label class="inline-flex items-center gap-2">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.jigblock">
+                                        <span>JS - com.nostel.jigblock</span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
                         <div>
