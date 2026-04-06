@@ -14,7 +14,9 @@ import os
 import sys
 import shutil
 import logging
+import sqlite3
 from pathlib import Path
+from queue import Empty, Queue
 
 # Khởi tạo ứng dụng Flask và SocketIO
 app = Flask(__name__)
@@ -132,6 +134,16 @@ def _user_data_dir():
     return os.path.join(os.path.expanduser("~"), ".eventinspector")
 
 
+def _package_history_dir():
+    base_dir = _runtime_app_dir()
+    history_dir = os.path.join(base_dir, "package_log_history")
+    os.makedirs(history_dir, exist_ok=True)
+    return history_dir
+
+
+PACKAGE_LOG_DB_PATH = os.path.join(_package_history_dir(), "package_logs.sqlite3")
+
+
 def _normalize_remote_update_config():
     try:
         user_dir = _user_data_dir()
@@ -237,6 +249,8 @@ package_log_cache = deque(maxlen=15000)
 target_package_name = ""
 active_package_pids = {}
 active_logcat_processes = {}
+active_package_log_session_id = None
+package_log_db_queue = Queue()
 
 # 6. Dữ liệu cho Tab Callback & Ads Event
 callback_ad_logs = deque(maxlen=MAX_CALLBACK_AD_LOGS)
@@ -258,6 +272,116 @@ is_paused = False
 lock = threading.Lock()
 incomplete_impression_logs = {} # Buffer cho logs bị ngắt dòng
 adb_error_counter = 0
+
+
+def _get_package_db_connection():
+    conn = sqlite3.connect(PACKAGE_LOG_DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _init_package_log_db():
+    conn = _get_package_db_connection()
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS package_log_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                package_id TEXT NOT NULL,
+                started_at REAL NOT NULL,
+                ended_at REAL,
+                status TEXT NOT NULL DEFAULT 'running'
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS package_log_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                time_display TEXT,
+                device_id TEXT,
+                device_name TEXT,
+                level TEXT,
+                tag TEXT,
+                message TEXT,
+                raw_log TEXT,
+                is_error INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(session_id) REFERENCES package_log_sessions(id)
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_package_log_entries_session ON package_log_entries(session_id, id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_package_log_sessions_started ON package_log_sessions(started_at DESC)")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _start_package_log_session(package_id):
+    conn = _get_package_db_connection()
+    try:
+        cur = conn.execute(
+            "INSERT INTO package_log_sessions (package_id, started_at, status) VALUES (?, ?, 'running')",
+            (package_id, time.time()),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def _finish_package_log_session(session_id):
+    if not session_id:
+        return
+    conn = _get_package_db_connection()
+    try:
+        conn.execute(
+            "UPDATE package_log_sessions SET ended_at = ?, status = 'stopped' WHERE id = ?",
+            (time.time(), session_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _package_log_db_writer():
+    conn = _get_package_db_connection()
+    batch = []
+    last_flush = time.time()
+
+    def flush():
+        nonlocal batch, last_flush
+        if not batch:
+            return
+        conn.executemany(
+            """
+            INSERT INTO package_log_entries
+            (session_id, created_at, time_display, device_id, device_name, level, tag, message, raw_log, is_error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            batch,
+        )
+        conn.commit()
+        batch = []
+        last_flush = time.time()
+
+    try:
+        while True:
+            try:
+                item = package_log_db_queue.get(timeout=0.5)
+                batch.append(item)
+                if len(batch) >= 100:
+                    flush()
+            except Empty:
+                if batch and time.time() - last_flush >= 0.5:
+                    flush()
+    finally:
+        flush()
+        conn.close()
 
 
 # --- REGEX PATTERNS ---
@@ -592,7 +716,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.1.0(2)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.1.0(3)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1046,6 +1170,36 @@ payload..."></textarea>
                                 </tr>
                             </thead>
                             <tbody id="packageLogTableBody" class="divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl shadow-md p-4 mt-4">
+                    <div class="flex flex-col lg:flex-row lg:items-end gap-4 mb-3">
+                        <div class="lg:w-72">
+                            <label for="packageHistorySessionSelect" class="block text-[11px] font-medium text-gray-700 mb-1">Saved Sessions:</label>
+                            <select id="packageHistorySessionSelect" class="w-full p-2 text-[11px] border rounded-md shadow-sm"></select>
+                        </div>
+                        <div class="flex-1">
+                            <label for="packageHistoryFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Keyword Filter:</label>
+                            <input type="text" id="packageHistoryFilterInput" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search full saved log...">
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button id="loadPackageHistoryBtn" class="bg-slate-600 hover:bg-slate-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Load</button>
+                            <button id="refreshPackageSessionsBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold text-xs py-2 px-4 rounded-lg h-9">Refresh Sessions</button>
+                        </div>
+                    </div>
+                    <p id="packageHistoryMeta" class="text-[11px] text-gray-500 mb-2">No session selected.</p>
+                    <div class="overflow-auto border rounded-md" style="height: 32vh;">
+                        <table class="min-w-full bg-white">
+                            <thead class="bg-gray-50 sticky top-0 z-10">
+                                <tr>
+                                    <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Time</th>
+                                    <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Device</th>
+                                    <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Tag</th>
+                                    <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Message</th>
+                                </tr>
+                            </thead>
+                            <tbody id="packageHistoryTableBody" class="divide-y divide-gray-200"></tbody>
                         </table>
                     </div>
                 </div>
@@ -1602,6 +1756,7 @@ payload..."></textarea>
         let lastPackageFilterSignature = '';
         let lastPackageRenderedCount = 0;
         let lastPackageFirstRowKey = '';
+        let packageHistorySessions = [];
 
         function getPackageRowKey(l) {
             const msgText = (l.message || l.log || '');
@@ -1676,6 +1831,91 @@ payload..."></textarea>
             lastPackageLogs = logs || [];
             renderPackageLogTable();
         });
+
+        function renderPackageHistorySessions(payload) {
+            const select = document.getElementById('packageHistorySessionSelect');
+            const meta = document.getElementById('packageHistoryMeta');
+            if (!select || !meta) return;
+            const prev = select.value;
+            packageHistorySessions = payload.sessions || [];
+            select.innerHTML = '';
+            if (packageHistorySessions.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'No saved sessions';
+                select.appendChild(opt);
+                meta.textContent = 'No saved package-log sessions yet.';
+                document.getElementById('packageHistoryTableBody').innerHTML = '';
+                return;
+            }
+            packageHistorySessions.forEach((s, idx) => {
+                const opt = document.createElement('option');
+                opt.value = String(s.id);
+                opt.textContent = `#${s.id} - ${s.package_id} - ${s.started_label}`;
+                if ((!prev && idx === 0) || prev === String(s.id)) opt.selected = true;
+                select.appendChild(opt);
+            });
+            const current = packageHistorySessions.find(s => String(s.id) === select.value) || packageHistorySessions[0];
+            if (current) {
+                meta.textContent = `Selected: ${current.package_id} | Started: ${current.started_label} | Status: ${current.status} | Rows: ${current.row_count}`;
+            }
+        }
+
+        function renderPackageHistoryRows(rows) {
+            const tbody = document.getElementById('packageHistoryTableBody');
+            if (!tbody) return;
+            if (!rows || rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="py-3 px-2 text-xs text-gray-500">No saved logs found for this filter.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = rows.map((row) => `
+                <tr>
+                    <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.time_display || '')}</td>
+                    <td class="py-2 px-2 text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.device_name || row.device_id || '')}</td>
+                    <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.tag || '')}</td>
+                    <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-pre-wrap break-all">${escapeHTML(row.raw_log || row.message || '')}</td>
+                </tr>
+            `).join('');
+        }
+
+        function loadPackageHistorySessions() {
+            fetch('/api/package-log/sessions')
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.ok) throw new Error(data.error || 'failed_to_load_sessions');
+                    renderPackageHistorySessions(data);
+                })
+                .catch(err => {
+                    document.getElementById('packageHistoryMeta').textContent = `Failed to load sessions: ${err}`;
+                });
+        }
+
+        function loadSelectedPackageHistory() {
+            const select = document.getElementById('packageHistorySessionSelect');
+            const keyword = document.getElementById('packageHistoryFilterInput')?.value || '';
+            if (!select || !select.value) {
+                renderPackageHistoryRows([]);
+                return;
+            }
+            const query = new URLSearchParams({
+                session_id: select.value,
+                q: keyword,
+            });
+            fetch(`/api/package-log/logs?${query.toString()}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.ok) throw new Error(data.error || 'failed_to_load_logs');
+                    const current = packageHistorySessions.find(s => String(s.id) === String(data.session_id));
+                    const meta = document.getElementById('packageHistoryMeta');
+                    if (meta && current) {
+                        meta.textContent = `Selected: ${current.package_id} | Started: ${current.started_label} | Status: ${current.status} | Showing: ${data.rows.length}${keyword ? ` | Filter: ${keyword}` : ''}`;
+                    }
+                    renderPackageHistoryRows(data.rows || []);
+                })
+                .catch(err => {
+                    document.getElementById('packageHistoryMeta').textContent = `Failed to load saved logs: ${err}`;
+                });
+        }
 
         // --- JSON Modal Handler ---
         document.body.addEventListener('click', (e) => {
@@ -1966,6 +2206,15 @@ payload..."></textarea>
             if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(true); }
         });
         document.getElementById('showErrorsOnly').addEventListener('change', () => renderPackageLogTable(true));
+        document.getElementById('loadPackageHistoryBtn').addEventListener('click', loadSelectedPackageHistory);
+        document.getElementById('refreshPackageSessionsBtn').addEventListener('click', loadPackageHistorySessions);
+        document.getElementById('packageHistorySessionSelect').addEventListener('change', loadSelectedPackageHistory);
+        document.getElementById('packageHistoryFilterInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                loadSelectedPackageHistory();
+            }
+        });
 
         // --- Row Selection for Package Log (click + drag) ---
         let isSelectingRows = false;
@@ -2140,6 +2389,8 @@ payload..."></textarea>
             }
             setPackageControlsEnabled(true);
         });
+
+        loadPackageHistorySessions();
         
     </script>
 </body>
@@ -2226,6 +2477,82 @@ def restart_app():
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)})
     os._exit(0)
+
+
+@app.get('/api/package-log/sessions')
+def package_log_sessions_api():
+    conn = _get_package_db_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT s.id, s.package_id, s.started_at, s.ended_at, s.status, COUNT(e.id) AS row_count
+            FROM package_log_sessions s
+            LEFT JOIN package_log_entries e ON e.session_id = s.id
+            GROUP BY s.id
+            ORDER BY s.id DESC
+            LIMIT 50
+            """
+        ).fetchall()
+        sessions = []
+        for row in rows:
+            started_label = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row["started_at"])) if row["started_at"] else ""
+            sessions.append({
+                "id": row["id"],
+                "package_id": row["package_id"],
+                "started_at": row["started_at"],
+                "ended_at": row["ended_at"],
+                "started_label": started_label,
+                "status": row["status"],
+                "row_count": row["row_count"] or 0,
+            })
+        return jsonify({"ok": True, "sessions": sessions})
+    finally:
+        conn.close()
+
+
+@app.get('/api/package-log/logs')
+def package_log_rows_api():
+    session_id = request.args.get('session_id', type=int)
+    keyword = (request.args.get('q') or '').strip().lower()
+    if not session_id:
+        return jsonify({"ok": False, "error": "session_id_required"}), 400
+    conn = _get_package_db_connection()
+    try:
+        if keyword:
+            rows = conn.execute(
+                """
+                SELECT time_display, device_id, device_name, tag, message, raw_log
+                FROM package_log_entries
+                WHERE session_id = ?
+                  AND (
+                    lower(coalesce(raw_log, '')) LIKE ?
+                    OR lower(coalesce(message, '')) LIKE ?
+                    OR lower(coalesce(tag, '')) LIKE ?
+                    OR lower(coalesce(device_name, '')) LIKE ?
+                  )
+                ORDER BY id ASC
+                LIMIT 2000
+                """,
+                (session_id, f"%{keyword}%", f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT time_display, device_id, device_name, tag, message, raw_log
+                FROM package_log_entries
+                WHERE session_id = ?
+                ORDER BY id ASC
+                LIMIT 2000
+                """,
+                (session_id,),
+            ).fetchall()
+        return jsonify({
+            "ok": True,
+            "session_id": session_id,
+            "rows": [dict(r) for r in rows],
+        })
+    finally:
+        conn.close()
 
 # --- BACKEND LOGIC ---
 
@@ -2865,6 +3192,23 @@ def package_log_consumer(device_id, logcat_process):
                         'timestamp': time.time(),
                         'is_error': is_error
                     })
+                    session_id = active_package_log_session_id
+                if session_id:
+                    try:
+                        package_log_db_queue.put_nowait((
+                            session_id,
+                            time.time(),
+                            time_display or time_str,
+                            device_id,
+                            get_device_name(device_id),
+                            level,
+                            tag,
+                            message,
+                            line.strip(),
+                            1 if is_error else 0,
+                        ))
+                    except Exception:
+                        pass
     except: pass
 
 def package_pid_monitor():
@@ -3071,9 +3415,18 @@ def sdk_check(data):
 
 @socketio.on('start_package_log')
 def spl(d):
-    global target_package_name
+    global target_package_name, active_package_log_session_id
     pid = d.get('package_id', '').strip()
-    with lock: target_package_name = pid; package_log_cache.clear(); socketio.emit('package_log_cache', [])
+    with lock:
+        if active_package_log_session_id:
+            _finish_package_log_session(active_package_log_session_id)
+            active_package_log_session_id = None
+        target_package_name = pid
+        if pid:
+            active_package_log_session_id = _start_package_log_session(pid)
+        package_log_cache.clear()
+        socketio.emit('package_log_cache', [])
+    socketio.emit('package_log_cache', [])
 
 @socketio.on('refresh_request')
 def refresh():
@@ -3098,9 +3451,11 @@ def connect():
 def run_server(host="0.0.0.0", port=5001):
     _normalize_remote_update_config()
     _set_active_profile()
+    _init_package_log_db()
     threading.Thread(target=device_manager, daemon=True).start()
     threading.Thread(target=package_log_emitter, daemon=True).start()
     threading.Thread(target=package_pid_monitor, daemon=True).start()
+    threading.Thread(target=_package_log_db_writer, daemon=True).start()
 
     def safe_print(msg):
         try:
