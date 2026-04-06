@@ -135,10 +135,23 @@ def _user_data_dir():
 
 
 def _package_history_dir():
-    base_dir = _runtime_app_dir()
-    history_dir = os.path.join(base_dir, "package_log_history")
-    os.makedirs(history_dir, exist_ok=True)
-    return history_dir
+    candidates = [
+        os.path.join(_runtime_app_dir(), "package_log_history"),
+        os.path.join(_user_data_dir(), "package_log_history"),
+    ]
+    for history_dir in candidates:
+        try:
+            os.makedirs(history_dir, exist_ok=True)
+            test_file = os.path.join(history_dir, ".write_test")
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("ok")
+            os.remove(test_file)
+            return history_dir
+        except Exception:
+            continue
+    fallback = os.path.join(_user_data_dir(), "package_log_history")
+    os.makedirs(fallback, exist_ok=True)
+    return fallback
 
 
 PACKAGE_LOG_DB_PATH = os.path.join(_package_history_dir(), "package_logs.sqlite3")
@@ -716,7 +729,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.1.0(3)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.1.0(4)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
