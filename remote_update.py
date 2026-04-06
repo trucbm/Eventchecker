@@ -8,7 +8,11 @@ import sys
 import requests
 
 APP_NAME = "EventInspector"
-DEFAULT_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates/remote_manifest.json"
+CHANNEL_ID = "v210"
+CONFIG_FILENAME = "remote_update_config_v210.json"
+STATE_FILENAME = "update_state_v210.json"
+UPDATES_DIRNAME = "updates_v210"
+DEFAULT_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_1/remote_manifest.json"
 
 
 def _user_data_dir():
@@ -23,9 +27,9 @@ def _user_data_dir():
 def _config_paths():
     user_dir = _user_data_dir()
     return [
-        os.getenv("EVENTINSPECTOR_UPDATE_CONFIG"),
-        os.path.join(user_dir, "remote_update_config.json"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "remote_update_config.json"),
+        os.getenv("EVENTINSPECTOR_UPDATE_CONFIG_V210"),
+        os.path.join(user_dir, CONFIG_FILENAME),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME),
     ]
 
 
@@ -52,7 +56,7 @@ def _load_config():
 def _ensure_user_config_template():
     user_dir = _user_data_dir()
     os.makedirs(user_dir, exist_ok=True)
-    cfg_path = os.path.join(user_dir, "remote_update_config.json")
+    cfg_path = os.path.join(user_dir, CONFIG_FILENAME)
     desired = {
         "enabled": True,
         "manifest_url": DEFAULT_MANIFEST_URL,
@@ -73,7 +77,7 @@ def _ensure_user_config_template():
 
 
 def _state_path():
-    return os.path.join(_user_data_dir(), "update_state.json")
+    return os.path.join(_user_data_dir(), STATE_FILENAME)
 
 
 def _load_state():
@@ -116,7 +120,25 @@ def _download(url, timeout):
     return r.content
 
 
-def check_and_prepare_updates():
+def load_prepared_update_dir():
+    _ensure_user_config_template()
+    cfg = _load_config()
+
+    if not cfg.get("enabled"):
+        return None
+
+    state = _load_state()
+    update_dir = state.get("update_dir")
+    expected_files = state.get("files") or []
+    if not update_dir or not os.path.isdir(update_dir):
+        return None
+    for rel_path in expected_files:
+        if rel_path and not os.path.exists(os.path.join(update_dir, rel_path)):
+            return None
+    return update_dir
+
+
+def check_for_updates():
     _ensure_user_config_template()
     cfg = _load_config()
 
@@ -134,10 +156,10 @@ def check_and_prepare_updates():
         manifest_bytes = _download(manifest_url, timeout)
         manifest = json.loads(manifest_bytes.decode("utf-8"))
     except Exception:
-        return state.get("update_dir")
+        return {"ok": False, "status": "error", "error": "manifest_download_failed", "update_dir": load_prepared_update_dir()}
 
-    update_dir = os.path.join(_user_data_dir(), "updates")
-    tmp_update_dir = os.path.join(_user_data_dir(), "updates_tmp")
+    update_dir = os.path.join(_user_data_dir(), UPDATES_DIRNAME)
+    tmp_update_dir = os.path.join(_user_data_dir(), f"{UPDATES_DIRNAME}_tmp")
     os.makedirs(tmp_update_dir, exist_ok=True)
 
     state_version = state.get("version")
@@ -154,9 +176,11 @@ def check_and_prepare_updates():
             "last_check": time.time(),
             "version": manifest_version,
             "update_dir": existing_update_dir,
+            "manifest_url": manifest_url,
+            "files": [item.get("path") for item in manifest_files if item.get("path")],
         })
         _save_state(state)
-        return existing_update_dir
+        return {"ok": True, "status": "up_to_date", "version": manifest_version, "update_dir": existing_update_dir}
 
     ok = True
     for item in manifest_files:
@@ -208,14 +232,23 @@ def check_and_prepare_updates():
                     dst = os.path.join(dest_root, name)
                     os.replace(src, dst)
         except Exception:
-            return state.get("update_dir")
+            return {"ok": False, "status": "error", "error": "replace_failed", "update_dir": load_prepared_update_dir()}
 
         state.update({
             "last_check": time.time(),
             "version": manifest.get("version"),
             "update_dir": update_dir,
+            "manifest_url": manifest_url,
+            "files": [item.get("path") for item in manifest_files if item.get("path")],
         })
         _save_state(state)
-        return update_dir
+        return {"ok": True, "status": "updated", "version": manifest.get("version"), "update_dir": update_dir}
+
+    return {"ok": False, "status": "error", "error": "download_failed", "update_dir": load_prepared_update_dir()}
+
+
+def check_and_prepare_updates():
+    result = check_for_updates()
+    return result.get("update_dir")
 
     return state.get("update_dir")

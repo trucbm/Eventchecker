@@ -60,17 +60,17 @@ def main():
     os.environ['EVENTINSPECTOR_RESTART_CMD'] = restart_cmd
     os.environ['EVENTINSPECTOR_RESTART_ARGS'] = restart_args
 
-    # Try remote update before importing app logic
+    # Load any already-downloaded update, but do not check remote on launch.
     if remote_update:
         try:
-            update_dir = remote_update.check_and_prepare_updates()
+            update_dir = remote_update.load_prepared_update_dir()
             if update_dir:
                 os.environ["EVENTINSPECTOR_UPDATE_DIR"] = update_dir
                 if update_dir not in sys.path:
                     sys.path.insert(0, update_dir)
-                logging.info("Loaded updates from: %s", update_dir)
+                logging.info("Loaded prepared update from: %s", update_dir)
         except Exception:
-            logging.exception("Remote update failed:\n%s", traceback.format_exc())
+            logging.exception("Prepared update load failed:\n%s", traceback.format_exc())
 
     from Log_checker import run_server
 
