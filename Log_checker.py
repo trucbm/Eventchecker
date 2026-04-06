@@ -591,7 +591,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(52)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(53)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -950,19 +950,31 @@ payload..."></textarea>
                             <div class="grid grid-cols-1 gap-1 text-xs text-gray-700">
                                 <label class="inline-flex items-center gap-2">
                                     <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.nonogram">
-                                    <span>NG - com.indiez.nonogram</span>
+                                    <span>NG</span>
                                 </label>
                                 <label class="inline-flex items-center gap-2">
                                     <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.train.miner">
-                                    <span>TM - com.indiez.train.miner</span>
+                                    <span>TM</span>
                                 </label>
                                 <label class="inline-flex items-center gap-2">
                                     <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.idletycoon.horse.racing">
-                                    <span>HR - com.indiez.idletycoon.horse.racing</span>
+                                    <span>HR</span>
                                 </label>
                                 <label class="inline-flex items-center gap-2">
                                     <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.solitaire.food">
-                                    <span>SC - com.indiez.solitaire.food</span>
+                                    <span>SC</span>
+                                </label>
+                                <label class="inline-flex items-center gap-2">
+                                    <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.dot.line.puzzle">
+                                    <span>KN</span>
+                                </label>
+                                <label class="inline-flex items-center gap-2">
+                                    <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.parking.car">
+                                    <span>CP</span>
+                                </label>
+                                <label class="inline-flex items-center gap-2">
+                                    <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.jigblock">
+                                    <span>JS</span>
                                 </label>
                             </div>
                         </div>
