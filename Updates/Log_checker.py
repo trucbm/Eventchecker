@@ -14,7 +14,9 @@ import os
 import sys
 import shutil
 import logging
+import sqlite3
 from pathlib import Path
+from queue import Empty, Queue
 
 # Khởi tạo ứng dụng Flask và SocketIO
 app = Flask(__name__)
@@ -95,7 +97,8 @@ def _resolve_default_params_path():
 
 DEFAULT_PARAMS_XLSX = _resolve_default_params_path()
 DEFAULT_PARAM_FILL = "FFFCE5CD"
-DEFAULT_REMOTE_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates/remote_manifest.json"
+REMOTE_UPDATE_CONFIG_FILENAME = "remote_update_config_v210.json"
+DEFAULT_REMOTE_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_1/remote_manifest.json"
 
 
 def _runtime_app_dir():
@@ -131,11 +134,34 @@ def _user_data_dir():
     return os.path.join(os.path.expanduser("~"), ".eventinspector")
 
 
+def _package_history_dir():
+    candidates = [
+        os.path.join(_runtime_app_dir(), "package_log_history"),
+        os.path.join(_user_data_dir(), "package_log_history"),
+    ]
+    for history_dir in candidates:
+        try:
+            os.makedirs(history_dir, exist_ok=True)
+            test_file = os.path.join(history_dir, ".write_test")
+            with open(test_file, "w", encoding="utf-8") as f:
+                f.write("ok")
+            os.remove(test_file)
+            return history_dir
+        except Exception:
+            continue
+    fallback = os.path.join(_user_data_dir(), "package_log_history")
+    os.makedirs(fallback, exist_ok=True)
+    return fallback
+
+
+PACKAGE_LOG_DB_PATH = os.path.join(_package_history_dir(), "package_logs.sqlite3")
+
+
 def _normalize_remote_update_config():
     try:
         user_dir = _user_data_dir()
         os.makedirs(user_dir, exist_ok=True)
-        cfg_path = os.path.join(user_dir, "remote_update_config.json")
+        cfg_path = os.path.join(user_dir, REMOTE_UPDATE_CONFIG_FILENAME)
         cfg = {}
         if os.path.exists(cfg_path):
             try:
@@ -236,6 +262,8 @@ package_log_cache = deque(maxlen=15000)
 target_package_name = ""
 active_package_pids = {}
 active_logcat_processes = {}
+active_package_log_session_id = None
+package_log_db_queue = Queue()
 
 # 6. Dữ liệu cho Tab Callback & Ads Event
 callback_ad_logs = deque(maxlen=MAX_CALLBACK_AD_LOGS)
@@ -257,6 +285,116 @@ is_paused = False
 lock = threading.Lock()
 incomplete_impression_logs = {} # Buffer cho logs bị ngắt dòng
 adb_error_counter = 0
+
+
+def _get_package_db_connection():
+    conn = sqlite3.connect(PACKAGE_LOG_DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _init_package_log_db():
+    conn = _get_package_db_connection()
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS package_log_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                package_id TEXT NOT NULL,
+                started_at REAL NOT NULL,
+                ended_at REAL,
+                status TEXT NOT NULL DEFAULT 'running'
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS package_log_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL,
+                created_at REAL NOT NULL,
+                time_display TEXT,
+                device_id TEXT,
+                device_name TEXT,
+                level TEXT,
+                tag TEXT,
+                message TEXT,
+                raw_log TEXT,
+                is_error INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(session_id) REFERENCES package_log_sessions(id)
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_package_log_entries_session ON package_log_entries(session_id, id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_package_log_sessions_started ON package_log_sessions(started_at DESC)")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _start_package_log_session(package_id):
+    conn = _get_package_db_connection()
+    try:
+        cur = conn.execute(
+            "INSERT INTO package_log_sessions (package_id, started_at, status) VALUES (?, ?, 'running')",
+            (package_id, time.time()),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def _finish_package_log_session(session_id):
+    if not session_id:
+        return
+    conn = _get_package_db_connection()
+    try:
+        conn.execute(
+            "UPDATE package_log_sessions SET ended_at = ?, status = 'stopped' WHERE id = ?",
+            (time.time(), session_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _package_log_db_writer():
+    conn = _get_package_db_connection()
+    batch = []
+    last_flush = time.time()
+
+    def flush():
+        nonlocal batch, last_flush
+        if not batch:
+            return
+        conn.executemany(
+            """
+            INSERT INTO package_log_entries
+            (session_id, created_at, time_display, device_id, device_name, level, tag, message, raw_log, is_error)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            batch,
+        )
+        conn.commit()
+        batch = []
+        last_flush = time.time()
+
+    try:
+        while True:
+            try:
+                item = package_log_db_queue.get(timeout=0.5)
+                batch.append(item)
+                if len(batch) >= 100:
+                    flush()
+            except Empty:
+                if batch and time.time() - last_flush >= 0.5:
+                    flush()
+    finally:
+        flush()
+        conn.close()
 
 
 # --- REGEX PATTERNS ---
@@ -591,11 +729,14 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(58)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.1.0(9)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
-                    <button id="restartAppBtn" class="bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Refresh</button>
+                    <div class="flex items-center gap-2">
+                    <button id="restartAppBtn" class="bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Check Update</button>
+                    <button id="manualRestartBtn" class="bg-slate-500 hover:bg-slate-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Restart</button>
+                </div>
                 </div>
                 <div class="flex items-center gap-4">
                     <div class="flex items-center gap-2">
@@ -936,22 +1077,13 @@ payload..."></textarea>
             <!-- TAB 8: Package -->
             <div id="tabContentPackage" class="hidden">
                  <div class="bg-white rounded-xl shadow-md p-4 mb-4">
-                     <div class="grid grid-cols-1 lg:grid-cols-[0.9fr_1.5fr_1.6fr] gap-4 items-start">
+                     <div class="grid grid-cols-1 lg:grid-cols-[0.9fr_1.5fr] gap-4 items-start">
                         <div class="max-w-md">
                             <label for="packageIdInput" class="block text-[11px] font-medium text-gray-700 mb-1">Package ID:</label>
                             <input type="text" id="packageIdInput" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="com.example.app">
-                            <div class="flex justify-center mt-3">
+                            <div class="flex justify-center items-center gap-2 mt-3">
                                 <button id="startPackageLogBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Start</button>
-                            </div>
-                            <div class="flex items-center mt-4 space-x-4">
-                                <div class="flex items-center">
-                                    <input id="showErrorsOnly" type="checkbox" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
-                                    <label for="showErrorsOnly" class="ml-2 block text-xs text-gray-900">Show errors only</label>
-                                </div>
-                                <div class="flex items-center">
-                                    <input id="autoScroll" type="checkbox" checked class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
-                                    <label for="autoScroll" class="ml-2 block text-xs text-gray-900">Auto-scroll</label>
-                                </div>
+                                <button id="openPackageHistoryBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-slate-600 hover:bg-slate-700 text-white h-9">Recorded Log</button>
                             </div>
                         </div>
                         <div>
@@ -991,58 +1123,6 @@ payload..."></textarea>
                                 </div>
                             </div>
                         </div>
-                        <div>
-                            <div class="grid grid-cols-2 gap-3 items-start">
-                                <div>
-                                    <label for="packageTagFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Tag Filter:</label>
-                                    <input type="text" id="packageTagFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Tag...">
-                                    <div class="mt-2 grid grid-cols-2 gap-4 text-xs text-gray-700">
-                                        <label class="inline-flex items-center gap-2">
-                                            <input type="radio" name="tagQuickFilter" value="" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                            <span>All</span>
-                                        </label>
-                                        <label class="inline-flex items-center gap-2">
-                                            <input type="radio" name="tagQuickFilter" value="appsflyer" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                            <span>Appsflyer</span>
-                                        </label>
-                                        <label class="inline-flex items-center gap-2">
-                                            <input type="radio" name="tagQuickFilter" value="integrationhelper" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                            <span>Integrationhelper</span>
-                                        </label>
-                                        <label class="inline-flex items-center gap-2">
-                                            <input type="radio" name="tagQuickFilter" value="appmetrica" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                            <span>Appmetrica</span>
-                                        </label>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label for="packageFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 1:</label>
-                                    <input type="text" id="packageFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 1...">
-                                    <div class="mt-2">
-                                        <label for="packageFilterInput2" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 2:</label>
-                                        <input type="text" id="packageFilterInput2" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 2...">
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div>
-                             <button id="copyPackageBtn" class="hidden text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-blue-500 hover:bg-blue-600 text-white">Copy Selected</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="bg-white rounded-xl shadow-md p-4">
-                    <h2 class="text-lg font-semibold mb-2">Package Log Stream</h2>
-                    <div id="packageLogContainer" class="overflow-auto overflow-x-auto" style="height: 50vh;">
-                        <table class="min-w-full bg-white">
-                           <thead class="bg-gray-50 sticky top-0 z-10">
-                                <tr>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b time-header resizable col-time">Time<div class="resizer" data-col="time"></div></th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 pr-1 pl-2 border-b tag-header resizable col-tag">Tag<div class="resizer" data-col="tag"></div></th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 pl-1 pr-3 border-b resizable col-message">Message<div class="resizer" data-col="message"></div></th>
-                                </tr>
-                            </thead>
-                            <tbody id="packageLogTableBody" class="divide-y divide-gray-200"></tbody>
-                        </table>
                     </div>
                 </div>
             </div>
@@ -1059,6 +1139,123 @@ payload..."></textarea>
             </div>
             <div class="flex-grow overflow-auto bg-gray-800 text-white p-4 rounded-md">
                 <pre><code id="jsonContent"></code></pre>
+            </div>
+        </div>
+    </div>
+
+    <div id="packageLiveModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 hidden">
+        <div class="bg-white rounded-xl shadow-lg p-6 w-[92vw] h-[86vh] flex flex-col">
+            <div class="flex justify-between items-center border-b pb-3 mb-4">
+                <h2 class="text-xl font-bold text-gray-800">Package Log Stream</h2>
+                <div class="flex items-center gap-2">
+                    <button id="copyPackageBtn" class="hidden text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-blue-500 hover:bg-blue-600 text-white">Copy Selected</button>
+                    <button id="pausePackageLogBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-yellow-500 hover:bg-yellow-600 text-white">Pause</button>
+                    <button id="stopPackageLogBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-red-500 hover:bg-red-600 text-white">Stop</button>
+                    <button id="closePackageLiveModal" class="text-gray-500 hover:text-gray-800 text-2xl font-bold">&times;</button>
+                </div>
+            </div>
+            <div class="flex flex-col gap-4">
+                <div class="grid grid-cols-1 xl:grid-cols-[1.2fr_1.4fr_auto] gap-4 items-start">
+                    <div>
+                        <label for="packageTagFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Tag Filter:</label>
+                        <input type="text" id="packageTagFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Tag...">
+                        <div class="mt-2 grid grid-cols-2 gap-4 text-xs text-gray-700">
+                            <label class="inline-flex items-center gap-2">
+                                <input type="radio" name="tagQuickFilter" value="" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                <span>All</span>
+                            </label>
+                            <label class="inline-flex items-center gap-2">
+                                <input type="radio" name="tagQuickFilter" value="appsflyer" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                <span>Appsflyer</span>
+                            </label>
+                            <label class="inline-flex items-center gap-2">
+                                <input type="radio" name="tagQuickFilter" value="integrationhelper" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                <span>Integrationhelper</span>
+                            </label>
+                            <label class="inline-flex items-center gap-2">
+                                <input type="radio" name="tagQuickFilter" value="appmetrica" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                <span>Appmetrica</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label for="packageFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 1:</label>
+                            <input type="text" id="packageFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 1...">
+                        </div>
+                        <div>
+                            <label for="packageFilterInput2" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 2:</label>
+                            <input type="text" id="packageFilterInput2" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 2...">
+                        </div>
+                    </div>
+                    <div class="flex flex-col gap-3 pt-5 text-xs text-gray-900">
+                        <label class="inline-flex items-center">
+                            <input id="showErrorsOnly" type="checkbox" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                            <span class="ml-2">Show errors only</span>
+                        </label>
+                        <label class="inline-flex items-center">
+                            <input id="autoScroll" type="checkbox" checked class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                            <span class="ml-2">Auto-scroll</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div id="packageLogContainer" class="overflow-auto overflow-x-auto mt-4 border rounded-md flex-1">
+                <table class="min-w-full bg-white">
+                   <thead class="bg-gray-50 sticky top-0 z-10">
+                        <tr>
+                            <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b time-header resizable col-time">Time<div class="resizer" data-col="time"></div></th>
+                            <th class="text-left text-sm font-semibold text-gray-600 py-2 pr-1 pl-2 border-b tag-header resizable col-tag">Tag<div class="resizer" data-col="tag"></div></th>
+                            <th class="text-left text-sm font-semibold text-gray-600 py-2 pl-1 pr-3 border-b resizable col-message">Message<div class="resizer" data-col="message"></div></th>
+                        </tr>
+                    </thead>
+                    <tbody id="packageLogTableBody" class="divide-y divide-gray-200"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="packageHistoryModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 hidden">
+        <div class="bg-white rounded-xl shadow-lg p-6 w-[88vw] h-[82vh] flex flex-col">
+            <div class="flex justify-between items-center border-b pb-3 mb-4">
+                <h2 class="text-xl font-bold text-gray-800">Recorded Package Logs</h2>
+                <button id="closePackageHistoryModal" class="text-gray-500 hover:text-gray-800 text-2xl font-bold">&times;</button>
+            </div>
+            <div class="flex flex-col gap-4">
+                <div class="flex flex-col xl:flex-row xl:items-end gap-4">
+                    <div class="xl:w-72">
+                        <label for="packageHistorySessionSelect" class="block text-[11px] font-medium text-gray-700 mb-1">Saved Sessions:</label>
+                        <select id="packageHistorySessionSelect" class="w-full p-2 text-[11px] border rounded-md shadow-sm"></select>
+                    </div>
+                    <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label for="packageHistoryFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 1:</label>
+                            <input type="text" id="packageHistoryFilterInput" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search saved log text 1...">
+                        </div>
+                        <div>
+                            <label for="packageHistoryFilterInput2" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 2:</label>
+                            <input type="text" id="packageHistoryFilterInput2" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search saved log text 2...">
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button id="loadPackageHistoryBtn" class="bg-slate-600 hover:bg-slate-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Load</button>
+                        <button id="refreshPackageSessionsBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold text-xs py-2 px-4 rounded-lg h-9">Refresh Sessions</button>
+                    </div>
+                </div>
+                <p id="packageHistoryMeta" class="text-[11px] text-gray-500">No session selected.</p>
+            </div>
+            <div class="overflow-auto border rounded-md mt-3 flex-1">
+                <table class="min-w-full bg-white">
+                    <thead class="bg-gray-50 sticky top-0 z-10">
+                        <tr>
+                            <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Time</th>
+                            <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Device</th>
+                            <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Tag</th>
+                            <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Message</th>
+                        </tr>
+                    </thead>
+                    <tbody id="packageHistoryTableBody" class="divide-y divide-gray-200"></tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -1135,9 +1332,48 @@ payload..."></textarea>
         });
 
         restartAppBtn?.addEventListener('click', () => {
-            if (confirm('Restart app now to check for updates?')) {
-                fetch('/restart_app', { method: 'POST' });
-            }
+            if (restartAppBtn.disabled) return;
+            const originalText = restartAppBtn.textContent;
+            restartAppBtn.disabled = true;
+            restartAppBtn.textContent = 'Checking...';
+            fetch('/check_update', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.status === 'updated') {
+                        restartAppBtn.textContent = 'Restarting...';
+                        return fetch('/restart_app', { method: 'POST' });
+                    }
+                    if (data.status === 'up_to_date') {
+                        alert('Already up to date.');
+                    } else if (data.error) {
+                        alert('Update check failed: ' + data.error);
+                    } else {
+                        alert('Update check failed.');
+                    }
+                })
+                .catch(err => {
+                    alert('Update check failed: ' + err);
+                })
+                .finally(() => {
+                    restartAppBtn.disabled = false;
+                    restartAppBtn.textContent = originalText;
+                });
+        });
+
+        const manualRestartBtn = document.getElementById('manualRestartBtn');
+        manualRestartBtn?.addEventListener('click', () => {
+            if (manualRestartBtn.disabled) return;
+            const originalText = manualRestartBtn.textContent;
+            manualRestartBtn.disabled = true;
+            manualRestartBtn.textContent = 'Restarting...';
+            fetch('/restart_app', { method: 'POST' })
+                .catch(err => {
+                    alert('Restart failed: ' + err);
+                })
+                .finally(() => {
+                    manualRestartBtn.disabled = false;
+                    manualRestartBtn.textContent = originalText;
+                });
         });
         
         // --- Recording Logic (Updated for separate tabs) ---
@@ -1555,14 +1791,38 @@ payload..."></textarea>
         });
 
         let lastPackageLogs = [];
+        let packageLiveVisibleLogs = [];
+        let packageLivePaused = false;
         let selectedPackageRowKeys = new Set();
-        let lastPackageFilterSignature = '';
-        let lastPackageRenderedCount = 0;
-        let lastPackageFirstRowKey = '';
+        let selectedPackageHistoryRowKeys = new Set();
+        let packageHistorySessions = [];
+        let packageHistoryRowsCache = [];
+        let activeLogSelectionSource = 'live';
+        let isSelectingRows = false;
+        let dragStartIndex = null;
+
+        const packageLiveModal = document.getElementById('packageLiveModal');
+        const closePackageLiveModal = document.getElementById('closePackageLiveModal');
+        const pausePackageLogBtn = document.getElementById('pausePackageLogBtn');
+        const stopPackageLogBtn = document.getElementById('stopPackageLogBtn');
+        const copyPackageBtn = document.getElementById('copyPackageBtn');
+        const copyPackageHistoryBtn = document.getElementById('copyPackageHistoryBtn');
+        const packageHistoryTableBody = document.getElementById('packageHistoryTableBody');
+
+        function getPackageRowKeyFromValues(timeValue, tagValue, messageValue) {
+            return `${timeValue || ''}||${tagValue || ''}||${messageValue || ''}`;
+        }
 
         function getPackageRowKey(l) {
-            const msgText = (l.message || l.log || '');
-            return `${l.time_display || l.time || ''}||${l.tag || ''}||${msgText}`;
+            const msgText = (l.raw_log || l.message || l.log || '');
+            return getPackageRowKeyFromValues(l.time_display || l.time || '', l.tag || '', msgText);
+        }
+
+        function refreshPackageCopyButtons() {
+            const liveCount = selectedPackageRowKeys.size;
+            const historyCount = selectedPackageHistoryRowKeys.size;
+            if (copyPackageBtn) copyPackageBtn.classList.toggle('hidden', liveCount === 0);
+            if (copyPackageHistoryBtn) copyPackageHistoryBtn.classList.toggle('hidden', historyCount === 0);
         }
 
         function getPackageFilterState() {
@@ -1580,7 +1840,7 @@ payload..."></textarea>
             return logs.filter(l => {
                 if (state.selectedDevice !== 'all' && l.device_id !== state.selectedDevice) return false;
                 if (state.errorsOnly && !l.is_error) return false;
-                const messageHaystack = `${l.message || ''}`.toLowerCase();
+                const messageHaystack = `${l.message || l.raw_log || ''}`.toLowerCase();
                 const tagHaystack = `${l.tag || ''}`.toLowerCase();
                 if (state.quickTag && !tagHaystack.includes(state.quickTag)) return false;
                 if (state.tagFilter && !tagHaystack.includes(state.tagFilter)) return false;
@@ -1591,7 +1851,7 @@ payload..."></textarea>
         }
 
         function packageRowHtml(l, idx) {
-            const msgText = (l.message || l.log || '');
+            const msgText = (l.message || l.raw_log || l.log || '');
             const isErrorLevel = (l.level === 'E' || l.level === 'F');
             const rowClass = isErrorLevel ? 'text-red-500' : '';
             const msgClass = isErrorLevel ? 'text-red-500' : '';
@@ -1600,40 +1860,155 @@ payload..."></textarea>
             return `<tr class="package-log-row hover:bg-gray-50 ${rowClass} ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${idx}"><td class="py-2 px-2 font-mono text-xs time-cell col-time">${escapeHTML(l.time_display || l.time || '')}</td><td class="py-2 pr-1 pl-2 font-mono text-xs tag-cell col-tag" title="${escapeHTML(l.tag || '')}">${escapeHTML(l.tag || '')}</td><td class="py-2 pl-1 pr-3 log-cell message-cell col-message ${msgClass}">${escapeHTML(msgText)}</td></tr>`;
         }
 
-        function renderPackageLogTable(forceFull = false) {
+        function renderPackageLogTable() {
             const tbody = document.getElementById('packageLogTableBody');
             if (!tbody) return;
-            const state = getPackageFilterState();
-            const signature = JSON.stringify(state);
-            const canAppendOnly =
-                !forceFull &&
-                signature === lastPackageFilterSignature &&
-                lastPackageLogs.length >= lastPackageRenderedCount &&
-                (lastPackageRenderedCount === 0 ||
-                    (lastPackageLogs[0] && getPackageRowKey(lastPackageLogs[0]) === lastPackageFirstRowKey));
-
-            if (canAppendOnly && lastPackageLogs.length > lastPackageRenderedCount) {
-                const appendedLogs = filterPackageLogs(lastPackageLogs.slice(lastPackageRenderedCount), state);
-                if (appendedLogs.length > 0) {
-                    const startIdx = tbody.querySelectorAll('tr.package-log-row').length;
-                    tbody.insertAdjacentHTML('beforeend', appendedLogs.map((l, idx) => packageRowHtml(l, startIdx + idx)).join(''));
-                }
-            } else {
-                const filtered = filterPackageLogs(lastPackageLogs, state);
-                tbody.innerHTML = filtered.map((l, idx) => packageRowHtml(l, idx)).join('');
+            const sourceLogs = packageLivePaused ? packageLiveVisibleLogs : lastPackageLogs;
+            const filtered = filterPackageLogs(sourceLogs, getPackageFilterState());
+            if (!packageLivePaused) packageLiveVisibleLogs = filtered.slice();
+            tbody.innerHTML = filtered.map((l, idx) => packageRowHtml(l, idx)).join('');
+            refreshPackageCopyButtons();
+            if (!packageLivePaused && document.getElementById('autoScroll').checked) {
+                const container = document.getElementById('packageLogContainer');
+                if (container) container.scrollTop = container.scrollHeight;
             }
+        }
 
-            lastPackageFilterSignature = signature;
-            lastPackageRenderedCount = lastPackageLogs.length;
-            lastPackageFirstRowKey = lastPackageLogs[0] ? getPackageRowKey(lastPackageLogs[0]) : '';
-            if(document.getElementById('autoScroll').checked) document.getElementById('packageLogContainer').scrollTop = document.getElementById('packageLogContainer').scrollHeight;
+        function openPackageLiveModalAndStart() {
+            packageLivePaused = false;
+            selectedPackageRowKeys.clear();
+            refreshPackageCopyButtons();
+            packageLiveModal?.classList.remove('hidden');
+            pausePackageLogBtn.textContent = 'Pause';
+            pausePackageLogBtn.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+            pausePackageLogBtn.classList.add('bg-yellow-500', 'hover:bg-yellow-600');
+            activeLogSelectionSource = 'live';
+            renderPackageLogTable();
+        }
+
+        function resetPackageLogUiAfterStop() {
+            packageLivePaused = false;
+            selectedPackageRowKeys.clear();
+            refreshPackageCopyButtons();
+            const btn = document.getElementById('startPackageLogBtn');
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Start';
+                btn.classList.remove('bg-red-500');
+            }
+            setPackageControlsEnabled(true);
+            packageLiveModal?.classList.add('hidden');
+        }
+
+        function stopPackageLogStream() {
+            socket.emit('start_package_log', {package_id: ''});
+            resetPackageLogUiAfterStop();
         }
 
         socket.on('package_log_cache', (logs) => {
             lastPackageLogs = logs || [];
-            renderPackageLogTable();
+            if (!packageLivePaused) renderPackageLogTable();
         });
 
+        function renderPackageHistorySessions(payload) {
+            const select = document.getElementById('packageHistorySessionSelect');
+            const meta = document.getElementById('packageHistoryMeta');
+            if (!select || !meta) return;
+            const prev = select.value;
+            packageHistorySessions = payload.sessions || [];
+            select.innerHTML = '';
+            if (packageHistorySessions.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = 'No saved sessions';
+                select.appendChild(opt);
+                meta.textContent = 'No saved package-log sessions yet.';
+                document.getElementById('packageHistoryTableBody').innerHTML = '';
+                packageHistoryRowsCache = [];
+                refreshPackageCopyButtons();
+                return;
+            }
+            packageHistorySessions.forEach((s, idx) => {
+                const opt = document.createElement('option');
+                opt.value = String(s.id);
+                opt.textContent = `#${s.id} - ${s.package_id} - ${s.started_label}`;
+                if ((!prev && idx === 0) || prev === String(s.id)) opt.selected = true;
+                select.appendChild(opt);
+            });
+            const current = packageHistorySessions.find(s => String(s.id) === select.value) || packageHistorySessions[0];
+            if (current) {
+                meta.textContent = `Selected: ${current.package_id} | Started: ${current.started_label} | Status: ${current.status} | Rows: ${current.row_count}`;
+            }
+        }
+
+        function packageHistoryRowHtml(row, idx) {
+            const rawText = row.raw_log || row.message || '';
+            const rowKey = getPackageRowKeyFromValues(row.time_display || '', row.tag || '', rawText);
+            const selectedClass = selectedPackageHistoryRowKeys.has(rowKey) ? 'selected' : '';
+            return `
+                <tr class="package-history-row hover:bg-gray-50 ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${idx}" data-raw-log="${encodeURIComponent(rawText)}">
+                    <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.time_display || '')}</td>
+                    <td class="py-2 px-2 text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.device_name || row.device_id || '')}</td>
+                    <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.tag || '')}</td>
+                    <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-pre-wrap break-all">${escapeHTML(rawText)}</td>
+                </tr>
+            `;
+        }
+
+        function renderPackageHistoryRows(rows) {
+            const tbody = document.getElementById('packageHistoryTableBody');
+            if (!tbody) return;
+            packageHistoryRowsCache = rows || [];
+            selectedPackageHistoryRowKeys.clear();
+            refreshPackageCopyButtons();
+            if (!rows || rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="py-3 px-2 text-xs text-gray-500">No saved logs found for this filter.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = rows.map((row, idx) => packageHistoryRowHtml(row, idx)).join('');
+        }
+
+        function loadPackageHistorySessions() {
+            fetch('/api/package-log/sessions')
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.ok) throw new Error(data.error || 'failed_to_load_sessions');
+                    renderPackageHistorySessions(data);
+                })
+                .catch(err => {
+                    document.getElementById('packageHistoryMeta').textContent = `Failed to load sessions: ${err}`;
+                });
+        }
+
+        function loadSelectedPackageHistory() {
+            const select = document.getElementById('packageHistorySessionSelect');
+            const keyword1 = document.getElementById('packageHistoryFilterInput')?.value || '';
+            const keyword2 = document.getElementById('packageHistoryFilterInput2')?.value || '';
+            if (!select || !select.value) {
+                renderPackageHistoryRows([]);
+                return;
+            }
+            const query = new URLSearchParams({
+                session_id: select.value,
+                q1: keyword1,
+                q2: keyword2,
+            });
+            fetch(`/api/package-log/logs?${query.toString()}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.ok) throw new Error(data.error || 'failed_to_load_logs');
+                    const current = packageHistorySessions.find(s => String(s.id) === String(data.session_id));
+                    const meta = document.getElementById('packageHistoryMeta');
+                    if (meta && current) {
+                        const filters = [keyword1, keyword2].filter(Boolean).join(' | ');
+                        meta.textContent = `Selected: ${current.package_id} | Started: ${current.started_label} | Status: ${current.status} | Showing: ${data.rows.length}${filters ? ` | Filter: ${filters}` : ''}`;
+                    }
+                    renderPackageHistoryRows(data.rows || []);
+                })
+                .catch(err => {
+                    document.getElementById('packageHistoryMeta').textContent = `Failed to load saved logs: ${err}`;
+                });
+        }
         // --- JSON Modal Handler ---
         document.body.addEventListener('click', (e) => {
             if (e.target && e.target.classList.contains('view-json-btn')) {
@@ -1653,20 +2028,26 @@ payload..."></textarea>
 
         // --- Log Detail Modal (Package Log) ---
         function getSelectedPackageRows() {
+            if (activeLogSelectionSource === 'history') {
+                const selected = Array.from(document.querySelectorAll('#packageHistoryTableBody tr.package-history-row.selected'));
+                if (selected.length > 0) return selected;
+                const allRows = Array.from(document.querySelectorAll('#packageHistoryTableBody tr.package-history-row'));
+                const byKey = new Map();
+                allRows.forEach(r => {
+                    const rawKey = r.getAttribute('data-row-key') || '';
+                    try { byKey.set(decodeURIComponent(rawKey), r); } catch {}
+                });
+                return Array.from(selectedPackageHistoryRowKeys).map(k => byKey.get(k)).filter(Boolean);
+            }
             const selected = Array.from(document.querySelectorAll('#packageLogTableBody tr.package-log-row.selected'));
             if (selected.length > 0) return selected;
-            // Fallback: rehydrate from saved keys
             const allRows = Array.from(document.querySelectorAll('#packageLogTableBody tr.package-log-row'));
             const byKey = new Map();
             allRows.forEach(r => {
                 const rawKey = r.getAttribute('data-row-key') || '';
                 try { byKey.set(decodeURIComponent(rawKey), r); } catch {}
             });
-            const fromKeys = [];
-            selectedPackageRowKeys.forEach(k => {
-                if (byKey.has(k)) fromKeys.push(byKey.get(k));
-            });
-            return fromKeys;
+            return Array.from(selectedPackageRowKeys).map(k => byKey.get(k)).filter(Boolean);
         }
 
         function getRowText(row) {
@@ -1676,6 +2057,10 @@ payload..."></textarea>
         }
 
         function getRowMessageText(row) {
+            if (row.classList.contains('package-history-row')) {
+                const raw = row.getAttribute('data-raw-log') || '';
+                try { return decodeURIComponent(raw); } catch { return row.querySelectorAll('td')[3]?.textContent?.trim() || ''; }
+            }
             const msgCell = row.querySelector('td.col-message');
             return (msgCell ? msgCell.textContent : '').trim();
         }
@@ -1685,7 +2070,7 @@ payload..."></textarea>
 
         function openLogDetailModal(rows) {
             const lines = rows.map(getRowText);
-            logDetailRawText = lines.join('\\n');
+            logDetailRawText = lines.join('\n');
             logDetailIsJsonView = false;
             logDetailContent.textContent = logDetailRawText;
             logDetailModal.classList.remove('hidden');
@@ -1722,7 +2107,7 @@ payload..."></textarea>
 
         function extractEventName(text) {
             if (!text) return '';
-            const m = text.match(/with\\s+name\\s+([\\w\\.:-]+)/i);
+            const m = text.match(/with\s+name\s+([\w\.:-]+)/i);
             if (m && m[1]) return m[1];
             return '';
         }
@@ -1732,7 +2117,6 @@ payload..."></textarea>
             const idx = text.indexOf('{');
             if (idx === -1) return '';
             let header = text.slice(0, idx).trim();
-            // Remove leading time/tag/prefix if present
             const i1 = header.indexOf('] : ');
             if (i1 !== -1) header = header.slice(i1 + 4).trim();
             const i2 = header.indexOf('] ');
@@ -1767,242 +2151,188 @@ payload..."></textarea>
                         metaLines.push('');
                         metaLines.push('extracted_json:');
                         metaLines.push(pretty);
-                        return `--- #${idx + 1} (JSON) ---\\n${metaLines.join('\\n')}`;
+                        return `--- #${idx + 1} (JSON) ---\n${metaLines.join('\n')}`;
                     } catch (e) {
-                        return `--- #${idx + 1} ---\\n${line}`;
+                        return `--- #${idx + 1} ---\n${line}`;
                     }
                 }
-                return `--- #${idx + 1} ---\\n${line}`;
+                return `--- #${idx + 1} ---\n${line}`;
             });
-            logDetailContent.textContent = outputs.join('\\n\\n');
+            logDetailContent.textContent = outputs.join('\n\n');
             logDetailIsJsonView = true;
         }
 
-        convertLogJsonBtn.addEventListener('click', convertSelectedLogsToJson);
-
-        document.getElementById('packageLogTableBody').addEventListener('dblclick', (e) => {
-            const row = e.target.closest('tr.package-log-row');
-            if (!row) return;
-            isSelectingRows = false;
-            dragStartIndex = null;
-            // Ensure clicked row is included
-            const rawKey = row.getAttribute('data-row-key') || '';
-            try { selectedPackageRowKeys.add(decodeURIComponent(rawKey)); } catch {}
-            const selected = getSelectedPackageRows();
-            const rowsToShow = selected.length > 0 ? selected : [row];
-            openLogDetailModal(rowsToShow);
-        });
-
-        document.addEventListener('keydown', (e) => {
-            if (e.key !== 'Enter') return;
-            const selected = getSelectedPackageRows();
-            if (selected.length === 0) return;
-            openLogDetailModal(selected);
-        });
-        
-        // --- Device Status ---
-        socket.on('device_status', (status) => {
-            const currentFilter = deviceFilter.value;
-            deviceFilter.innerHTML = '<option value="all">All Devices</option>';
-            if (status.connected_devices) {
-                status.connected_devices.forEach(d => {
-                    const opt = document.createElement('option');
-                    opt.value = d.id; opt.textContent = d.name;
-                    deviceFilter.appendChild(opt);
-                });
-            }
-            // Restore selection if exists
-            if([...deviceFilter.options].some(o => o.value === currentFilter)) deviceFilter.value = currentFilter;
-
-            if (status.connected_devices && status.connected_devices.length > 0) {
-                 deviceListEl.innerHTML = '<ul class="list-disc list-inside text-left">' + 
-                    status.connected_devices.map(d => `<li class="text-green-600 font-semibold animate-pulse-green">${d.id} - ${d.name}</li>`).join('') + 
-                    '</ul>';
-            } else {
-                 deviceListEl.innerHTML = `<p class="text-orange-500">${status.message || 'Waiting...'}</p>`;
-            }
-        });
-        
-        // --- FIXED: Trigger refresh on device change to update all tables including callback
-        deviceFilter.addEventListener('change', (e) => { 
-            selectedDevice = e.target.value; 
-            socket.emit('refresh_request'); 
-            renderCallbackTable(); // Trigger client-side re-render immediately
-            renderAdRevenueTable();
-        });
-
-        // --- Specific Tab Logic ---
-        function setValidationButtonState(isActive) {
-            const btn = document.getElementById('startValidationBtn');
-            if (!btn) return;
-            if (isActive) {
-                btn.textContent = 'Stop';
-                btn.className = 'bg-red-500 hover:bg-red-600 text-white font-semibold text-xs px-4 rounded-lg h-9';
-            } else {
-                btn.textContent = 'Start Checking';
-                btn.className = 'bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 rounded-lg h-9';
-            }
-        }
-
-        document.getElementById('startValidationBtn').addEventListener('click', () => {
-            const btn = document.getElementById('startValidationBtn');
-            const isStarting = btn && btn.textContent === 'Start Checking';
-            if (isStarting) socket.emit('start_validation', []);
-            else socket.emit('stop_validation');
-        });
-
-        document.getElementById('clearValidatorFilterBtn')?.addEventListener('click', () => {
-            const eventInput = document.getElementById('validatorEventFilterInput');
-            if (eventInput) eventInput.value = '';
-            const allRadio = document.querySelector('input[name="validatorSourceFilter"][value="all"]');
-            if (allRadio) allRadio.checked = true;
-            renderValidatorTable(validator_results_cache);
-        });
-        
-        document.getElementById('validatorEventFilterInput').addEventListener('input', () => {
-            renderValidatorTable(validator_results_cache);
-        });
-
-        document.querySelectorAll('input[name="validatorSourceFilter"]').forEach(r => {
-            r.addEventListener('change', () => renderValidatorTable(validator_results_cache));
-        });
-
-        socket.on('validator_status', (data) => {
-            setValidationButtonState(!!(data && data.active));
-        });
-
-        const specificEventInput = document.getElementById('specificEventInput');
-        const specificParamInput = document.getElementById('specificParamInput');
-        const parseParamList = (text) => {
-            if (!text) return [];
-            return text
-                .replace(/,/g, ' ')
-                .split(/\\s+/)
-                .map(p => p.trim())
-                .filter(p => p);
-        };
-        const updateSpecific = () => socket.emit('update_specific_filter', { eventNames: specificEventInput.value.split('\\n').filter(p=>p.trim()), params: parseParamList(specificParamInput.value) });
-        specificEventInput.addEventListener('input', updateSpecific);
-        specificParamInput.addEventListener('input', updateSpecific);
-        document.querySelectorAll('input[name="specificSourceFilter"]').forEach(r => {
-            r.addEventListener('change', () => renderSpecificEventTable());
-        });
-        
-        document.getElementById('adRevenueParamInput').addEventListener('input', (e) => socket.emit('update_adrevenue_filter', {
-            params: e.target.value
-                .split('\\n')
-                .map(p => p.trim().replace(/^['"]+|['"]+$/g, ''))
-                .filter(p => p)
-        }));
-        document.getElementById('adRevenueFilterInput').addEventListener('input', renderAdRevenueTable);
-        document.querySelectorAll('input[name="adRevenueSourceFilter"]').forEach(r => r.addEventListener('change', renderAdRevenueTable));
-        let packageFilterRenderTimer = null;
-        const schedulePackageRender = () => {
-            clearTimeout(packageFilterRenderTimer);
-            packageFilterRenderTimer = setTimeout(() => renderPackageLogTable(true), 120);
-        };
-        document.getElementById('packageFilterInput').addEventListener('input', schedulePackageRender);
-        document.getElementById('packageFilterInput2').addEventListener('input', schedulePackageRender);
-        document.getElementById('packageTagFilterInput').addEventListener('input', () => {
-            const allOpt = document.querySelector('input[name="tagQuickFilter"][value=""]');
-            if (allOpt) allOpt.checked = true;
-            schedulePackageRender();
-        });
-        document.querySelectorAll('input[name="tagQuickFilter"]').forEach(r => r.addEventListener('change', (e) => {
-            const tagInput = document.getElementById('packageTagFilterInput');
-            if (tagInput && e.target.value) tagInput.value = '';
-            renderPackageLogTable(true);
-        }));
-        document.getElementById('packageFilterInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(true); }
-        });
-        document.getElementById('packageFilterInput2').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(true); }
-        });
-        document.getElementById('packageTagFilterInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(true); }
-        });
-        document.getElementById('showErrorsOnly').addEventListener('change', () => renderPackageLogTable(true));
-
-        // --- Row Selection for Package Log (click + drag) ---
-        let isSelectingRows = false;
-        let dragStartIndex = null;
-
-        function updateSelectionRange(startIdx, endIdx) {
-            const rows = Array.from(document.querySelectorAll('#packageLogTableBody tr.package-log-row'));
+        function updateRowSelection(containerSelector, rowSelector, selectionSet, startIdx, endIdx) {
+            const rows = Array.from(document.querySelectorAll(`${containerSelector} ${rowSelector}`));
             if (rows.length === 0) return;
             const [minIdx, maxIdx] = startIdx <= endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
-            selectedPackageRowKeys.clear();
+            selectionSet.clear();
             rows.forEach(r => {
                 const idx = parseInt(r.getAttribute('data-row-index') || '-1', 10);
+                const rawKey = r.getAttribute('data-row-key') || '';
                 if (idx >= minIdx && idx <= maxIdx) {
-                    const rawKey = r.getAttribute('data-row-key') || '';
-                    try { selectedPackageRowKeys.add(decodeURIComponent(rawKey)); } catch (err) {}
+                    try { selectionSet.add(decodeURIComponent(rawKey)); } catch {}
                     r.classList.add('selected');
                 } else {
                     r.classList.remove('selected');
                 }
             });
+            refreshPackageCopyButtons();
         }
 
-        document.getElementById('packageLogTableBody').addEventListener('mousedown', (e) => {
-            const row = e.target.closest('tr.package-log-row');
-            if (!row) return;
-            if (e.detail && e.detail >= 2) return;
-            if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
-                document.activeElement.blur();
-            }
-            isSelectingRows = true;
-            const idx = parseInt(row.getAttribute('data-row-index') || '0', 10);
-            dragStartIndex = idx;
-            updateSelectionRange(idx, idx);
-            e.preventDefault();
-        });
+        function attachPackageSelectionHandlers(tableBodyId, rowClass, selectionSet, sourceName) {
+            const tbody = document.getElementById(tableBodyId);
+            if (!tbody) return;
+            tbody.addEventListener('mousedown', (e) => {
+                const row = e.target.closest(`tr.${rowClass}`);
+                if (!row) return;
+                if (e.detail && e.detail >= 2) return;
+                if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+                    document.activeElement.blur();
+                }
+                activeLogSelectionSource = sourceName;
+                isSelectingRows = true;
+                dragStartIndex = parseInt(row.getAttribute('data-row-index') || '0', 10);
+                updateRowSelection(`#${tableBodyId}`, `tr.${rowClass}`, selectionSet, dragStartIndex, dragStartIndex);
+                e.preventDefault();
+            });
+            tbody.addEventListener('mouseover', (e) => {
+                if (!isSelectingRows || dragStartIndex === null || activeLogSelectionSource !== sourceName) return;
+                const row = e.target.closest(`tr.${rowClass}`);
+                if (!row) return;
+                const idx = parseInt(row.getAttribute('data-row-index') || '0', 10);
+                updateRowSelection(`#${tableBodyId}`, `tr.${rowClass}`, selectionSet, dragStartIndex, idx);
+            });
+            tbody.addEventListener('dblclick', (e) => {
+                const row = e.target.closest(`tr.${rowClass}`);
+                if (!row) return;
+                activeLogSelectionSource = sourceName;
+                isSelectingRows = false;
+                dragStartIndex = null;
+                const rawKey = row.getAttribute('data-row-key') || '';
+                try { selectionSet.add(decodeURIComponent(rawKey)); } catch {}
+                row.classList.add('selected');
+                refreshPackageCopyButtons();
+                const selected = getSelectedPackageRows();
+                openLogDetailModal(selected.length > 0 ? selected : [row]);
+            });
+        }
 
-        document.getElementById('packageLogTableBody').addEventListener('mouseover', (e) => {
-            if (!isSelectingRows || dragStartIndex === null) return;
-            const row = e.target.closest('tr.package-log-row');
-            if (!row) return;
-            const idx = parseInt(row.getAttribute('data-row-index') || '0', 10);
-            updateSelectionRange(dragStartIndex, idx);
-        });
+        convertLogJsonBtn.addEventListener('click', convertSelectedLogsToJson);
+        attachPackageSelectionHandlers('packageLogTableBody', 'package-log-row', selectedPackageRowKeys, 'live');
+        attachPackageSelectionHandlers('packageHistoryTableBody', 'package-history-row', selectedPackageHistoryRowKeys, 'history');
 
         document.addEventListener('mouseup', () => {
             isSelectingRows = false;
             dragStartIndex = null;
         });
 
-        // --- Ctrl+C to copy selected package log rows ---
-        document.addEventListener('keydown', async (e) => {
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const selected = getSelectedPackageRows();
+                if (selected.length > 0) openLogDetailModal(selected);
+                return;
+            }
             if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'c') return;
             const active = document.activeElement;
             if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
-            const selectedRows = Array.from(document.querySelectorAll('#packageLogTableBody tr.package-log-row.selected'));
+            const selectedRows = getSelectedPackageRows();
             if (selectedRows.length === 0) return;
             const lines = selectedRows.map(r => {
                 const cells = r.querySelectorAll('td');
                 const parts = Array.from(cells).map(td => (td.textContent || '').trim());
-                return parts.join('\\t');
+                return parts.join('\t');
             });
-            const textToCopy = lines.join('\\n');
-            try {
-                if (navigator.clipboard && navigator.clipboard.writeText) {
-                    await navigator.clipboard.writeText(textToCopy);
-                } else {
-                    const ta = document.createElement('textarea');
-                    ta.value = textToCopy;
-                    ta.style.position = 'fixed';
-                    ta.style.opacity = '0';
-                    document.body.appendChild(ta);
-                    ta.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(ta);
-                }
-            } catch (err) {
-                console.error('Copy failed', err);
+            const textToCopy = lines.join('\n');
+            navigator.clipboard?.writeText(textToCopy).catch(async () => {
+                const ta = document.createElement('textarea');
+                ta.value = textToCopy;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+            });
+        });
+
+        copyPackageBtn?.addEventListener('click', async () => {
+            activeLogSelectionSource = 'live';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key:'c', ctrlKey:true}));
+        });
+        copyPackageHistoryBtn?.addEventListener('click', async () => {
+            activeLogSelectionSource = 'history';
+            document.dispatchEvent(new KeyboardEvent('keydown', {key:'c', ctrlKey:true}));
+        });
+
+        document.getElementById('loadPackageHistoryBtn').addEventListener('click', loadSelectedPackageHistory);
+        document.getElementById('refreshPackageSessionsBtn').addEventListener('click', loadPackageHistorySessions);
+        document.getElementById('packageHistorySessionSelect').addEventListener('change', loadSelectedPackageHistory);
+        document.getElementById('packageHistoryFilterInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                loadSelectedPackageHistory();
             }
         });
-        
+        document.getElementById('packageHistoryFilterInput2').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                loadSelectedPackageHistory();
+            }
+        });
+        const packageHistoryModal = document.getElementById('packageHistoryModal');
+        const openPackageHistoryBtn = document.getElementById('openPackageHistoryBtn');
+        const closePackageHistoryModal = document.getElementById('closePackageHistoryModal');
+        openPackageHistoryBtn?.addEventListener('click', () => {
+            packageHistoryModal?.classList.remove('hidden');
+            activeLogSelectionSource = 'history';
+            loadPackageHistorySessions();
+        });
+        closePackageHistoryModal?.addEventListener('click', () => {
+            packageHistoryModal?.classList.add('hidden');
+        });
+        packageHistoryModal?.addEventListener('click', (e) => {
+            if (e.target === packageHistoryModal) packageHistoryModal.classList.add('hidden');
+        });
+
+        document.getElementById('packageFilterInput').addEventListener('input', () => renderPackageLogTable());
+        document.getElementById('packageFilterInput2').addEventListener('input', () => renderPackageLogTable());
+        document.getElementById('packageTagFilterInput').addEventListener('input', () => {
+            const allOpt = document.querySelector('input[name="tagQuickFilter"][value=""]');
+            if (allOpt) allOpt.checked = true;
+            renderPackageLogTable();
+        });
+        document.querySelectorAll('input[name="tagQuickFilter"]').forEach(r => r.addEventListener('change', (e) => {
+            const tagInput = document.getElementById('packageTagFilterInput');
+            if (tagInput && e.target.value) tagInput.value = '';
+            renderPackageLogTable();
+        }));
+        document.getElementById('packageFilterInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(); }
+        });
+        document.getElementById('packageFilterInput2').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(); }
+        });
+        document.getElementById('packageTagFilterInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(); }
+        });
+        document.getElementById('showErrorsOnly').addEventListener('change', () => renderPackageLogTable());
+
+        pausePackageLogBtn?.addEventListener('click', () => {
+            packageLivePaused = !packageLivePaused;
+            if (packageLivePaused) {
+                pausePackageLogBtn.textContent = 'Resume';
+                pausePackageLogBtn.classList.remove('bg-yellow-500', 'hover:bg-yellow-600');
+                pausePackageLogBtn.classList.add('bg-blue-500', 'hover:bg-blue-600');
+            } else {
+                pausePackageLogBtn.textContent = 'Pause';
+                pausePackageLogBtn.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+                pausePackageLogBtn.classList.add('bg-yellow-500', 'hover:bg-yellow-600');
+                renderPackageLogTable();
+            }
+        });
+        stopPackageLogBtn?.addEventListener('click', stopPackageLogStream);
+        closePackageLiveModal?.addEventListener('click', stopPackageLogStream);
         document.getElementById('startSdkCheckBtn').addEventListener('click', () => {
              const text = document.getElementById('sdkCheckInput').value;
              if(text) socket.emit('start_sdk_check', {text: text});
@@ -2097,6 +2427,8 @@ payload..."></textarea>
             }
             setPackageControlsEnabled(true);
         });
+
+        loadPackageHistorySessions();
         
     </script>
 </body>
@@ -2156,6 +2488,19 @@ def import_profile():
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
 
+@app.post('/check_update')
+def check_update():
+    try:
+        import remote_update
+    except Exception as e:
+        return jsonify({'ok': False, 'status': 'error', 'error': f'updater_unavailable: {e}'})
+    try:
+        result = remote_update.check_for_updates()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'ok': False, 'status': 'error', 'error': str(e)})
+
+
 @app.post('/restart_app')
 def restart_app():
     cmd = os.getenv('EVENTINSPECTOR_RESTART_CMD')
@@ -2170,6 +2515,86 @@ def restart_app():
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)})
     os._exit(0)
+
+
+@app.get('/api/package-log/sessions')
+def package_log_sessions_api():
+    conn = _get_package_db_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT s.id, s.package_id, s.started_at, s.ended_at, s.status, COUNT(e.id) AS row_count
+            FROM package_log_sessions s
+            LEFT JOIN package_log_entries e ON e.session_id = s.id
+            GROUP BY s.id
+            ORDER BY s.id DESC
+            LIMIT 50
+            """
+        ).fetchall()
+        sessions = []
+        for row in rows:
+            started_label = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row["started_at"])) if row["started_at"] else ""
+            sessions.append({
+                "id": row["id"],
+                "package_id": row["package_id"],
+                "started_at": row["started_at"],
+                "ended_at": row["ended_at"],
+                "started_label": started_label,
+                "status": row["status"],
+                "row_count": row["row_count"] or 0,
+            })
+        return jsonify({"ok": True, "sessions": sessions})
+    finally:
+        conn.close()
+
+
+@app.get('/api/package-log/logs')
+def package_log_rows_api():
+    session_id = request.args.get('session_id', type=int)
+    keyword1 = (request.args.get('q1') or request.args.get('q') or '').strip().lower()
+    keyword2 = (request.args.get('q2') or '').strip().lower()
+    if not session_id:
+        return jsonify({"ok": False, "error": "session_id_required"}), 400
+    conn = _get_package_db_connection()
+    try:
+        sql = """
+            SELECT time_display, device_id, device_name, tag, message, raw_log
+            FROM package_log_entries
+            WHERE session_id = ?
+        """
+        params = [session_id]
+
+        def search_clause():
+            return """
+              AND (
+                lower(coalesce(raw_log, '')) LIKE ?
+                OR lower(coalesce(message, '')) LIKE ?
+                OR lower(coalesce(tag, '')) LIKE ?
+                OR lower(coalesce(device_name, '')) LIKE ?
+              )
+            """
+
+        if keyword1:
+            sql += search_clause()
+            like1 = f"%{keyword1}%"
+            params.extend([like1, like1, like1, like1])
+        if keyword2:
+            sql += search_clause()
+            like2 = f"%{keyword2}%"
+            params.extend([like2, like2, like2, like2])
+
+        sql += """
+            ORDER BY id ASC
+            LIMIT 2000
+        """
+        rows = conn.execute(sql, params).fetchall()
+        return jsonify({
+            "ok": True,
+            "session_id": session_id,
+            "rows": [dict(r) for r in rows],
+        })
+    finally:
+        conn.close()
 
 # --- BACKEND LOGIC ---
 
@@ -2253,20 +2678,31 @@ def process_load_ads_ext_log(line, device_id):
 
 def find_and_parse_event(log_entry):
     """Parse log sự kiện chung từ TrackingService->Track và AppMetrica regular event."""
-    match = OLD_EVENT_LOG_PATTERN.search(log_entry)
-    if match:
+    if 'TrackingService->Track:' in log_entry:
         try:
-            data = json.loads(match.group(1))
-            event_name = data.get("eventName")
-            params = data.get("e", {})
-            if event_name:
-                wrapped = {
-                    "eventName": event_name,
-                    "e": params,
-                    "source": "firebase",
-                }
-                return event_name, params, json.dumps(wrapped, ensure_ascii=False)
-        except: pass
+            after_keyword = log_entry.split('TrackingService->Track:', 1)[1]
+            json_str = extract_json_object_from_text(after_keyword)
+            if not json_str:
+                match = OLD_EVENT_LOG_PATTERN.search(log_entry)
+                json_str = match.group(1) if match else None
+            if json_str:
+                data = json.loads(json_str)
+                event_name = data.get('eventName') or data.get('event_name')
+                params = data.get('e', {})
+                if isinstance(params, str):
+                    try:
+                        params = json.loads(params)
+                    except Exception:
+                        params = {}
+                if event_name and isinstance(params, dict):
+                    wrapped = {
+                        'eventName': event_name,
+                        'e': params,
+                        'source': 'firebase',
+                    }
+                    return event_name, params, json.dumps(wrapped, ensure_ascii=False)
+        except Exception:
+            pass
 
     match = METRICA_REGULAR_EVENT_PATTERN.search(log_entry)
     if match:
@@ -2274,12 +2710,12 @@ def find_and_parse_event(log_entry):
             event_name = match.group(1)
             params = json.loads(match.group(2))
             wrapped = {
-                "eventName": event_name,
-                "e": params,
-                "source": "appmetrica",
+                'eventName': event_name,
+                'e': params,
+                'source': 'appmetrica',
             }
             return event_name, params, json.dumps(wrapped, ensure_ascii=False)
-        except:
+        except Exception:
             pass
     return None, None, None
 
@@ -2809,6 +3245,23 @@ def package_log_consumer(device_id, logcat_process):
                         'timestamp': time.time(),
                         'is_error': is_error
                     })
+                    session_id = active_package_log_session_id
+                if session_id:
+                    try:
+                        package_log_db_queue.put_nowait((
+                            session_id,
+                            time.time(),
+                            time_display or time_str,
+                            device_id,
+                            get_device_name(device_id),
+                            level,
+                            tag,
+                            message,
+                            line.strip(),
+                            1 if is_error else 0,
+                        ))
+                    except Exception:
+                        pass
     except: pass
 
 def package_pid_monitor():
@@ -3015,9 +3468,18 @@ def sdk_check(data):
 
 @socketio.on('start_package_log')
 def spl(d):
-    global target_package_name
+    global target_package_name, active_package_log_session_id
     pid = d.get('package_id', '').strip()
-    with lock: target_package_name = pid; package_log_cache.clear(); socketio.emit('package_log_cache', [])
+    with lock:
+        if active_package_log_session_id:
+            _finish_package_log_session(active_package_log_session_id)
+            active_package_log_session_id = None
+        target_package_name = pid
+        if pid:
+            active_package_log_session_id = _start_package_log_session(pid)
+        package_log_cache.clear()
+        socketio.emit('package_log_cache', [])
+    socketio.emit('package_log_cache', [])
 
 @socketio.on('refresh_request')
 def refresh():
@@ -3042,9 +3504,11 @@ def connect():
 def run_server(host="0.0.0.0", port=5001):
     _normalize_remote_update_config()
     _set_active_profile()
+    _init_package_log_db()
     threading.Thread(target=device_manager, daemon=True).start()
     threading.Thread(target=package_log_emitter, daemon=True).start()
     threading.Thread(target=package_pid_monitor, daemon=True).start()
+    threading.Thread(target=_package_log_db_writer, daemon=True).start()
 
     def safe_print(msg):
         try:
