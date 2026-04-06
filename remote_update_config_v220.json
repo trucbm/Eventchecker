@@ -1,0 +1,6 @@
+{
+  "enabled": true,
+  "manifest_url": "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_2/remote_manifest.json",
+  "timeout_sec": 10,
+  "min_interval_sec": 0
+}
