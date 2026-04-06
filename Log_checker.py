@@ -591,7 +591,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(55)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(56)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -764,10 +764,27 @@ HTML_TEMPLATE = """
             <!-- TAB 4: Specific -->
             <div id="tabContentSpecific" class="hidden">
                 <div class="bg-white rounded-xl shadow-md p-4 mb-4">
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                    <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_150px_minmax(0,1fr)] gap-4 items-start">
                          <div>
                             <label for="specificEventInput" class="block text-xs font-medium text-gray-700 mb-1">Filter by Event Names:</label>
                             <textarea id="specificEventInput" rows="4" class="w-full p-2 border rounded-md shadow-sm" placeholder="Leave empty to show all events..."></textarea>
+                         </div>
+                         <div>
+                            <label class="block text-xs font-medium text-gray-700 mb-1">Source Filter:</label>
+                            <div class="flex flex-col gap-2 text-xs text-gray-700 pt-1">
+                                <label class="inline-flex items-center gap-1.5">
+                                    <input type="radio" name="specificSourceFilter" value="all" checked>
+                                    <span>All</span>
+                                </label>
+                                <label class="inline-flex items-center gap-1.5">
+                                    <input type="radio" name="specificSourceFilter" value="firebase">
+                                    <span>Firebase</span>
+                                </label>
+                                <label class="inline-flex items-center gap-1.5">
+                                    <input type="radio" name="specificSourceFilter" value="appmetrica">
+                                    <span>Appmetrica</span>
+                                </label>
+                            </div>
                          </div>
                          <div>
                             <label for="specificParamInput" class="block text-xs font-medium text-gray-700 mb-1">Validate Parameters:</label>
@@ -1430,15 +1447,27 @@ payload..."></textarea>
             updateDefaultEventStatus(validator_results_cache);
         });
 
+        let lastSpecificEventData = [];
+
         socket.on('update_specific_event_table', (d) => {
+             lastSpecificEventData = d || [];
+             renderSpecificEventTable();
+        });
+
+        function renderSpecificEventTable() {
              const tbody = document.getElementById('specificEventTableBody');
              if (!tbody) return;
-             const filtered = (selectedDevice === 'all') ? d : d.filter(r => r.device_id === selectedDevice);
+             const sourceFilter = document.querySelector('input[name="specificSourceFilter"]:checked')?.value || 'all';
+             const filtered = lastSpecificEventData.filter(r => {
+                 if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
+                 if (sourceFilter !== 'all' && (r.source || 'firebase') !== sourceFilter) return false;
+                 return true;
+             });
              if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
              else {
                  tbody.innerHTML = filtered.map(res => `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.status === 'PASSED'?'text-green-600':'text-red-600'}">${res.status}</td><td class="py-2 px-3"><span class="event-name-link cursor-pointer text-sm font-medium text-indigo-700 hover:underline" data-event-name="${escapeAttribute(res.event_name)}">${res.event_name}</span></td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${res.raw_log}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`).join('');
              }
-        });
+        }
         let lastAdRevenueData = [];
 
          socket.on('update_adrevenue_table', (d) => {
@@ -1823,6 +1852,9 @@ payload..."></textarea>
         const updateSpecific = () => socket.emit('update_specific_filter', { eventNames: specificEventInput.value.split('\\n').filter(p=>p.trim()), params: parseParamList(specificParamInput.value) });
         specificEventInput.addEventListener('input', updateSpecific);
         specificParamInput.addEventListener('input', updateSpecific);
+        document.querySelectorAll('input[name="specificSourceFilter"]').forEach(r => {
+            r.addEventListener('change', () => renderSpecificEventTable());
+        });
         
         document.getElementById('adRevenueParamInput').addEventListener('input', (e) => socket.emit('update_adrevenue_filter', {
             params: e.target.value
