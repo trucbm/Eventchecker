@@ -591,7 +591,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(56)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.0.0(57)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1564,36 +1564,76 @@ payload..."></textarea>
 
         let lastPackageLogs = [];
         let selectedPackageRowKeys = new Set();
-        function renderPackageLogTable() {
-            const tbody = document.getElementById('packageLogTableBody');
-            if (!tbody) return;
-            const filterText = document.getElementById('packageFilterInput').value.toLowerCase();
-            const filterText2 = document.getElementById('packageFilterInput2').value.toLowerCase();
-            const tagFilter = document.getElementById('packageTagFilterInput').value.toLowerCase();
-            const quickTag = document.querySelector('input[name="tagQuickFilter"]:checked')?.value || '';
-            const errorsOnly = document.getElementById('showErrorsOnly').checked;
-            
-            const filtered = lastPackageLogs.filter(l => {
-                if (selectedDevice !== 'all' && l.device_id !== selectedDevice) return false;
-                if (errorsOnly && !l.is_error) return false;
+        let lastPackageFilterSignature = '';
+        let lastPackageRenderedCount = 0;
+        let lastPackageFirstRowKey = '';
+
+        function getPackageRowKey(l) {
+            const msgText = (l.message || l.log || '');
+            return `${l.time_display || l.time || ''}||${l.tag || ''}||${msgText}`;
+        }
+
+        function getPackageFilterState() {
+            return {
+                selectedDevice,
+                filterText: document.getElementById('packageFilterInput').value.toLowerCase(),
+                filterText2: document.getElementById('packageFilterInput2').value.toLowerCase(),
+                tagFilter: document.getElementById('packageTagFilterInput').value.toLowerCase(),
+                quickTag: document.querySelector('input[name="tagQuickFilter"]:checked')?.value || '',
+                errorsOnly: document.getElementById('showErrorsOnly').checked,
+            };
+        }
+
+        function filterPackageLogs(logs, state) {
+            return logs.filter(l => {
+                if (state.selectedDevice !== 'all' && l.device_id !== state.selectedDevice) return false;
+                if (state.errorsOnly && !l.is_error) return false;
                 const messageHaystack = `${l.message || ''}`.toLowerCase();
                 const tagHaystack = `${l.tag || ''}`.toLowerCase();
-                if (quickTag && !tagHaystack.includes(quickTag)) return false;
-                if (tagFilter && !tagHaystack.includes(tagFilter)) return false;
-                if (filterText && !messageHaystack.includes(filterText)) return false;
-                if (filterText2 && !messageHaystack.includes(filterText2)) return false;
+                if (state.quickTag && !tagHaystack.includes(state.quickTag)) return false;
+                if (state.tagFilter && !tagHaystack.includes(state.tagFilter)) return false;
+                if (state.filterText && !messageHaystack.includes(state.filterText)) return false;
+                if (state.filterText2 && !messageHaystack.includes(state.filterText2)) return false;
                 return true;
             });
-            
-            tbody.innerHTML = filtered.map((l, idx) => {
-                const msgText = (l.message || l.log || '');
-                const isErrorLevel = (l.level === 'E' || l.level === 'F');
-                const rowClass = isErrorLevel ? 'text-red-500' : '';
-                const msgClass = isErrorLevel ? 'text-red-500' : '';
-                const rowKey = `${l.time_display || l.time || ''}||${l.tag || ''}||${msgText}`;
-                const selectedClass = selectedPackageRowKeys.has(rowKey) ? 'selected' : '';
-                return `<tr class="package-log-row hover:bg-gray-50 ${rowClass} ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${idx}"><td class="py-2 px-2 font-mono text-xs time-cell col-time">${escapeHTML(l.time_display || l.time || '')}</td><td class="py-2 pr-1 pl-2 font-mono text-xs tag-cell col-tag" title="${escapeHTML(l.tag || '')}">${escapeHTML(l.tag || '')}</td><td class="py-2 pl-1 pr-3 log-cell message-cell col-message ${msgClass}">${escapeHTML(msgText)}</td></tr>`;
-            }).join('');
+        }
+
+        function packageRowHtml(l, idx) {
+            const msgText = (l.message || l.log || '');
+            const isErrorLevel = (l.level === 'E' || l.level === 'F');
+            const rowClass = isErrorLevel ? 'text-red-500' : '';
+            const msgClass = isErrorLevel ? 'text-red-500' : '';
+            const rowKey = getPackageRowKey(l);
+            const selectedClass = selectedPackageRowKeys.has(rowKey) ? 'selected' : '';
+            return `<tr class="package-log-row hover:bg-gray-50 ${rowClass} ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${idx}"><td class="py-2 px-2 font-mono text-xs time-cell col-time">${escapeHTML(l.time_display || l.time || '')}</td><td class="py-2 pr-1 pl-2 font-mono text-xs tag-cell col-tag" title="${escapeHTML(l.tag || '')}">${escapeHTML(l.tag || '')}</td><td class="py-2 pl-1 pr-3 log-cell message-cell col-message ${msgClass}">${escapeHTML(msgText)}</td></tr>`;
+        }
+
+        function renderPackageLogTable(forceFull = false) {
+            const tbody = document.getElementById('packageLogTableBody');
+            if (!tbody) return;
+            const state = getPackageFilterState();
+            const signature = JSON.stringify(state);
+            const canAppendOnly =
+                !forceFull &&
+                signature === lastPackageFilterSignature &&
+                lastPackageLogs.length >= lastPackageRenderedCount &&
+                (lastPackageRenderedCount === 0 ||
+                    (lastPackageLogs[0] && getPackageRowKey(lastPackageLogs[0]) === lastPackageFirstRowKey));
+
+            if (canAppendOnly && lastPackageLogs.length > lastPackageRenderedCount) {
+                const appendedLogs = filterPackageLogs(lastPackageLogs.slice(lastPackageRenderedCount), state);
+                if (appendedLogs.length > 0) {
+                    const startIdx = tbody.querySelectorAll('tr.package-log-row').length;
+                    tbody.insertAdjacentHTML('beforeend', appendedLogs.map((l, idx) => packageRowHtml(l, startIdx + idx)).join(''));
+                }
+            } else {
+                const filtered = filterPackageLogs(lastPackageLogs, state);
+                tbody.innerHTML = filtered.map((l, idx) => packageRowHtml(l, idx)).join('');
+            }
+
+            lastPackageFilterSignature = signature;
+            lastPackageRenderedCount = lastPackageLogs.length;
+            lastPackageFirstRowKey = lastPackageLogs[0] ? getPackageRowKey(lastPackageLogs[0]) : '';
             if(document.getElementById('autoScroll').checked) document.getElementById('packageLogContainer').scrollTop = document.getElementById('packageLogContainer').scrollHeight;
         }
 
@@ -1864,28 +1904,33 @@ payload..."></textarea>
         }));
         document.getElementById('adRevenueFilterInput').addEventListener('input', renderAdRevenueTable);
         document.querySelectorAll('input[name="adRevenueSourceFilter"]').forEach(r => r.addEventListener('change', renderAdRevenueTable));
-        document.getElementById('packageFilterInput').addEventListener('input', renderPackageLogTable);
-        document.getElementById('packageFilterInput2').addEventListener('input', renderPackageLogTable);
+        let packageFilterRenderTimer = null;
+        const schedulePackageRender = () => {
+            clearTimeout(packageFilterRenderTimer);
+            packageFilterRenderTimer = setTimeout(() => renderPackageLogTable(true), 120);
+        };
+        document.getElementById('packageFilterInput').addEventListener('input', schedulePackageRender);
+        document.getElementById('packageFilterInput2').addEventListener('input', schedulePackageRender);
         document.getElementById('packageTagFilterInput').addEventListener('input', () => {
             const allOpt = document.querySelector('input[name="tagQuickFilter"][value=""]');
             if (allOpt) allOpt.checked = true;
-            renderPackageLogTable();
+            schedulePackageRender();
         });
         document.querySelectorAll('input[name="tagQuickFilter"]').forEach(r => r.addEventListener('change', (e) => {
             const tagInput = document.getElementById('packageTagFilterInput');
             if (tagInput && e.target.value) tagInput.value = '';
-            renderPackageLogTable();
+            renderPackageLogTable(true);
         }));
         document.getElementById('packageFilterInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(); }
+            if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(true); }
         });
         document.getElementById('packageFilterInput2').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(); }
+            if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(true); }
         });
         document.getElementById('packageTagFilterInput').addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(); }
+            if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(true); }
         });
-        document.getElementById('showErrorsOnly').addEventListener('change', renderPackageLogTable);
+        document.getElementById('showErrorsOnly').addEventListener('change', () => renderPackageLogTable(true));
 
         // --- Row Selection for Package Log (click + drag) ---
         let isSelectingRows = false;
