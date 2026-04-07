@@ -550,30 +550,16 @@ def _read_adrevenue_sheet(ws):
 
     # The adrevenue sheet can have headers on row 1 or row 2 (e.g. B=AdRevenue, C=Appmetrica, D=AppsFlyer).
     # Find the first row near the top that declares Appmetrica / Appsflyer columns.
-    for row in range(1, min(ws.max_row, 8) + 1):
+    for row in range(1, min(ws.max_row, 5) + 1):
         candidate_cols = {"appmetrica": None, "appsflyer": None}
         for col in range(1, ws.max_column + 1):
             header = _normalize_adrevenue_sheet_key(ws.cell(row, col).value)
             if header in candidate_cols and candidate_cols[header] is None:
                 candidate_cols[header] = col
-        if candidate_cols["appmetrica"] or candidate_cols["appsflyer"]:
+        if any(candidate_cols.values()):
             header_row = row
             source_cols = candidate_cols
             break
-
-    # Extra fallback for the exact spreadsheet layout in use: B=AdRevenue, C=Appmetrica, D=AppsFlyer.
-    if header_row is None:
-        for row in range(1, min(ws.max_row, 8) + 1):
-            left = _normalize_adrevenue_sheet_key(ws.cell(row, 2).value)
-            appm = _normalize_adrevenue_sheet_key(ws.cell(row, 3).value)
-            apps = _normalize_adrevenue_sheet_key(ws.cell(row, 4).value)
-            if left == "all" and (appm == "appmetrica" or apps == "appsflyer"):
-                header_row = row
-                source_cols = {
-                    "appmetrica": 3 if appm == "appmetrica" else None,
-                    "appsflyer": 4 if apps == "appsflyer" else None,
-                }
-                break
 
     if header_row is None:
         return params_by_source
@@ -588,15 +574,9 @@ def _read_adrevenue_sheet(ws):
             value = str(raw).strip()
             if not value:
                 continue
-            normalized = _normalize_adrevenue_sheet_key(value)
-            if normalized in {"appmetrica", "appsflyer", "all"}:
-                continue
             params_by_source[source].append(value)
 
-    return {
-        source: [p for i, p in enumerate(values) if p and p not in values[:i]]
-        for source, values in params_by_source.items()
-    }
+    return params_by_source
 
 
 def load_default_params_config():
@@ -828,7 +808,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(14)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(12)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3205,18 +3185,11 @@ def cache_specific_event_log(event_name, params, json_string, log_entry, device_
     _apply_specific_filter_and_emit()
 
 def _apply_adrevenue_filter_and_emit():
-    global adrevenue_default_params, adrevenue_source_params
-    if active_profile_path and not any(adrevenue_source_params.get(src) for src in ("appmetrica", "appsflyer")):
-        try:
-            load_default_params_config()
-        except Exception:
-            pass
-
     rendered = []
     with lock:
         for item in adrevenue_logs:
             parsed_data = item.get("parsed_data") or {}
-            source = _normalize_adrevenue_sheet_key(item.get("source") or "appmetrica")
+            source = (item.get("source") or "appmetrica").lower()
 
             if source == "appsflyer":
                 ad_network = parsed_data.get("ad_network") if isinstance(parsed_data.get("ad_network"), dict) else {}
@@ -3229,17 +3202,23 @@ def _apply_adrevenue_filter_and_emit():
                 validate_maps = [parsed_data, payload_data]
                 details_target = parsed_data if parsed_data else item.get("raw_details", "")
 
-            source_required = list(adrevenue_source_params.get(source, []))
-            all_required = list(adrevenue_default_params)
-            combined_required = []
+            required_all = list(adrevenue_default_params)
+            normalized_source = _normalize_adrevenue_sheet_key(source)
+            for alias in (
+                normalized_source,
+                _normalize_adrevenue_sheet_key(item.get("event_name", "")),
+                "all",
+            ):
+                required_all.extend(adrevenue_source_params.get(alias, []))
+            seen_required = []
             seen_set = set()
-            for param in source_required + all_required:
-                if param and param not in seen_set:
+            for param in required_all:
+                if param not in seen_set:
                     seen_set.add(param)
-                    combined_required.append(param)
+                    seen_required.append(param)
 
             missing = []
-            for param in combined_required:
+            for param in seen_required:
                 if any(isinstance(m, dict) and param in m for m in validate_maps):
                     continue
                 missing.append(param)
@@ -3248,22 +3227,20 @@ def _apply_adrevenue_filter_and_emit():
             for candidate in validate_maps:
                 if isinstance(candidate, dict):
                     actual_keys.update(candidate.keys())
-            strange = sorted(actual_keys - set(combined_required)) if combined_required else []
+            strange = sorted(actual_keys - set(seen_required)) if seen_required else []
+
+            status = "INFO"
+            if seen_required:
+                status = "PASSED" if not missing else "FAILED"
 
             summary_parts = []
-            if combined_required:
-                status = "PASSED" if not missing else "FAILED"
+            if seen_required:
                 if missing:
                     summary_parts.append(format_param_issue_html("Missing", missing, "text-red-600", chunk_size=1))
                 else:
                     summary_parts.append("<div class='mb-2 text-xs font-medium text-green-600'>All required params found</div>")
                 if strange:
                     summary_parts.append(format_param_issue_html("Strange", strange, "text-orange-600", chunk_size=1))
-            else:
-                status = "FAILED"
-                summary_parts.append(
-                    f"<div class='mb-2 text-xs font-medium text-red-600'>No adrevenue sheet params loaded for {escapeHTML(source.title())}</div>"
-                )
 
             details_html = ''.join(summary_parts) + format_json_html(details_target)
             rendered.append({
