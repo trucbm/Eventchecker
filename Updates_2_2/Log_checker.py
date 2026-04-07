@@ -411,7 +411,7 @@ METRICA_REGULAR_EVENT_PATTERN = re.compile(
 
 # Patterns cũ của Log Checker
 OLD_EVENT_LOG_PATTERN = re.compile(r'\[\s*Tracking\s*\]\s*TrackingService->Track:\s*(\{"eventName":.*)')
-CALLBACK_LOG_PATTERN = re.compile(r"(_OnImpressionDataReadyEvent|LevelPlayInterstitialAdListener|LevelPlayBannerAdViewListener|LevelPlayRewardedAdListener)")
+CALLBACK_LOG_PATTERN = re.compile(r"(_OnImpressionDataReadyEvent|_OnLevelPlayImpressionDataReadyEvent|LevelPlayInterstitialAdListener|LevelPlayBannerAdViewListener|LevelPlayRewardedAdListener)")
 ADREVENUE_LOG_PATTERN = re.compile(r"AdRevenue Received:\s*AdRevenue\{(.*)\}")
 APPSFLYER_ADREVENUE_PATTERN = re.compile(r"\b(ADREVENUE)-\d+:\s*preparing data:\s*(\{.*\})", re.IGNORECASE)
 SDK_CHECK_SEARCH_PATTERN = re.compile(r'"search_pattern"\s*:\s*["\'](.*?)["\']')
@@ -423,7 +423,8 @@ CALLBACK_DISPLAY_NAMES = {
     "LevelPlayInterstitialAdListener": "Interstitial",
     "LevelPlayBannerAdViewListener": "Banner",
     "LevelPlayRewardedAdListener": "Rewarded",
-    "_OnImpressionDataReadyEvent": "Impression Data"
+    "_OnImpressionDataReadyEvent": "Impression Data",
+    "_OnLevelPlayImpressionDataReadyEvent": "LevelPlay Impression Data"
 }
 
 def get_device_name(device_id):
@@ -794,7 +795,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(9)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(10)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2949,14 +2950,19 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
     with lock:
         current_buffer = incomplete_impression_logs.get(device_id, "")
 
-    # If we are buffering, OR if this is a new Impression Data event
-    if current_buffer or "_OnImpressionDataReadyEvent" in log_entry:
+    is_split_impression_start = (
+        "_OnImpressionDataReadyEvent" in log_entry
+        or "_OnLevelPlayImpressionDataReadyEvent" in log_entry
+    )
+
+    # If we are buffering, OR if this is a new split impression event
+    if current_buffer or is_split_impression_start:
         with lock:
             # Re-read buffer inside lock to be safe (though simple logic here is fine)
             current_buffer = incomplete_impression_logs.get(device_id, "")
             
             # Case A: Start of new log
-            if "_OnImpressionDataReadyEvent" in log_entry:
+            if is_split_impression_start:
                 # Reset buffer with current line
                 current_buffer = log_entry
             else:
@@ -2985,14 +2991,20 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                     json_str = current_buffer[start_idx : end_idx+1]
                     details = ""
                     json_data_for_log = "{}"
+                    display_name = (
+                        "LevelPlay Impression Data"
+                        if "_OnLevelPlayImpressionDataReadyEvent" in current_buffer
+                        else "Impression Data"
+                    )
                     
                     try:
                         data = json.loads(json_str)
                         if 'impressionData' in data:
-                            details = format_json_html(data['impressionData'])
+                            details_target = data['impressionData']
                         else:
-                            details = format_json_html(data)
-                        json_data_for_log = json_str
+                            details_target = data
+                        details = format_json_html(details_target)
+                        json_data_for_log = json.dumps(details_target, ensure_ascii=False)
                     except:
                         details = f'<div class="text-xs font-mono break-all text-red-600">JSON Parse Error</div><div class="text-xs font-mono break-all">{json_str}</div>'
                         json_data_for_log = "{}"
@@ -3005,9 +3017,9 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                         "device_id": device_id, 
                         "device_name": get_device_name(device_id), 
                         "type": "Callback", 
-                        "event_name": "Impression Data", 
+                        "event_name": display_name, 
                         "details": details, 
-                        "raw_log": current_buffer.strip()[:200]+"...", 
+                        "raw_log": current_buffer.strip(), 
                         "json_data": json_data_for_log
                     })
                     socketio.emit('update_callback_ad_table', list(callback_ad_logs))
@@ -3035,7 +3047,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
     if callback_match:
         found_key = callback_match.group(1)
         # Skip if it is impression data (handled above)
-        if "_OnImpressionDataReadyEvent" in found_key: return
+        if "_OnImpressionDataReadyEvent" in found_key or "_OnLevelPlayImpressionDataReadyEvent" in found_key: return
 
         details = "N/A"
         display_name = CALLBACK_DISPLAY_NAMES.get(found_key, found_key)
