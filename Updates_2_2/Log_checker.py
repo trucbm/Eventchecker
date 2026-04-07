@@ -808,7 +808,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(13)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(14)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1600,7 +1600,7 @@ HTML_TEMPLATE = """
             results.forEach(r => {
                 if (!statusMap.hasOwnProperty(r.event_name)) return;
                 if (r.status === 'FAILED') statusMap[r.event_name] = 'failed';
-                else if (r.status === 'PASSED' && statusMap[r.event_name] !== 'failed') statusMap[r.event_name] = 'passed';
+                else if (r.status === 'PASSED') statusMap[r.event_name] = 'passed';
             });
             Object.entries(statusMap).forEach(([name, status]) => {
                 const el = defaultEventStatusEls[name];
