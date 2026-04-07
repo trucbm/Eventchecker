@@ -808,7 +808,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(12)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(13)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3185,6 +3185,13 @@ def cache_specific_event_log(event_name, params, json_string, log_entry, device_
     _apply_specific_filter_and_emit()
 
 def _apply_adrevenue_filter_and_emit():
+    global adrevenue_default_params, adrevenue_source_params
+    if active_profile_path and not any(adrevenue_source_params.get(src) for src in ("appmetrica", "appsflyer")):
+        try:
+            load_default_params_config()
+        except Exception:
+            pass
+
     rendered = []
     with lock:
         for item in adrevenue_logs:
@@ -3230,17 +3237,20 @@ def _apply_adrevenue_filter_and_emit():
             strange = sorted(actual_keys - set(seen_required)) if seen_required else []
 
             status = "INFO"
-            if seen_required:
-                status = "PASSED" if not missing else "FAILED"
-
             summary_parts = []
             if seen_required:
+                status = "PASSED" if not missing else "FAILED"
                 if missing:
                     summary_parts.append(format_param_issue_html("Missing", missing, "text-red-600", chunk_size=1))
                 else:
                     summary_parts.append("<div class='mb-2 text-xs font-medium text-green-600'>All required params found</div>")
                 if strange:
                     summary_parts.append(format_param_issue_html("Strange", strange, "text-orange-600", chunk_size=1))
+            elif normalized_source in {"appmetrica", "appsflyer"}:
+                status = "FAILED"
+                summary_parts.append(
+                    f"<div class='mb-2 text-xs font-medium text-red-600'>No adrevenue sheet params loaded for {escapeHTML(normalized_source.title())}</div>"
+                )
 
             details_html = ''.join(summary_parts) + format_json_html(details_target)
             rendered.append({
