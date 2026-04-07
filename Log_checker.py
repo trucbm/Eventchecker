@@ -729,7 +729,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(6)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(7)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1086,10 +1086,10 @@ payload..."></textarea>
                                 <button id="openPackageHistoryBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-slate-600 hover:bg-slate-700 text-white h-9">Recorded Log</button>
                             </div>
                         </div>
-                        <div class="max-w-[980px]">
+                        <div class="max-w-[980px] min-h-[120px] flex flex-col justify-start">
                             <label class="block text-[11px] font-medium text-gray-700 mb-1">Quick Select:</label>
-                            <div class="grid grid-cols-2 gap-x-14 gap-y-1 text-[11px] text-gray-700 max-w-[920px]">
-                                <div class="space-y-1">
+                            <div class="flex items-start gap-16 text-[11px] text-gray-700 pt-1">
+                                <div class="flex flex-col gap-1 min-w-[320px]">
                                     <label class="inline-flex items-center gap-2">
                                         <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.nonogram">
                                         <span>NG - com.indiez.nonogram</span>
@@ -1107,7 +1107,7 @@ payload..."></textarea>
                                         <span>SC - com.indiez.solitaire.food</span>
                                     </label>
                                 </div>
-                                <div class="space-y-1 justify-self-start xl:justify-self-end">
+                                <div class="flex flex-col gap-1 min-w-[320px]">
                                     <label class="inline-flex items-center gap-2">
                                         <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.dot.line.puzzle">
                                         <span>KN - com.nostel.dot.line.puzzle</span>
