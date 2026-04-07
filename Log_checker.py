@@ -808,7 +808,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(12)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(13)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3103,8 +3103,11 @@ def process_event_validator_log(event_name, actual_params, json_string, log_entr
         specific = event_specific_params.get(event_name, [])
         required_all.extend(specific)
 
-        missing = set(required_all) - set(actual_params.keys())
-        status = "PASSED" if not missing else "FAILED"
+        required_set = set(required_all)
+        actual_set = set(actual_params.keys())
+        missing = sorted(required_set - actual_set)
+        strange = sorted(actual_set - required_set) if required_set else []
+        status = "PASSED" if not missing and not strange else "FAILED"
         
         # New Formatting Logic: Highlight missing -> Show full JSON
         details_html = ""
@@ -3122,6 +3125,8 @@ def process_event_validator_log(event_name, actual_params, json_string, log_entr
                 details_html += f'<div class="text-orange-600 font-bold mb-2">Possible typo: "{event_name}" ~ "{closest}"</div>'
         if missing:
             details_html += format_param_issue_html("Missing", missing, "text-red-600")
+        if strange:
+            details_html += format_param_issue_html("Strange", strange, "text-orange-600")
         
         details_html += format_json_html(actual_params)
         
@@ -3158,9 +3163,11 @@ def _apply_specific_filter_and_emit():
                      required_all.extend(event_specific_params.get(evt, []))
 
                  if required_all:
-                     missing = set(required_all) - set(params.keys())
-                     strange = set(params.keys()) - set(required_all)
-                     status = "PASSED" if not missing else "FAILED"
+                     required_set = set(required_all)
+                     actual_set = set(params.keys())
+                     missing = sorted(required_set - actual_set)
+                     strange = sorted(actual_set - required_set)
+                     status = "PASSED" if not missing and not strange else "FAILED"
                      
                      if missing:
                          details += format_param_issue_html("Missing", missing, "text-red-600")
