@@ -545,13 +545,25 @@ def _read_adrevenue_sheet(ws):
     """Read AdRevenue params from a dedicated sheet with Appmetrica/Appsflyer columns."""
     params_by_source = {"appmetrica": [], "appsflyer": []}
     source_cols = {"appmetrica": None, "appsflyer": None}
+    header_row = None
 
-    for col in range(1, ws.max_column + 1):
-        header = _normalize_adrevenue_sheet_key(ws.cell(1, col).value)
-        if header in source_cols and source_cols[header] is None:
-            source_cols[header] = col
+    # The adrevenue sheet can have headers on row 1 or row 2 (e.g. B=AdRevenue, C=Appmetrica, D=AppsFlyer).
+    # Find the first row near the top that declares Appmetrica / Appsflyer columns.
+    for row in range(1, min(ws.max_row, 5) + 1):
+        candidate_cols = {"appmetrica": None, "appsflyer": None}
+        for col in range(1, ws.max_column + 1):
+            header = _normalize_adrevenue_sheet_key(ws.cell(row, col).value)
+            if header in candidate_cols and candidate_cols[header] is None:
+                candidate_cols[header] = col
+        if any(candidate_cols.values()):
+            header_row = row
+            source_cols = candidate_cols
+            break
 
-    for row in range(2, ws.max_row + 1):
+    if header_row is None:
+        return params_by_source
+
+    for row in range(header_row + 1, ws.max_row + 1):
         for source, col in source_cols.items():
             if not col:
                 continue
@@ -795,7 +807,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(10)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(11)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
