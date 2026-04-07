@@ -729,7 +729,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(1)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(2)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1194,6 +1194,7 @@ payload..."></textarea>
                 <h2 class="text-xl font-bold text-gray-800">Package Log Stream</h2>
                 <div class="flex items-center gap-2">
                     <button id="copyPackageBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-blue-500 hover:bg-blue-600 text-white">Copy Selected</button>
+                    <button id="pausePackageLogBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-amber-500 hover:bg-amber-600 text-white">Pause</button>
                     <button id="stopPackageLogBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-red-500 hover:bg-red-600 text-white">Stop</button>
                 </div>
             </div>
@@ -1793,6 +1794,8 @@ payload..."></textarea>
         let lastPackageRenderedCount = 0;
         let lastPackageFirstRowKey = '';
         let packageHistorySessions = [];
+        let packageUiPaused = false;
+        let pausedPackageSnapshot = [];
 
         function getPackageRowKey(l) {
             const msgText = (l.message || l.log || '');
@@ -1834,38 +1837,44 @@ payload..."></textarea>
             return `<tr class="package-log-row hover:bg-gray-50 ${rowClass} ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${idx}"><td class="py-2 px-2 font-mono text-xs time-cell col-time">${escapeHTML(l.time_display || l.time || '')}</td><td class="py-2 pr-1 pl-2 font-mono text-xs tag-cell col-tag" title="${escapeHTML(l.tag || '')}">${escapeHTML(l.tag || '')}</td><td class="py-2 pl-1 pr-3 log-cell message-cell col-message ${msgClass}">${escapeHTML(msgText)}</td></tr>`;
         }
 
+        function getPackageSourceLogs(state) {
+            return packageUiPaused ? pausedPackageSnapshot : lastPackageLogs;
+        }
+
         function renderPackageLogTable(forceFull = false) {
             const tbody = document.getElementById('packageLogTableBody');
             if (!tbody) return;
             const state = getPackageFilterState();
+            const sourceLogs = getPackageSourceLogs(state);
             const signature = JSON.stringify(state);
             const canAppendOnly =
+                !packageUiPaused &&
                 !forceFull &&
                 signature === lastPackageFilterSignature &&
-                lastPackageLogs.length >= lastPackageRenderedCount &&
+                sourceLogs.length >= lastPackageRenderedCount &&
                 (lastPackageRenderedCount === 0 ||
-                    (lastPackageLogs[0] && getPackageRowKey(lastPackageLogs[0]) === lastPackageFirstRowKey));
+                    (sourceLogs[0] && getPackageRowKey(sourceLogs[0]) === lastPackageFirstRowKey));
 
-            if (canAppendOnly && lastPackageLogs.length > lastPackageRenderedCount) {
-                const appendedLogs = filterPackageLogs(lastPackageLogs.slice(lastPackageRenderedCount), state);
+            if (canAppendOnly && sourceLogs.length > lastPackageRenderedCount) {
+                const appendedLogs = filterPackageLogs(sourceLogs.slice(lastPackageRenderedCount), state);
                 if (appendedLogs.length > 0) {
                     const startIdx = tbody.querySelectorAll('tr.package-log-row').length;
                     tbody.insertAdjacentHTML('beforeend', appendedLogs.map((l, idx) => packageRowHtml(l, startIdx + idx)).join(''));
                 }
             } else {
-                const filtered = filterPackageLogs(lastPackageLogs, state);
+                const filtered = filterPackageLogs(sourceLogs, state);
                 tbody.innerHTML = filtered.map((l, idx) => packageRowHtml(l, idx)).join('');
             }
 
             lastPackageFilterSignature = signature;
-            lastPackageRenderedCount = lastPackageLogs.length;
-            lastPackageFirstRowKey = lastPackageLogs[0] ? getPackageRowKey(lastPackageLogs[0]) : '';
+            lastPackageRenderedCount = sourceLogs.length;
+            lastPackageFirstRowKey = sourceLogs[0] ? getPackageRowKey(sourceLogs[0]) : '';
             if(document.getElementById('autoScroll').checked) document.getElementById('packageLogContainer').scrollTop = document.getElementById('packageLogContainer').scrollHeight;
         }
 
         socket.on('package_log_cache', (logs) => {
             lastPackageLogs = logs || [];
-            renderPackageLogTable();
+            if (!packageUiPaused) renderPackageLogTable();
         });
 
         function renderPackageHistorySessions(payload) {
@@ -2367,6 +2376,7 @@ payload..."></textarea>
 
         const packageStreamModal = document.getElementById('packageStreamModal');
         const startPackageLogBtn = document.getElementById('startPackageLogBtn');
+        const pausePackageLogBtn = document.getElementById('pausePackageLogBtn');
         const stopPackageLogBtn = document.getElementById('stopPackageLogBtn');
 
         function setPackageRunningState(isRunning) {
@@ -2386,15 +2396,38 @@ payload..."></textarea>
             packageStreamModal?.classList.add('hidden');
         }
 
+        function setPackagePauseState(isPaused) {
+            packageUiPaused = isPaused;
+            if (pausePackageLogBtn) {
+                pausePackageLogBtn.textContent = isPaused ? 'Resume' : 'Pause';
+                pausePackageLogBtn.classList.toggle('bg-amber-500', !isPaused);
+                pausePackageLogBtn.classList.toggle('hover:bg-amber-600', !isPaused);
+                pausePackageLogBtn.classList.toggle('bg-emerald-500', isPaused);
+                pausePackageLogBtn.classList.toggle('hover:bg-emerald-600', isPaused);
+            }
+            if (isPaused) {
+                pausedPackageSnapshot = filterPackageLogs(lastPackageLogs, getPackageFilterState());
+            } else {
+                pausedPackageSnapshot = [];
+            }
+            renderPackageLogTable(true);
+        }
+
         startPackageLogBtn?.addEventListener('click', () => {
              const pkg = document.getElementById('packageIdInput').value;
+             setPackagePauseState(false);
              openPackageStreamModal();
              socket.emit('start_package_log', {package_id: pkg});
              setPackageRunningState(true);
         });
 
+        pausePackageLogBtn?.addEventListener('click', () => {
+            setPackagePauseState(!packageUiPaused);
+        });
+
         stopPackageLogBtn?.addEventListener('click', () => {
             socket.emit('start_package_log', {package_id: ''});
+            setPackagePauseState(false);
             closePackageStreamModal();
             setPackageRunningState(false);
         });
@@ -2467,6 +2500,7 @@ payload..."></textarea>
             const btn = document.getElementById('startPackageLogBtn');
             if (btn && btn.textContent !== 'Start') {
                 socket.emit('start_package_log', {package_id: ''});
+                setPackagePauseState(false);
                 closePackageStreamModal();
                 setPackageRunningState(false);
             }
