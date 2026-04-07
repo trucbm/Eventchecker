@@ -540,6 +540,31 @@ def _normalize_adrevenue_sheet_key(name):
     return text
 
 
+def _read_adrevenue_sheet(ws):
+    """Read AdRevenue params from a dedicated sheet with Appmetrica/Appsflyer columns."""
+    params_by_source = {"appmetrica": [], "appsflyer": []}
+    source_cols = {"appmetrica": None, "appsflyer": None}
+
+    for col in range(1, ws.max_column + 1):
+        header = _normalize_adrevenue_sheet_key(ws.cell(1, col).value)
+        if header in source_cols and source_cols[header] is None:
+            source_cols[header] = col
+
+    for row in range(2, ws.max_row + 1):
+        for source, col in source_cols.items():
+            if not col:
+                continue
+            raw = ws.cell(row, col).value
+            if raw is None:
+                continue
+            value = str(raw).strip()
+            if not value:
+                continue
+            params_by_source[source].append(value)
+
+    return params_by_source
+
+
 def load_default_params_config():
     """Load default params, event-specific params, and AdRevenue params from XLSX."""
     global default_params, event_specific_params, active_profile_game_name
@@ -560,18 +585,20 @@ def load_default_params_config():
         revenue_defaults = []
         revenue_specific = {}
         revenue_sheet = None
-        for ws in wb.worksheets[1:]:
+        for ws in wb.worksheets:
             title = _normalize_adrevenue_sheet_key(ws.title)
-            if "revenue" in title or title in {"appmetrica", "appsflyer", "all"}:
+            if title == "adrevenue":
                 revenue_sheet = ws
                 break
+        if revenue_sheet is None:
+            for ws in wb.worksheets[1:]:
+                title = _normalize_adrevenue_sheet_key(ws.title)
+                if "revenue" in title or title in {"appmetrica", "appsflyer", "all"}:
+                    revenue_sheet = ws
+                    break
 
         if revenue_sheet:
-            _, revenue_defaults, revenue_sheet_map = _read_profile_sheet(revenue_sheet, allow_default_fill=True)
-            revenue_specific = {
-                _normalize_adrevenue_sheet_key(k): v
-                for k, v in revenue_sheet_map.items()
-            }
+            revenue_specific = _read_adrevenue_sheet(revenue_sheet)
 
         adrevenue_default_params = revenue_defaults
         adrevenue_source_params = revenue_specific
@@ -767,7 +794,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(8)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(9)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
