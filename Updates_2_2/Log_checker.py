@@ -729,7 +729,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(4)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(5)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1076,8 +1076,8 @@ payload..."></textarea>
             
             <!-- TAB 8: Package -->
             <div id="tabContentPackage" class="hidden">
-                 <div class="bg-white rounded-xl shadow-md p-4 mb-4">
-                     <div class="grid grid-cols-1 lg:grid-cols-[0.9fr_1.5fr] gap-4 items-start">
+                 <div class="bg-white rounded-xl shadow-md p-5 mb-4">
+                     <div class="grid grid-cols-1 lg:grid-cols-[0.85fr_1.7fr] gap-6 items-start">
                         <div class="max-w-md">
                             <label for="packageIdInput" class="block text-[11px] font-medium text-gray-700 mb-1">Package ID:</label>
                             <input type="text" id="packageIdInput" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="com.example.app">
@@ -1088,8 +1088,8 @@ payload..."></textarea>
                         </div>
                         <div>
                             <label class="block text-[11px] font-medium text-gray-700 mb-1">Quick Select:</label>
-                            <div class="grid grid-cols-1 xl:grid-cols-2 gap-x-10 gap-y-1 text-[11px] text-gray-700">
-                                <div class="space-y-1">
+                            <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-x-10 gap-y-1 text-[11px] text-gray-700">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1">
                                     <label class="inline-flex items-center gap-2">
                                         <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.nonogram">
                                         <span>NG - com.indiez.nonogram</span>
@@ -1107,7 +1107,7 @@ payload..."></textarea>
                                         <span>SC - com.indiez.solitaire.food</span>
                                     </label>
                                 </div>
-                                <div class="space-y-1">
+                                <div class="space-y-1 justify-self-start xl:justify-self-end">
                                     <label class="inline-flex items-center gap-2">
                                         <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.dot.line.puzzle">
                                         <span>KN - com.nostel.dot.line.puzzle</span>
