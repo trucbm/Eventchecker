@@ -271,7 +271,8 @@ callback_ad_logs = deque(maxlen=MAX_CALLBACK_AD_LOGS)
 # 7. Dữ liệu cho Tab AdRevenue
 adrevenue_log_cache = []
 adrevenue_logs = deque(maxlen=MAX_ADREVENUE_LOGS)
-adrevenue_params_to_validate = []
+adrevenue_default_params = []
+adrevenue_source_params = {}
 
 # 8. Dữ liệu cho Tab SDK Check
 sdk_check_search_list = []
@@ -488,66 +489,103 @@ def extract_json_object_from_text(text):
     except:
         return None
 
+def _read_profile_sheet(ws, allow_default_fill=True):
+    event_map = {}
+    current_event = None
+    header_row = 1
+    game_name = ""
+
+    if str(ws.cell(1, 2).value or "").strip().lower() == "game":
+        game_name = str(ws.cell(1, 3).value or "").strip()
+        header_row = 2
+
+    for r in range(header_row + 1, ws.max_row + 1):
+        event_val = ws.cell(r, 2).value
+        param_cell = ws.cell(r, 3)
+        param_val = param_cell.value
+
+        if event_val:
+            current_event = str(event_val).strip()
+            if current_event:
+                event_map.setdefault(current_event, {"specific": [], "default": []})
+
+        if current_event and param_val:
+            param = str(param_val).strip()
+            fill = param_cell.fill
+            fg = fill.fgColor.rgb if fill and fill.fgColor else None
+            is_default = allow_default_fill and (fg == DEFAULT_PARAM_FILL)
+            bucket = "default" if is_default else "specific"
+            event_map[current_event][bucket].append(param)
+
+    seen = set()
+    merged_default = []
+    for data in event_map.values():
+        for p in data["default"]:
+            if p not in seen:
+                seen.add(p)
+                merged_default.append(p)
+    return game_name, merged_default, {k: v["specific"] for k, v in event_map.items()}
+
+
+def _normalize_adrevenue_sheet_key(name):
+    text = re.sub(r'[^a-z0-9]+', '', str(name or "").lower())
+    aliases = {
+        "appmetrica": {"appmetrica", "adrevenueappmetrica", "appmetricaadrevenue"},
+        "appsflyer": {"appsflyer", "adrevenueappsflyer", "appsflyeradrevenue"},
+        "all": {"adrevenue", "all", "default", "common", "shared"},
+    }
+    for key, values in aliases.items():
+        if text in values:
+            return key
+    return text
+
+
 def load_default_params_config():
-    """Load default params + event-specific params from XLSX."""
+    """Load default params, event-specific params, and AdRevenue params from XLSX."""
     global default_params, event_specific_params, active_profile_game_name
+    global adrevenue_default_params, adrevenue_source_params
     path = active_profile_path or DEFAULT_PARAMS_XLSX
     if not path or not os.path.exists(path):
         print(f"INFO: Default params sheet not found: {path}")
         default_params = []
         event_specific_params = {}
         active_profile_game_name = ""
+        adrevenue_default_params = []
+        adrevenue_source_params = {}
         return
     try:
         wb = load_workbook(path)
-        ws = wb.active
-        event_map = {}
-        current_event = None
-        header_row = 1
+        active_profile_game_name, default_params, event_specific_params = _read_profile_sheet(wb.active, allow_default_fill=True)
 
-        if str(ws.cell(1, 2).value or "").strip().lower() == "game":
-            active_profile_game_name = str(ws.cell(1, 3).value or "").strip()
-            header_row = 2
-        else:
-            active_profile_game_name = ""
+        revenue_defaults = []
+        revenue_specific = {}
+        revenue_sheet = None
+        for ws in wb.worksheets[1:]:
+            title = _normalize_adrevenue_sheet_key(ws.title)
+            if "revenue" in title or title in {"appmetrica", "appsflyer", "all"}:
+                revenue_sheet = ws
+                break
 
-        for r in range(header_row + 1, ws.max_row + 1):
-            event_val = ws.cell(r, 2).value
-            param_cell = ws.cell(r, 3)
-            param_val = param_cell.value
+        if revenue_sheet:
+            _, revenue_defaults, revenue_sheet_map = _read_profile_sheet(revenue_sheet, allow_default_fill=True)
+            revenue_specific = {
+                _normalize_adrevenue_sheet_key(k): v
+                for k, v in revenue_sheet_map.items()
+            }
 
-            if event_val:
-                current_event = str(event_val).strip()
-                if current_event:
-                    event_map.setdefault(current_event, {"specific": [], "default": []})
-
-            if current_event and param_val:
-                param = str(param_val).strip()
-                fill = param_cell.fill
-                fg = fill.fgColor.rgb if fill and fill.fgColor else None
-                is_default = (fg == DEFAULT_PARAM_FILL)
-                if is_default:
-                    event_map[current_event]["default"].append(param)
-                else:
-                    event_map[current_event]["specific"].append(param)
-
-        # Build unique default params list
-        seen = set()
-        merged_default = []
-        for data in event_map.values():
-            for p in data["default"]:
-                if p not in seen:
-                    seen.add(p)
-                    merged_default.append(p)
-
-        default_params = merged_default
-        event_specific_params = {k: v["specific"] for k, v in event_map.items()}
-        print(f"INFO: Loaded default params: {len(default_params)}; events: {len(event_specific_params)}")
+        adrevenue_default_params = revenue_defaults
+        adrevenue_source_params = revenue_specific
+        print(
+            f"INFO: Loaded default params: {len(default_params)}; events: {len(event_specific_params)}; "
+            f"adrevenue defaults: {len(adrevenue_default_params)}; adrevenue sources: {len(adrevenue_source_params)}"
+        )
     except Exception as e:
         print(f"ERROR: Failed to load default params sheet: {e}")
         default_params = []
         event_specific_params = {}
         active_profile_game_name = ""
+        adrevenue_default_params = []
+        adrevenue_source_params = {}
 
 
 def _sanitize_profile_filename(filename):
@@ -729,7 +767,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(7)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(8)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -947,12 +985,13 @@ HTML_TEMPLATE = """
             <!-- TAB 5: AdRevenue -->
             <div id="tabContentAdRevenue" class="hidden">
                 <div class="bg-white rounded-xl shadow-md p-4 mb-4">
-                     <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(260px,360px)] gap-4 items-start">
-                        <div>
-                            <label for="adRevenueParamInput" class="block text-xs font-medium text-gray-700 mb-1">Validate Parameters:</label>
-                            <textarea id="adRevenueParamInput" rows="6" class="w-full p-2 border rounded-md shadow-sm" placeholder="adRevenue
-currency
-payload..."></textarea>
+                     <div class="grid grid-cols-1 md:grid-cols-[minmax(260px,380px)_minmax(0,1fr)] gap-4 items-start">
+                        <div class="space-y-3">
+                            <div class="flex items-center gap-3">
+                                <label for="adRevenueProfileSelect" class="text-xs font-medium text-gray-700 whitespace-nowrap">Game Profile:</label>
+                                <p id="adRevenueProfileGameText" class="text-xs font-medium text-indigo-700"></p>
+                            </div>
+                            <select id="adRevenueProfileSelect" class="w-full h-10 px-3 border rounded-md shadow-sm text-sm"></select>
                         </div>
                         <div class="space-y-3">
                             <div>
@@ -1468,18 +1507,23 @@ payload..."></textarea>
         }
 
         function renderProfileOptions(payload) {
-            const select = document.getElementById('profileSelect');
-            if (!select) return;
             const profiles = payload.profiles || [];
-            select.innerHTML = profiles.length
-                ? profiles.map(name => `<option value="${escapeAttribute(name)}"${name === payload.current_profile ? ' selected' : ''}>${escapeHTML(name)}</option>`).join('')
-                : '<option value="">No profiles</option>';
-            select.disabled = profiles.length === 0;
+            [document.getElementById('profileSelect'), document.getElementById('adRevenueProfileSelect')].forEach(select => {
+                if (!select) return;
+                select.innerHTML = profiles.length
+                    ? profiles.map(name => `<option value="${escapeAttribute(name)}"${name === payload.current_profile ? ' selected' : ''}>${escapeHTML(name)}</option>`).join('')
+                    : '<option value="">No profiles</option>';
+                select.disabled = profiles.length === 0;
+            });
             currentProfileName = payload.current_profile || '';
             defaultEventNames = payload.default_event_names || [];
             renderDefaultEventStatusList();
             updateDefaultEventStatus(validator_results_cache);
             updateProfileStatus(payload);
+            const adRevenueGameEl = document.getElementById('adRevenueProfileGameText');
+            if (adRevenueGameEl) {
+                adRevenueGameEl.textContent = payload.game_name || 'Unknown';
+            }
         }
 
         async function refreshProfiles() {
@@ -1609,8 +1653,7 @@ payload..."></textarea>
             }
         });
 
-        document.getElementById('profileSelect')?.addEventListener('change', async (e) => {
-            const profileName = e.target.value;
+        async function switchSharedProfile(profileName) {
             if (!profileName || profileName === currentProfileName) return;
             const res = await fetch('/api/profiles/select', {
                 method: 'POST',
@@ -1626,6 +1669,14 @@ payload..."></textarea>
             validator_results_cache = [];
             renderValidatorTable(validator_results_cache);
             renderProfileOptions(payload);
+        }
+
+        document.getElementById('profileSelect')?.addEventListener('change', async (e) => {
+            await switchSharedProfile(e.target.value);
+        });
+
+        document.getElementById('adRevenueProfileSelect')?.addEventListener('change', async (e) => {
+            await switchSharedProfile(e.target.value);
         });
 
         document.getElementById('reloadProfileBtn')?.addEventListener('click', async () => {
@@ -2217,12 +2268,6 @@ payload..."></textarea>
             r.addEventListener('change', () => renderSpecificEventTable());
         });
         
-        document.getElementById('adRevenueParamInput').addEventListener('input', (e) => socket.emit('update_adrevenue_filter', {
-            params: e.target.value
-                .split('\\n')
-                .map(p => p.trim().replace(/^['"]+|['"]+$/g, ''))
-                .filter(p => p)
-        }));
         document.getElementById('adRevenueFilterInput').addEventListener('input', renderAdRevenueTable);
         document.querySelectorAll('input[name="adRevenueSourceFilter"]').forEach(r => r.addEventListener('change', renderAdRevenueTable));
         let packageFilterRenderTimer = null;
@@ -2536,6 +2581,7 @@ def select_profile():
     try:
         if not _set_active_profile(profile_name):
             return jsonify({'ok': False, 'error': 'profile_not_found'}), 404
+        _apply_adrevenue_filter_and_emit()
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
     return jsonify({'ok': True, **_profile_payload()})
@@ -2547,6 +2593,7 @@ def reload_profile():
         _set_active_profile(active_profile_name)
     else:
         _set_active_profile()
+    _apply_adrevenue_filter_and_emit()
     return jsonify({'ok': True, **_profile_payload()})
 
 
@@ -2561,6 +2608,7 @@ def import_profile():
         os.makedirs(PROFILE_DIR, exist_ok=True)
         upload.save(target)
         _set_active_profile(filename)
+        _apply_adrevenue_filter_and_emit()
         return jsonify({'ok': True, **_profile_payload()})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
@@ -3086,7 +3134,6 @@ def cache_specific_event_log(event_name, params, json_string, log_entry, device_
     _apply_specific_filter_and_emit()
 
 def _apply_adrevenue_filter_and_emit():
-    normalized = [p.strip().strip('"').strip("'") for p in adrevenue_params_to_validate if p and p.strip()]
     rendered = []
     with lock:
         for item in adrevenue_logs:
@@ -3104,22 +3151,45 @@ def _apply_adrevenue_filter_and_emit():
                 validate_maps = [parsed_data, payload_data]
                 details_target = parsed_data if parsed_data else item.get("raw_details", "")
 
+            required_all = list(adrevenue_default_params)
+            normalized_source = _normalize_adrevenue_sheet_key(source)
+            for alias in (
+                normalized_source,
+                _normalize_adrevenue_sheet_key(item.get("event_name", "")),
+                "all",
+            ):
+                required_all.extend(adrevenue_source_params.get(alias, []))
+            seen_required = []
+            seen_set = set()
+            for param in required_all:
+                if param not in seen_set:
+                    seen_set.add(param)
+                    seen_required.append(param)
+
             missing = []
-            for param in normalized:
+            for param in seen_required:
                 if any(isinstance(m, dict) and param in m for m in validate_maps):
                     continue
                 missing.append(param)
 
+            actual_keys = set()
+            for candidate in validate_maps:
+                if isinstance(candidate, dict):
+                    actual_keys.update(candidate.keys())
+            strange = sorted(actual_keys - set(seen_required)) if seen_required else []
+
             status = "INFO"
-            if normalized:
+            if seen_required:
                 status = "PASSED" if not missing else "FAILED"
 
             summary_parts = []
-            if normalized:
+            if seen_required:
                 if missing:
                     summary_parts.append(format_param_issue_html("Missing", missing, "text-red-600", chunk_size=1))
                 else:
-                    summary_parts.append("<div class='mb-2 text-xs font-medium text-green-600'>All requested params found</div>")
+                    summary_parts.append("<div class='mb-2 text-xs font-medium text-green-600'>All required params found</div>")
+                if strange:
+                    summary_parts.append(format_param_issue_html("Strange", strange, "text-orange-600", chunk_size=1))
 
             details_html = ''.join(summary_parts) + format_json_html(details_target)
             rendered.append({
@@ -3522,8 +3592,8 @@ def usf(d):
     _apply_specific_filter_and_emit()
 
 @socketio.on('update_adrevenue_filter')
-def uaf(d):
-    global adrevenue_params_to_validate; adrevenue_params_to_validate = d.get('params', []); _apply_adrevenue_filter_and_emit()
+def uaf(_d=None):
+    _apply_adrevenue_filter_and_emit()
 
 @socketio.on('start_sdk_check')
 def sdk_check(data):
