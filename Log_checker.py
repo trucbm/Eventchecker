@@ -729,7 +729,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(5)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(6)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1086,10 +1086,10 @@ payload..."></textarea>
                                 <button id="openPackageHistoryBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-slate-600 hover:bg-slate-700 text-white h-9">Recorded Log</button>
                             </div>
                         </div>
-                        <div>
+                        <div class="max-w-[980px]">
                             <label class="block text-[11px] font-medium text-gray-700 mb-1">Quick Select:</label>
-                            <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-x-10 gap-y-1 text-[11px] text-gray-700">
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-1">
+                            <div class="grid grid-cols-2 gap-x-14 gap-y-1 text-[11px] text-gray-700 max-w-[920px]">
+                                <div class="space-y-1">
                                     <label class="inline-flex items-center gap-2">
                                         <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.nonogram">
                                         <span>NG - com.indiez.nonogram</span>
