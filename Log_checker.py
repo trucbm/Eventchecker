@@ -259,6 +259,7 @@ specific_event_params_filters = []
 
 # 5. Dữ liệu cho Tab Package Logcat
 package_log_cache = deque(maxlen=15000)
+PACKAGE_LOG_UI_MAX_ROWS = 1500
 target_package_name = ""
 active_package_pids = {}
 active_logcat_processes = {}
@@ -807,7 +808,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(11)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(12)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2750,7 +2751,6 @@ def package_log_rows_api():
 
         sql += """
             ORDER BY id ASC
-            LIMIT 2000
         """
         rows = conn.execute(sql, params).fetchall()
         return jsonify({
@@ -3555,7 +3555,8 @@ def package_log_emitter():
             if not is_paused and target_package_name:
                 now = time.time()
                 while package_log_cache and now - package_log_cache[0]['timestamp'] > 1000: package_log_cache.popleft()
-                socketio.emit('package_log_cache', list(package_log_cache))
+                ui_rows = list(package_log_cache)[-PACKAGE_LOG_UI_MAX_ROWS:]
+                socketio.emit('package_log_cache', ui_rows)
 
 # --- SOCKET HANDLERS ---
 @socketio.on('change_tab')
