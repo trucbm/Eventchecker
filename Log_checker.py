@@ -729,7 +729,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(2)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(3)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1198,9 +1198,9 @@ payload..."></textarea>
                     <button id="stopPackageLogBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-red-500 hover:bg-red-600 text-white">Stop</button>
                 </div>
             </div>
-            <div class="grid grid-cols-1 lg:grid-cols-[1.2fr_1.3fr_auto] gap-4 items-start mb-4">
-                <div>
-                    <div class="flex items-center gap-4 mb-3">
+            <div class="grid grid-cols-1 xl:grid-cols-[420px_minmax(0,1fr)] gap-5 items-start mb-4">
+                <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-4 mb-3">
                         <label class="inline-flex items-center gap-2">
                             <input id="showErrorsOnly" type="checkbox" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
                             <span class="block text-xs text-gray-900">Show errors only</span>
@@ -1212,7 +1212,7 @@ payload..."></textarea>
                     </div>
                     <label for="packageTagFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Tag Filter:</label>
                     <input type="text" id="packageTagFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Tag...">
-                    <div class="mt-2 grid grid-cols-2 gap-4 text-xs text-gray-700">
+                    <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-xs text-gray-700">
                         <label class="inline-flex items-center gap-2">
                             <input type="radio" name="tagQuickFilter" value="" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
                             <span>All</span>
@@ -1231,16 +1231,13 @@ payload..."></textarea>
                         </label>
                     </div>
                 </div>
-                <div>
+                <div class="min-w-0">
                     <label for="packageFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 1:</label>
                     <input type="text" id="packageFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 1...">
                     <div class="mt-2">
                         <label for="packageFilterInput2" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 2:</label>
                         <input type="text" id="packageFilterInput2" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 2...">
                     </div>
-                </div>
-                <div class="text-[11px] text-gray-500 pt-1">
-                    Live package log runs in this popup.
                 </div>
             </div>
             <div id="packageLogContainer" class="overflow-auto overflow-x-auto flex-1 border rounded-md" style="min-height: 0;">
