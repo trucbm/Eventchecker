@@ -729,7 +729,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(3)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(4)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1190,53 +1190,54 @@ payload..."></textarea>
 
     <div id="packageStreamModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 hidden">
         <div class="bg-white rounded-xl shadow-lg p-6 w-[94vw] h-[88vh] flex flex-col">
-            <div class="flex justify-between items-center border-b pb-3 mb-4">
-                <h2 class="text-xl font-bold text-gray-800">Package Log Stream</h2>
-                <div class="flex items-center gap-2">
-                    <button id="copyPackageBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-blue-500 hover:bg-blue-600 text-white">Copy Selected</button>
-                    <button id="pausePackageLogBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-amber-500 hover:bg-amber-600 text-white">Pause</button>
-                    <button id="stopPackageLogBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-red-500 hover:bg-red-600 text-white">Stop</button>
-                </div>
-            </div>
-            <div class="grid grid-cols-1 xl:grid-cols-[420px_minmax(0,1fr)] gap-5 items-start mb-4">
-                <div class="min-w-0">
-                    <div class="flex flex-wrap items-center gap-4 mb-3">
-                        <label class="inline-flex items-center gap-2">
-                            <input id="showErrorsOnly" type="checkbox" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
-                            <span class="block text-xs text-gray-900">Show errors only</span>
-                        </label>
-                        <label class="inline-flex items-center gap-2">
-                            <input id="autoScroll" type="checkbox" checked class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
-                            <span class="block text-xs text-gray-900">Auto-scroll</span>
-                        </label>
+            <div class="border-b pb-3 mb-4">
+                <div class="grid grid-cols-1 xl:grid-cols-[420px_1fr_420px] gap-6 items-start">
+                    <div class="min-w-0">
+                        <h2 class="text-xl font-bold text-gray-800 mb-4">Package Log Stream</h2>
+                        <label for="packageTagFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Tag Filter:</label>
+                        <input type="text" id="packageTagFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Tag...">
+                        <div class="flex items-center gap-3 mt-4">
+                            <button id="pausePackageLogBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-amber-500 hover:bg-amber-600 text-white">Pause</button>
+                            <button id="stopPackageLogBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-red-500 hover:bg-red-600 text-white">Stop</button>
+                        </div>
                     </div>
-                    <label for="packageTagFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Tag Filter:</label>
-                    <input type="text" id="packageTagFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Tag...">
-                    <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-xs text-gray-700">
-                        <label class="inline-flex items-center gap-2">
-                            <input type="radio" name="tagQuickFilter" value="" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                            <span>All</span>
-                        </label>
-                        <label class="inline-flex items-center gap-2">
-                            <input type="radio" name="tagQuickFilter" value="appsflyer" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                            <span>Appsflyer</span>
-                        </label>
-                        <label class="inline-flex items-center gap-2">
-                            <input type="radio" name="tagQuickFilter" value="integrationhelper" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                            <span>Integrationhelper</span>
-                        </label>
-                        <label class="inline-flex items-center gap-2">
-                            <input type="radio" name="tagQuickFilter" value="appmetrica" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                            <span>Appmetrica</span>
-                        </label>
+                    <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-4 mb-4">
+                            <label class="inline-flex items-center gap-2">
+                                <input id="showErrorsOnly" type="checkbox" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                <span class="block text-xs text-gray-900">Show errors only</span>
+                            </label>
+                            <label class="inline-flex items-center gap-2">
+                                <input id="autoScroll" type="checkbox" checked class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                <span class="block text-xs text-gray-900">Auto-scroll</span>
+                            </label>
+                        </div>
+                        <div class="pt-4 border-t grid grid-cols-1 gap-y-2 text-xs text-gray-700">
+                            <label class="inline-flex items-center gap-2">
+                                <input type="radio" name="tagQuickFilter" value="" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                <span>All</span>
+                            </label>
+                            <label class="inline-flex items-center gap-2">
+                                <input type="radio" name="tagQuickFilter" value="integrationhelper" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                <span>Integrationhelper</span>
+                            </label>
+                            <label class="inline-flex items-center gap-2">
+                                <input type="radio" name="tagQuickFilter" value="appsflyer" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                <span>Appsflyer</span>
+                            </label>
+                            <label class="inline-flex items-center gap-2">
+                                <input type="radio" name="tagQuickFilter" value="appmetrica" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                <span>Appmetrica</span>
+                            </label>
+                        </div>
                     </div>
-                </div>
-                <div class="min-w-0">
-                    <label for="packageFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 1:</label>
-                    <input type="text" id="packageFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 1...">
-                    <div class="mt-2">
-                        <label for="packageFilterInput2" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 2:</label>
-                        <input type="text" id="packageFilterInput2" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 2...">
+                    <div class="min-w-0">
+                        <label for="packageFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 1:</label>
+                        <input type="text" id="packageFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 1...">
+                        <div class="mt-3">
+                            <label for="packageFilterInput2" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 2:</label>
+                            <input type="text" id="packageFilterInput2" class="w-full p-2 border rounded-md shadow-sm" placeholder="Search text 2...">
+                        </div>
                     </div>
                 </div>
             </div>
