@@ -812,7 +812,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(23)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(24)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1274,7 +1274,7 @@ HTML_TEMPLATE = """
                         <tr>
                             <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Time</th>
                             <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Device</th>
-                            <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b w-[96px] max-w-[96px]">Tag</th>
+                            <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b w-[88px] max-w-[88px]">Tag</th>
                             <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Message</th>
                         </tr>
                     </thead>
@@ -2036,7 +2036,7 @@ HTML_TEMPLATE = """
                 <tr>
                     <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.time_display || '')}</td>
                     <td class="py-2 px-2 text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.device_name || row.device_id || '')}</td>
-                    <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap max-w-[96px] w-[96px] overflow-hidden text-ellipsis" title="${escapeHTML(row.tag || '')}">${escapeHTML(row.tag || '')}</td>
+                    <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap max-w-[88px] w-[88px] overflow-hidden text-ellipsis" title="${escapeHTML(row.tag || '')}">${escapeHTML(row.tag || '')}</td>
                     <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-pre-wrap break-all">${escapeHTML(row.raw_log || row.message || '')}</td>
                 </tr>
             `).join('');
