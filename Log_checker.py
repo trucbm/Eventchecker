@@ -15,6 +15,10 @@ import sys
 import shutil
 import logging
 import sqlite3
+try:
+    import webview
+except Exception:
+    webview = None
 from pathlib import Path
 from queue import Empty, Queue
 
@@ -808,7 +812,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(16)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(17)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1259,7 +1263,7 @@ HTML_TEMPLATE = """
                         <tr>
                             <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Time</th>
                             <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Device</th>
-                            <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b w-[36px] max-w-[36px]">Tag</th>
+                            <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b w-[56px] max-w-[56px]">Tag</th>
                             <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Message</th>
                         </tr>
                     </thead>
@@ -2008,7 +2012,7 @@ HTML_TEMPLATE = """
                 <tr>
                     <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.time_display || '')}</td>
                     <td class="py-2 px-2 text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.device_name || row.device_id || '')}</td>
-                    <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap max-w-[36px] w-[36px] overflow-hidden text-ellipsis" title="${escapeHTML(row.tag || '')}">${escapeHTML(row.tag || '')}</td>
+                    <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap max-w-[56px] w-[56px] overflow-hidden text-ellipsis" title="${escapeHTML(row.tag || '')}">${escapeHTML(row.tag || '')}</td>
                     <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-pre-wrap break-all">${escapeHTML(row.raw_log || row.message || '')}</td>
                 </tr>
             `).join('');
@@ -2846,6 +2850,22 @@ def package_log_export_api():
         package_stub = re.sub(r'[^A-Za-z0-9._-]+', '_', session["package_id"] or f"session_{session_id}")
         filename = f"package_log_{session_id}_{package_stub}_{started_label}.log"
         path = os.path.join(export_dir, filename)
+
+        chosen_path = None
+        try:
+            if webview and getattr(webview, "windows", None):
+                selected = webview.windows[0].create_file_dialog(
+                    webview.SAVE_DIALOG,
+                    directory=export_dir,
+                    save_filename=filename,
+                    file_types=("Log files (*.log)", "All files (*.*)"),
+                )
+                if selected:
+                    chosen_path = selected[0] if isinstance(selected, (list, tuple)) else selected
+        except Exception:
+            logging.exception("Package log save dialog failed")
+
+        path = chosen_path or path
 
         with open(path, "w", encoding="utf-8") as f:
             for row in rows:
