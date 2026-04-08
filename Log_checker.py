@@ -420,8 +420,8 @@ CALLBACK_LOG_PATTERN = re.compile(r"(_OnImpressionDataReadyEvent|_OnLevelPlayImp
 ADREVENUE_LOG_PATTERN = re.compile(r"AdRevenue Received:\s*AdRevenue\{(.*)\}")
 APPSFLYER_ADREVENUE_PATTERN = re.compile(r"\b(ADREVENUE)-\d+:\s*preparing data:\s*(\{.*\})", re.IGNORECASE)
 SDK_CHECK_SEARCH_PATTERN = re.compile(r'"search_pattern"\s*:\s*["\'](.*?)["\']')
-GADSME_SERVICE_KEYWORD = "GadsmeService->"
-ADVERTY5_KEYWORD = "Adverty5"
+GADSME_SERVICE_KEYWORD = "[InPlayAds,Gadsme]"
+ADVERTY5_KEYWORD = "[InPlayAds,Adverty]"
 
 # Mapping tên hiển thị cho Callback
 CALLBACK_DISPLAY_NAMES = {
@@ -812,7 +812,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(29)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(30)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3215,11 +3215,14 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
     global incomplete_impression_logs
     if is_paused: return
 
-    # --- 0. Process GadsmeService callbacks ---
+    # --- 0. Process Gadsme callbacks ---
     if GADSME_SERVICE_KEYWORD in log_entry:
         try:
             after_keyword = log_entry.split(GADSME_SERVICE_KEYWORD, 1)[1]
-            method_part = after_keyword.split(':', 1)[0].strip()
+            if "->" in after_keyword:
+                method_part = after_keyword.split("->", 1)[1].split(":", 1)[0].strip()
+            else:
+                method_part = after_keyword.split(":", 1)[0].strip() or "Gadsme"
             json_str = extract_json_object_from_text(after_keyword)
             details = "N/A"
             json_data_for_log = "{}"
@@ -3235,7 +3238,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                     "device_id": device_id,
                     "device_name": get_device_name(device_id),
                     "type": "Callback Gadsme",
-                    "event_name": method_part or "GadsmeService",
+                    "event_name": method_part or "Gadsme",
                     "details": details,
                     "raw_log": log_entry.strip(),
                     "json_data": json_data_for_log
@@ -3245,14 +3248,14 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
         except:
             pass
 
-    # --- 0b. Process Adverty5 callbacks ---
-    if ADVERTY5_KEYWORD in log_entry and "Adverty5" in log_entry and "->" in log_entry:
+    # --- 0b. Process Adverty callbacks ---
+    if ADVERTY5_KEYWORD in log_entry:
         try:
-            after_keyword = log_entry.split("Adverty5", 1)[1]
+            after_keyword = log_entry.split(ADVERTY5_KEYWORD, 1)[1]
             if "->" in after_keyword:
                 method_part = after_keyword.split("->", 1)[1].split(":", 1)[0].strip()
             else:
-                method_part = "Adverty5"
+                method_part = after_keyword.split(":", 1)[0].strip() or "Adverty"
             json_str = extract_json_object_from_text(after_keyword)
             details = "N/A"
             json_data_for_log = "{}"
@@ -3268,7 +3271,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                     "device_id": device_id,
                     "device_name": get_device_name(device_id),
                     "type": "Callback Adverty5",
-                    "event_name": method_part or "Adverty5",
+                    "event_name": method_part or "Adverty",
                     "details": details,
                     "raw_log": log_entry.strip(),
                     "json_data": json_data_for_log
