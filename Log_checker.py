@@ -812,7 +812,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(25)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(26)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3222,7 +3222,11 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                 current_split_key = "_OnImpressionDataReadyEvent"
             
             # Case A: Start of new log
-            if is_split_impression_start:
+            if current_buffer and current_split_key and split_impression_key == current_split_key:
+                # Continuation line may repeat the same callback prefix; append instead of
+                # resetting the buffer so two split lines become one merged record.
+                current_buffer += "\n" + log_entry
+            elif is_split_impression_start:
                 # Reset buffer with current line
                 current_buffer = log_entry
                 current_split_key = split_impression_key
