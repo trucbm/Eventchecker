@@ -812,7 +812,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(27)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(28)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3242,11 +3242,14 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
 
             parse_buffer = current_buffer
             if current_split_key:
-                repeated_prefix_pattern = re.compile(
-                    rf'\n\d{{2}}-\d{{2}}\s+\d{{2}}:\d{{2}}:\d{{2}}\.\d+\s+\d+\s+\d+\s+[A-Z]\s+[^:]+:\s*LevelPlayAdService->'
-                    rf'{re.escape(current_split_key)}:\s*'
-                )
-                parse_buffer = repeated_prefix_pattern.sub('', parse_buffer)
+                callback_marker = f"LevelPlayAdService->{current_split_key}:"
+                buffer_parts = []
+                for buffer_line in current_buffer.splitlines():
+                    cleaned_line = buffer_line.strip()
+                    if callback_marker in cleaned_line:
+                        cleaned_line = cleaned_line.split(callback_marker, 1)[1].strip()
+                    buffer_parts.append(cleaned_line)
+                parse_buffer = ''.join(buffer_parts)
 
             if not parse_buffer:
                 pass
