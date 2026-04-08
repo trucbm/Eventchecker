@@ -812,7 +812,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(22)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(23)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1345,9 +1345,9 @@ HTML_TEMPLATE = """
                 <table class="min-w-full bg-white">
                    <thead class="bg-gray-50 sticky top-0 z-10">
                         <tr>
-                            <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b time-header resizable col-time">Time<div class="resizer" data-col="time"></div></th>
-                            <th class="text-left text-sm font-semibold text-gray-600 py-2 pr-1 pl-2 border-b tag-header resizable col-tag">Tag<div class="resizer" data-col="tag"></div></th>
-                            <th class="text-left text-sm font-semibold text-gray-600 py-2 pl-1 pr-3 border-b resizable col-message">Message<div class="resizer" data-col="message"></div></th>
+                            <th class="text-left text-xs font-semibold text-gray-600 py-1.5 px-2 border-b time-header resizable col-time">Time<div class="resizer" data-col="time"></div></th>
+                            <th class="text-left text-xs font-semibold text-gray-600 py-1.5 pr-1 pl-2 border-b tag-header resizable col-tag">Tag<div class="resizer" data-col="tag"></div></th>
+                            <th class="text-left text-xs font-semibold text-gray-600 py-1.5 pl-1 pr-3 border-b resizable col-message">Message<div class="resizer" data-col="message"></div></th>
                         </tr>
                     </thead>
                     <tbody id="packageLogTableBody" class="divide-y divide-gray-200"></tbody>
@@ -1953,7 +1953,7 @@ HTML_TEMPLATE = """
             const msgClass = isErrorLevel ? 'text-red-500' : (isWarningLevel ? 'text-amber-500' : '');
             const rowKey = getPackageRowKey(l);
             const selectedClass = selectedPackageRowKeys.has(rowKey) ? 'selected' : '';
-            return `<tr class="package-log-row hover:bg-gray-50 ${rowClass} ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${idx}"><td class="py-2 px-2 font-mono text-xs time-cell col-time">${escapeHTML(l.time_display || l.time || '')}</td><td class="py-2 pr-1 pl-2 font-mono text-xs tag-cell col-tag" title="${escapeHTML(l.tag || '')}">${escapeHTML(l.tag || '')}</td><td class="py-2 pl-1 pr-3 log-cell message-cell col-message ${msgClass}">${escapeHTML(msgText)}</td></tr>`;
+            return `<tr class="package-log-row hover:bg-gray-50 ${rowClass} ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${idx}"><td class="py-1.5 px-2 font-mono text-[11px] leading-4 time-cell col-time">${escapeHTML(l.time_display || l.time || '')}</td><td class="py-1.5 pr-1 pl-2 font-mono text-[11px] leading-4 tag-cell col-tag" title="${escapeHTML(l.tag || '')}">${escapeHTML(l.tag || '')}</td><td class="py-1.5 pl-1 pr-3 font-mono text-[11px] leading-4 log-cell message-cell col-message ${msgClass}">${escapeHTML(msgText)}</td></tr>`;
         }
 
         function getPackageSourceLogs(state) {
