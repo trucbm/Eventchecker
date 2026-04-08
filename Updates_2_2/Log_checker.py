@@ -812,7 +812,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(20)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(21)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1240,7 +1240,7 @@ HTML_TEMPLATE = """
                 <button id="closePackageHistoryModal" class="text-gray-500 hover:text-gray-800 text-2xl font-bold">&times;</button>
             </div>
             <div class="flex flex-col gap-4">
-                <div class="grid grid-cols-1 xl:grid-cols-[340px_160px_1fr_1fr_1fr] gap-4 items-end">
+                <div class="grid grid-cols-1 xl:grid-cols-[340px_160px_160px_1fr_1fr_1fr] gap-4 items-end">
                     <div>
                         <label for="packageHistorySessionSelect" class="block text-[11px] font-medium text-gray-700 mb-1">Saved Sessions:</label>
                         <select id="packageHistorySessionSelect" class="w-full p-2 text-[11px] border rounded-md shadow-sm"></select>
@@ -1248,6 +1248,10 @@ HTML_TEMPLATE = """
                     <div>
                         <label class="block text-[11px] font-medium text-gray-700 mb-1">&nbsp;</label>
                         <button id="clearPackageHistoryBtn" class="w-full bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-semibold text-xs py-2 px-4 rounded-lg h-9">Clear Data</button>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-medium text-gray-700 mb-1">&nbsp;</label>
+                        <button id="clearPackageHistoryFiltersBtn" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200 font-semibold text-xs py-2 px-4 rounded-lg h-9">Clear Filter</button>
                     </div>
                     <div>
                         <label for="packageHistoryFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Filter 1:</label>
@@ -2128,6 +2132,16 @@ HTML_TEMPLATE = """
                 });
         }
 
+        function clearRecordedPackageHistoryFilters() {
+            const filter1 = document.getElementById('packageHistoryFilterInput');
+            const filter2 = document.getElementById('packageHistoryFilterInput2');
+            const filter3 = document.getElementById('packageHistoryFilterInput3');
+            if (filter1) filter1.value = '';
+            if (filter2) filter2.value = '';
+            if (filter3) filter3.value = '';
+            loadSelectedPackageHistory();
+        }
+
         // --- JSON Modal Handler ---
         document.body.addEventListener('click', (e) => {
             if (e.target && e.target.classList.contains('view-json-btn')) {
@@ -2416,6 +2430,7 @@ HTML_TEMPLATE = """
         document.getElementById('exportPackageHistoryAllBtn').addEventListener('click', () => exportSelectedPackageHistory(false));
         document.getElementById('refreshPackageSessionsBtn').addEventListener('click', loadPackageHistorySessions);
         document.getElementById('clearPackageHistoryBtn').addEventListener('click', clearAllRecordedPackageHistory);
+        document.getElementById('clearPackageHistoryFiltersBtn').addEventListener('click', clearRecordedPackageHistoryFilters);
         document.getElementById('packageHistorySessionSelect').addEventListener('change', loadSelectedPackageHistory);
         document.getElementById('packageHistoryFilterInput').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
