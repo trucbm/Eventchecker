@@ -808,7 +808,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(14)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(15)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1247,6 +1247,7 @@ HTML_TEMPLATE = """
                     </div>
                     <div class="flex items-center gap-2">
                         <button id="loadPackageHistoryBtn" class="bg-slate-600 hover:bg-slate-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Load</button>
+                        <button id="exportPackageHistoryBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Export Log</button>
                         <button id="refreshPackageSessionsBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold text-xs py-2 px-4 rounded-lg h-9">Refresh Sessions</button>
                     </div>
                 </div>
@@ -1258,7 +1259,7 @@ HTML_TEMPLATE = """
                         <tr>
                             <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Time</th>
                             <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Device</th>
-                            <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Tag</th>
+                            <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b w-[72px] max-w-[72px]">Tag</th>
                             <th class="text-left text-xs font-semibold text-gray-600 py-2 px-2 border-b">Message</th>
                         </tr>
                     </thead>
@@ -2007,7 +2008,7 @@ HTML_TEMPLATE = """
                 <tr>
                     <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.time_display || '')}</td>
                     <td class="py-2 px-2 text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.device_name || row.device_id || '')}</td>
-                    <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.tag || '')}</td>
+                    <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap max-w-[72px] w-[72px] overflow-hidden text-ellipsis" title="${escapeHTML(row.tag || '')}">${escapeHTML(row.tag || '')}</td>
                     <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-pre-wrap break-all">${escapeHTML(row.raw_log || row.message || '')}</td>
                 </tr>
             `).join('');
@@ -2052,6 +2053,33 @@ HTML_TEMPLATE = """
                 })
                 .catch(err => {
                     document.getElementById('packageHistoryMeta').textContent = `Failed to load saved logs: ${err}`;
+                });
+        }
+
+        function exportSelectedPackageHistory() {
+            const select = document.getElementById('packageHistorySessionSelect');
+            const keyword1 = document.getElementById('packageHistoryFilterInput')?.value || '';
+            const keyword2 = document.getElementById('packageHistoryFilterInput2')?.value || '';
+            if (!select || !select.value) {
+                alert('Please select a recorded session first.');
+                return;
+            }
+            fetch('/api/package-log/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: Number(select.value),
+                    q1: keyword1,
+                    q2: keyword2,
+                }),
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.ok) throw new Error(data.error || 'failed_to_export_logs');
+                    alert(`Exported ${data.row_count} rows to:\n${data.path}`);
+                })
+                .catch(err => {
+                    alert(`Failed to export recorded log: ${err}`);
                 });
         }
 
@@ -2339,6 +2367,7 @@ HTML_TEMPLATE = """
         });
         document.getElementById('showErrorsOnly').addEventListener('change', () => renderPackageLogTable(true));
         document.getElementById('loadPackageHistoryBtn').addEventListener('click', loadSelectedPackageHistory);
+        document.getElementById('exportPackageHistoryBtn').addEventListener('click', exportSelectedPackageHistory);
         document.getElementById('refreshPackageSessionsBtn').addEventListener('click', loadPackageHistorySessions);
         document.getElementById('packageHistorySessionSelect').addEventListener('change', loadSelectedPackageHistory);
         document.getElementById('packageHistoryFilterInput').addEventListener('keydown', (e) => {
@@ -2758,6 +2787,73 @@ def package_log_rows_api():
             "session_id": session_id,
             "rows": [dict(r) for r in rows],
         })
+    finally:
+        conn.close()
+
+
+@app.post('/api/package-log/export')
+def package_log_export_api():
+    payload = request.get_json(silent=True) or {}
+    try:
+        session_id = int(payload.get('session_id'))
+    except Exception:
+        return jsonify({"ok": False, "error": "session_id_required"}), 400
+
+    keyword1 = str(payload.get('q1') or '').strip().lower()
+    keyword2 = str(payload.get('q2') or '').strip().lower()
+    conn = _get_package_db_connection()
+    try:
+        session = conn.execute(
+            "SELECT id, package_id, started_at FROM package_log_sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        if not session:
+            return jsonify({"ok": False, "error": "session_not_found"}), 404
+
+        sql = """
+            SELECT raw_log, message
+            FROM package_log_entries
+            WHERE session_id = ?
+        """
+        params = [session_id]
+
+        def search_clause():
+            return """
+              AND (
+                lower(coalesce(raw_log, '')) LIKE ?
+                OR lower(coalesce(message, '')) LIKE ?
+                OR lower(coalesce(tag, '')) LIKE ?
+                OR lower(coalesce(device_name, '')) LIKE ?
+              )
+            """
+
+        if keyword1:
+            like1 = f"%{keyword1}%"
+            sql += search_clause()
+            params.extend([like1, like1, like1, like1])
+        if keyword2:
+            like2 = f"%{keyword2}%"
+            sql += search_clause()
+            params.extend([like2, like2, like2, like2])
+
+        sql += " ORDER BY id ASC"
+        rows = conn.execute(sql, params).fetchall()
+
+        export_dir = os.path.join(_package_history_dir(), "exports")
+        os.makedirs(export_dir, exist_ok=True)
+        started_at = session["started_at"] or time.time()
+        started_label = time.strftime("%Y%m%d_%H%M%S", time.localtime(started_at))
+        package_stub = re.sub(r'[^A-Za-z0-9._-]+', '_', session["package_id"] or f"session_{session_id}")
+        filename = f"package_log_{session_id}_{package_stub}_{started_label}.log"
+        path = os.path.join(export_dir, filename)
+
+        with open(path, "w", encoding="utf-8") as f:
+            for row in rows:
+                text = row["raw_log"] or row["message"] or ""
+                f.write(text.rstrip("\n"))
+                f.write("\n")
+
+        return jsonify({"ok": True, "path": path, "row_count": len(rows), "session_id": session_id})
     finally:
         conn.close()
 
