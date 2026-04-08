@@ -416,7 +416,7 @@ METRICA_REGULAR_EVENT_PATTERN = re.compile(
 
 # Patterns cũ của Log Checker
 OLD_EVENT_LOG_PATTERN = re.compile(r'\[\s*Tracking\s*\]\s*TrackingService->Track:\s*(\{"eventName":.*)')
-CALLBACK_LOG_PATTERN = re.compile(r"(_OnImpressionDataReadyEvent|_OnLevelPlayImpressionDataReadyEvent|LevelPlayInterstitialAdListener|LevelPlayBannerAdViewListener|LevelPlayRewardedAdListener)")
+CALLBACK_LOG_PATTERN = re.compile(r"(_OnImpressionDataReadyEvent|_OnLevelPlayImpressionDataReadyEvent|LevelPlayInterstitialAdListener|LevelPlayBannerAdViewListener|LevelPlayRewardedAdListener|Receive Ironsource Impression Data LevelPlayImpressionData)")
 ADREVENUE_LOG_PATTERN = re.compile(r"AdRevenue Received:\s*AdRevenue\{(.*)\}")
 APPSFLYER_ADREVENUE_PATTERN = re.compile(r"\b(ADREVENUE)-\d+:\s*preparing data:\s*(\{.*\})", re.IGNORECASE)
 SDK_CHECK_SEARCH_PATTERN = re.compile(r'"search_pattern"\s*:\s*["\'](.*?)["\']')
@@ -812,7 +812,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(30)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(31)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3428,7 +3428,13 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
         display_name = CALLBACK_DISPLAY_NAMES.get(found_key, found_key)
         json_data_for_log = "{}"
         
-        if "Listener" in found_key:
+        if found_key == "Receive Ironsource Impression Data LevelPlayImpressionData":
+             try:
+                 payload = log_entry.split(found_key, 1)[1].strip()
+                 details = f'<div class="text-xs font-mono break-all">{html.escape(payload)}</div>' if payload else "Ironsource Impression Data"
+             except:
+                 details = "Ironsource Impression Data"
+        elif "Listener" in found_key:
              # Try parsing adInfo if present
              try:
                  if 'adInfo:' in log_entry:
