@@ -812,7 +812,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(26)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(27)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3240,21 +3240,29 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                 incomplete_impression_logs[device_id] = current_buffer
                 current_buffer = ""
 
-            if not current_buffer:
+            parse_buffer = current_buffer
+            if current_split_key:
+                repeated_prefix_pattern = re.compile(
+                    rf'\n\d{{2}}-\d{{2}}\s+\d{{2}}:\d{{2}}:\d{{2}}\.\d+\s+\d+\s+\d+\s+[A-Z]\s+[^:]+:\s*LevelPlayAdService->'
+                    rf'{re.escape(current_split_key)}:\s*'
+                )
+                parse_buffer = repeated_prefix_pattern.sub('', parse_buffer)
+
+            if not parse_buffer:
                 pass
             else:
                 # Try to find JSON
             # 1. Find first '{'
-                start_idx = current_buffer.find('{')
+                start_idx = parse_buffer.find('{')
             
             # If no '{' yet, just keep buffering (unless it's been too long?)
-            if current_buffer and start_idx != -1:
+            if parse_buffer and start_idx != -1:
                 # 2. Count braces to find end
                 open_braces = 0
                 end_idx = -1
-                for i in range(start_idx, len(current_buffer)):
-                    if current_buffer[i] == '{': open_braces += 1
-                    elif current_buffer[i] == '}': open_braces -= 1
+                for i in range(start_idx, len(parse_buffer)):
+                    if parse_buffer[i] == '{': open_braces += 1
+                    elif parse_buffer[i] == '}': open_braces -= 1
                     
                     if open_braces == 0:
                         end_idx = i
@@ -3262,7 +3270,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                 
                 if end_idx != -1:
                     # Found complete JSON
-                    json_str = current_buffer[start_idx : end_idx+1]
+                    json_str = parse_buffer[start_idx : end_idx+1]
                     details = ""
                     json_data_for_log = "{}"
                     display_name = (
