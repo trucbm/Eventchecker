@@ -812,7 +812,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(18)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(19)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1229,31 +1229,37 @@ HTML_TEMPLATE = """
 
     <div id="packageHistoryModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 hidden">
         <div class="bg-white rounded-xl shadow-lg p-6 w-[88vw] h-[82vh] flex flex-col">
-            <div class="flex justify-between items-center border-b pb-3 mb-4">
-                <h2 class="text-xl font-bold text-gray-800">Recorded Package Logs</h2>
+            <div class="flex justify-between items-start border-b pb-3 mb-4">
+                <div class="flex items-center gap-3 flex-wrap">
+                    <h2 class="text-xl font-bold text-gray-800">Recorded Package Logs</h2>
+                    <button id="loadPackageHistoryBtn" class="bg-slate-600 hover:bg-slate-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Load</button>
+                    <button id="refreshPackageSessionsBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold text-xs py-2 px-4 rounded-lg h-9">Refresh Sessions</button>
+                    <button id="exportPackageHistoryAllBtn" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Export Full</button>
+                    <button id="exportPackageHistoryFilteredBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Export Filtered</button>
+                </div>
                 <button id="closePackageHistoryModal" class="text-gray-500 hover:text-gray-800 text-2xl font-bold">&times;</button>
             </div>
             <div class="flex flex-col gap-4">
-                <div class="flex flex-col xl:flex-row xl:items-end gap-4">
-                    <div class="xl:w-72">
+                <div class="grid grid-cols-1 xl:grid-cols-[340px_160px_1fr_1fr_1fr] gap-4 items-end">
+                    <div>
                         <label for="packageHistorySessionSelect" class="block text-[11px] font-medium text-gray-700 mb-1">Saved Sessions:</label>
                         <select id="packageHistorySessionSelect" class="w-full p-2 text-[11px] border rounded-md shadow-sm"></select>
                     </div>
-                    <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <div>
-                            <label for="packageHistoryFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 1:</label>
-                            <input type="text" id="packageHistoryFilterInput" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search saved log text 1...">
-                        </div>
-                        <div>
-                            <label for="packageHistoryFilterInput2" class="block text-[11px] font-medium text-gray-700 mb-1">Message Filter 2:</label>
-                            <input type="text" id="packageHistoryFilterInput2" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search saved log text 2...">
-                        </div>
+                    <div>
+                        <label class="block text-[11px] font-medium text-gray-700 mb-1">&nbsp;</label>
+                        <button id="clearPackageHistoryBtn" class="w-full bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-semibold text-xs py-2 px-4 rounded-lg h-9">Clear Data</button>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <button id="loadPackageHistoryBtn" class="bg-slate-600 hover:bg-slate-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Load</button>
-                        <button id="exportPackageHistoryFilteredBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Export Filtered</button>
-                        <button id="exportPackageHistoryAllBtn" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Export Full</button>
-                        <button id="refreshPackageSessionsBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold text-xs py-2 px-4 rounded-lg h-9">Refresh Sessions</button>
+                    <div>
+                        <label for="packageHistoryFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Filter 1:</label>
+                        <input type="text" id="packageHistoryFilterInput" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search saved log text 1...">
+                    </div>
+                    <div>
+                        <label for="packageHistoryFilterInput2" class="block text-[11px] font-medium text-gray-700 mb-1">Filter 2:</label>
+                        <input type="text" id="packageHistoryFilterInput2" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search saved log text 2...">
+                    </div>
+                    <div>
+                        <label for="packageHistoryFilterInput3" class="block text-[11px] font-medium text-gray-700 mb-1">Filter 3:</label>
+                        <input type="text" id="packageHistoryFilterInput3" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search saved log text 3...">
                     </div>
                 </div>
                 <p id="packageHistoryMeta" class="text-[11px] text-gray-500">No session selected.</p>
@@ -2035,6 +2041,7 @@ HTML_TEMPLATE = """
             const select = document.getElementById('packageHistorySessionSelect');
             const keyword1 = document.getElementById('packageHistoryFilterInput')?.value || '';
             const keyword2 = document.getElementById('packageHistoryFilterInput2')?.value || '';
+            const keyword3 = document.getElementById('packageHistoryFilterInput3')?.value || '';
             if (!select || !select.value) {
                 renderPackageHistoryRows([]);
                 return;
@@ -2043,6 +2050,7 @@ HTML_TEMPLATE = """
                 session_id: select.value,
                 q1: keyword1,
                 q2: keyword2,
+                q3: keyword3,
             });
             fetch(`/api/package-log/logs?${query.toString()}`)
                 .then(r => r.json())
@@ -2051,7 +2059,7 @@ HTML_TEMPLATE = """
                     const current = packageHistorySessions.find(s => String(s.id) === String(data.session_id));
                     const meta = document.getElementById('packageHistoryMeta');
                     if (meta && current) {
-                        const filters = [keyword1, keyword2].filter(Boolean).join(' | ');
+                        const filters = [keyword1, keyword2, keyword3].filter(Boolean).join(' | ');
                         meta.textContent = `Selected: ${current.package_id} | Started: ${current.started_label} | Status: ${current.status} | Showing: ${data.rows.length}${filters ? ` | Filter: ${filters}` : ''}`;
                     }
                     renderPackageHistoryRows(data.rows || []);
@@ -2065,6 +2073,7 @@ HTML_TEMPLATE = """
             const select = document.getElementById('packageHistorySessionSelect');
             const keyword1 = document.getElementById('packageHistoryFilterInput')?.value || '';
             const keyword2 = document.getElementById('packageHistoryFilterInput2')?.value || '';
+            const keyword3 = document.getElementById('packageHistoryFilterInput3')?.value || '';
             if (!select || !select.value) {
                 alert('Please select a recorded session first.');
                 return;
@@ -2076,6 +2085,7 @@ HTML_TEMPLATE = """
                     session_id: Number(select.value),
                     q1: filteredOnly ? keyword1 : '',
                     q2: filteredOnly ? keyword2 : '',
+                    q3: filteredOnly ? keyword3 : '',
                     filtered_only: filteredOnly,
                 }),
             })
@@ -2385,6 +2395,12 @@ HTML_TEMPLATE = """
             }
         });
         document.getElementById('packageHistoryFilterInput2').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                loadSelectedPackageHistory();
+            }
+        });
+        document.getElementById('packageHistoryFilterInput3').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 loadSelectedPackageHistory();
@@ -2756,6 +2772,7 @@ def package_log_rows_api():
     session_id = request.args.get('session_id', type=int)
     keyword1 = (request.args.get('q1') or request.args.get('q') or '').strip().lower()
     keyword2 = (request.args.get('q2') or '').strip().lower()
+    keyword3 = (request.args.get('q3') or '').strip().lower()
     if not session_id:
         return jsonify({"ok": False, "error": "session_id_required"}), 400
     conn = _get_package_db_connection()
@@ -2785,6 +2802,10 @@ def package_log_rows_api():
             sql += search_clause()
             like2 = f"%{keyword2}%"
             params.extend([like2, like2, like2, like2])
+        if keyword3:
+            sql += search_clause()
+            like3 = f"%{keyword3}%"
+            params.extend([like3, like3, like3, like3])
 
         sql += """
             ORDER BY id ASC
@@ -2809,6 +2830,7 @@ def package_log_export_api():
 
     keyword1 = str(payload.get('q1') or '').strip().lower()
     keyword2 = str(payload.get('q2') or '').strip().lower()
+    keyword3 = str(payload.get('q3') or '').strip().lower()
     filtered_only = bool(payload.get('filtered_only', True))
     conn = _get_package_db_connection()
     try:
@@ -2844,6 +2866,10 @@ def package_log_export_api():
             like2 = f"%{keyword2}%"
             sql += search_clause()
             params.extend([like2, like2, like2, like2])
+        if keyword3:
+            like3 = f"%{keyword3}%"
+            sql += search_clause()
+            params.extend([like3, like3, like3, like3])
 
         sql += " ORDER BY id ASC"
         rows = conn.execute(sql, params).fetchall()
@@ -2853,7 +2879,7 @@ def package_log_export_api():
         started_at = session["started_at"] or time.time()
         started_label = time.strftime("%Y%m%d_%H%M%S", time.localtime(started_at))
         package_stub = re.sub(r'[^A-Za-z0-9._-]+', '_', session["package_id"] or f"session_{session_id}")
-        suffix = "filtered" if filtered_only and (keyword1 or keyword2) else "full"
+        suffix = "filtered" if filtered_only and (keyword1 or keyword2 or keyword3) else "full"
         filename = f"package_log_{session_id}_{package_stub}_{started_label}_{suffix}.log"
         path = os.path.join(export_dir, filename)
 
