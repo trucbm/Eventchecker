@@ -812,7 +812,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(21)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(22)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1302,6 +1302,10 @@ HTML_TEMPLATE = """
                             <label class="inline-flex items-center gap-2">
                                 <input id="showErrorsOnly" type="checkbox" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
                                 <span class="block text-xs text-gray-900">Show errors only</span>
+                            </label>
+                            <label class="inline-flex items-center gap-2">
+                                <input id="showWarningsOnly" type="checkbox" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                <span class="block text-xs text-gray-900">Show only Warning</span>
                             </label>
                             <label class="inline-flex items-center gap-2">
                                 <input id="autoScroll" type="checkbox" checked class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
@@ -1916,13 +1920,21 @@ HTML_TEMPLATE = """
                 tagFilter: document.getElementById('packageTagFilterInput').value.toLowerCase(),
                 quickTag: document.querySelector('input[name="tagQuickFilter"]:checked')?.value || '',
                 errorsOnly: document.getElementById('showErrorsOnly').checked,
+                warningsOnly: document.getElementById('showWarningsOnly').checked,
             };
         }
 
         function filterPackageLogs(logs, state) {
             return logs.filter(l => {
                 if (state.selectedDevice !== 'all' && l.device_id !== state.selectedDevice) return false;
-                if (state.errorsOnly && !l.is_error) return false;
+                const isWarningLevel = l.level === 'W';
+                if (state.errorsOnly && state.warningsOnly) {
+                    if (!(l.is_error || isWarningLevel)) return false;
+                } else if (state.errorsOnly) {
+                    if (!l.is_error) return false;
+                } else if (state.warningsOnly) {
+                    if (!isWarningLevel) return false;
+                }
                 const messageHaystack = `${l.message || ''}`.toLowerCase();
                 const tagHaystack = `${l.tag || ''}`.toLowerCase();
                 if (state.quickTag && !tagHaystack.includes(state.quickTag)) return false;
@@ -1936,8 +1948,9 @@ HTML_TEMPLATE = """
         function packageRowHtml(l, idx) {
             const msgText = (l.message || l.log || '');
             const isErrorLevel = (l.level === 'E' || l.level === 'F');
-            const rowClass = isErrorLevel ? 'text-red-500' : '';
-            const msgClass = isErrorLevel ? 'text-red-500' : '';
+            const isWarningLevel = l.level === 'W';
+            const rowClass = isErrorLevel ? 'text-red-500' : (isWarningLevel ? 'text-amber-500' : '');
+            const msgClass = isErrorLevel ? 'text-red-500' : (isWarningLevel ? 'text-amber-500' : '');
             const rowKey = getPackageRowKey(l);
             const selectedClass = selectedPackageRowKeys.has(rowKey) ? 'selected' : '';
             return `<tr class="package-log-row hover:bg-gray-50 ${rowClass} ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${idx}"><td class="py-2 px-2 font-mono text-xs time-cell col-time">${escapeHTML(l.time_display || l.time || '')}</td><td class="py-2 pr-1 pl-2 font-mono text-xs tag-cell col-tag" title="${escapeHTML(l.tag || '')}">${escapeHTML(l.tag || '')}</td><td class="py-2 pl-1 pr-3 log-cell message-cell col-message ${msgClass}">${escapeHTML(msgText)}</td></tr>`;
@@ -2425,6 +2438,7 @@ HTML_TEMPLATE = """
             if (e.key === 'Enter') { e.preventDefault(); renderPackageLogTable(true); }
         });
         document.getElementById('showErrorsOnly').addEventListener('change', () => renderPackageLogTable(true));
+        document.getElementById('showWarningsOnly').addEventListener('change', () => renderPackageLogTable(true));
         document.getElementById('loadPackageHistoryBtn').addEventListener('click', loadSelectedPackageHistory);
         document.getElementById('exportPackageHistoryFilteredBtn').addEventListener('click', () => exportSelectedPackageHistory(true));
         document.getElementById('exportPackageHistoryAllBtn').addEventListener('click', () => exportSelectedPackageHistory(false));
