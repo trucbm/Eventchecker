@@ -768,7 +768,7 @@ HTML_TEMPLATE = """
             z-index: 20;
         }
         .resizer:hover { background: rgba(59, 130, 246, 0.15); }
-        #packageLogTableBody tr.selected { background-color: #bfdbfe !important; }
+        #packageLogTableBody tr.selected, #packageHistoryTableBody tr.selected { background-color: #bfdbfe !important; }
         .resizer.disabled { cursor: not-allowed; background: transparent; }
         .details-cell pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
         .adrevenue-panel { border: 1px solid #e5e7eb; background: #f9fafb; border-radius: 0.5rem; padding: 0.5rem; }
@@ -812,7 +812,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(28)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(29)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2025,6 +2025,10 @@ HTML_TEMPLATE = """
             }
         }
 
+        function getPackageHistoryRowKey(row) {
+            return [row.time_display || '', row.device_name || row.device_id || '', row.tag || '', row.raw_log || row.message || ''].join('||');
+        }
+
         function renderPackageHistoryRows(rows) {
             const tbody = document.getElementById('packageHistoryTableBody');
             if (!tbody) return;
@@ -2032,14 +2036,17 @@ HTML_TEMPLATE = """
                 tbody.innerHTML = '<tr><td colspan="4" class="py-3 px-2 text-xs text-gray-500">No saved logs found for this filter.</td></tr>';
                 return;
             }
-            tbody.innerHTML = rows.map((row) => `
-                <tr>
+            tbody.innerHTML = rows.map((row, idx) => {
+                const rowKey = getPackageHistoryRowKey(row);
+                const selectedClass = selectedPackageHistoryRowKeys.has(rowKey) ? 'selected' : '';
+                return `
+                <tr class="package-history-row hover:bg-gray-50 ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${idx}">
                     <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.time_display || '')}</td>
                     <td class="py-2 px-2 text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.device_name || row.device_id || '')}</td>
                     <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap max-w-[88px] w-[88px] overflow-hidden text-ellipsis" title="${escapeHTML(row.tag || '')}">${escapeHTML(row.tag || '')}</td>
                     <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-pre-wrap break-all">${escapeHTML(row.raw_log || row.message || '')}</td>
                 </tr>
-            `).join('');
+            `}).join('');
         }
 
         function loadPackageHistorySessions() {
@@ -2173,6 +2180,10 @@ HTML_TEMPLATE = """
         closeLogDetailModal.addEventListener('click', () => logDetailModal.classList.add('hidden'));
 
         // --- Log Detail Modal (Package Log) ---
+        let selectedPackageHistoryRowKeys = new Set();
+        let isSelectingHistoryRows = false;
+        let historyDragStartIndex = null;
+
         function getSelectedPackageRows() {
             const selected = Array.from(document.querySelectorAll('#packageLogTableBody tr.package-log-row.selected'));
             if (selected.length > 0) return selected;
@@ -2188,6 +2199,30 @@ HTML_TEMPLATE = """
                 if (byKey.has(k)) fromKeys.push(byKey.get(k));
             });
             return fromKeys;
+        }
+
+        function getSelectedPackageHistoryRows() {
+            const selected = Array.from(document.querySelectorAll('#packageHistoryTableBody tr.package-history-row.selected'));
+            if (selected.length > 0) return selected;
+            const allRows = Array.from(document.querySelectorAll('#packageHistoryTableBody tr.package-history-row'));
+            const byKey = new Map();
+            allRows.forEach(r => {
+                const rawKey = r.getAttribute('data-row-key') || '';
+                try { byKey.set(decodeURIComponent(rawKey), r); } catch {}
+            });
+            const fromKeys = [];
+            selectedPackageHistoryRowKeys.forEach(k => {
+                if (byKey.has(k)) fromKeys.push(byKey.get(k));
+            });
+            return fromKeys;
+        }
+
+        function getActiveSelectedLogRows() {
+            if (packageHistoryModal && !packageHistoryModal.classList.contains('hidden')) {
+                const historyRows = getSelectedPackageHistoryRows();
+                if (historyRows.length > 0) return historyRows;
+            }
+            return getSelectedPackageRows();
         }
 
         function getRowText(row) {
@@ -2267,7 +2302,7 @@ HTML_TEMPLATE = """
                 logDetailIsJsonView = false;
                 return;
             }
-            const rows = getSelectedPackageRows();
+            const rows = getActiveSelectedLogRows();
             if (rows.length === 0) return;
             const outputs = rows.map((row, idx) => {
                 const line = getRowText(row);
@@ -2309,14 +2344,14 @@ HTML_TEMPLATE = """
             // Ensure clicked row is included
             const rawKey = row.getAttribute('data-row-key') || '';
             try { selectedPackageRowKeys.add(decodeURIComponent(rawKey)); } catch {}
-            const selected = getSelectedPackageRows();
+            const selected = getActiveSelectedLogRows();
             const rowsToShow = selected.length > 0 ? selected : [row];
             openLogDetailModal(rowsToShow);
         });
 
         document.addEventListener('keydown', (e) => {
             if (e.key !== 'Enter') return;
-            const selected = getSelectedPackageRows();
+            const selected = getActiveSelectedLogRows();
             if (selected.length === 0) return;
             openLogDetailModal(selected);
         });
@@ -2521,9 +2556,61 @@ HTML_TEMPLATE = """
             updateSelectionRange(dragStartIndex, idx);
         });
 
+        function updateHistorySelectionRange(startIdx, endIdx) {
+            const rows = Array.from(document.querySelectorAll('#packageHistoryTableBody tr.package-history-row'));
+            if (rows.length === 0) return;
+            const [minIdx, maxIdx] = startIdx <= endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+            selectedPackageHistoryRowKeys.clear();
+            rows.forEach(r => {
+                const idx = parseInt(r.getAttribute('data-row-index') || '-1', 10);
+                if (idx >= minIdx && idx <= maxIdx) {
+                    const rawKey = r.getAttribute('data-row-key') || '';
+                    try { selectedPackageHistoryRowKeys.add(decodeURIComponent(rawKey)); } catch (err) {}
+                    r.classList.add('selected');
+                } else {
+                    r.classList.remove('selected');
+                }
+            });
+        }
+
+        document.getElementById('packageHistoryTableBody').addEventListener('mousedown', (e) => {
+            const row = e.target.closest('tr.package-history-row');
+            if (!row) return;
+            if (e.detail && e.detail >= 2) return;
+            if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+                document.activeElement.blur();
+            }
+            isSelectingHistoryRows = true;
+            const idx = parseInt(row.getAttribute('data-row-index') || '0', 10);
+            historyDragStartIndex = idx;
+            updateHistorySelectionRange(idx, idx);
+            e.preventDefault();
+        });
+
+        document.getElementById('packageHistoryTableBody').addEventListener('mouseover', (e) => {
+            if (!isSelectingHistoryRows || historyDragStartIndex === null) return;
+            const row = e.target.closest('tr.package-history-row');
+            if (!row) return;
+            const idx = parseInt(row.getAttribute('data-row-index') || '0', 10);
+            updateHistorySelectionRange(historyDragStartIndex, idx);
+        });
+
+        document.getElementById('packageHistoryTableBody').addEventListener('dblclick', (e) => {
+            const row = e.target.closest('tr.package-history-row');
+            if (!row) return;
+            isSelectingHistoryRows = false;
+            historyDragStartIndex = null;
+            const rawKey = row.getAttribute('data-row-key') || '';
+            try { selectedPackageHistoryRowKeys.add(decodeURIComponent(rawKey)); } catch {}
+            const selected = getSelectedPackageHistoryRows();
+            openLogDetailModal(selected.length > 0 ? selected : [row]);
+        });
+
         document.addEventListener('mouseup', () => {
             isSelectingRows = false;
             dragStartIndex = null;
+            isSelectingHistoryRows = false;
+            historyDragStartIndex = null;
         });
 
         // --- Ctrl+C to copy selected package log rows ---
@@ -2531,7 +2618,7 @@ HTML_TEMPLATE = """
             if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'c') return;
             const active = document.activeElement;
             if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
-            const selectedRows = Array.from(document.querySelectorAll('#packageLogTableBody tr.package-log-row.selected'));
+            const selectedRows = getActiveSelectedLogRows();
             if (selectedRows.length === 0) return;
             const lines = selectedRows.map(r => {
                 const cells = r.querySelectorAll('td');
