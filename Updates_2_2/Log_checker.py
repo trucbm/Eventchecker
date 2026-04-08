@@ -812,7 +812,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(24)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(25)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3196,31 +3196,55 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
     with lock:
         current_buffer = incomplete_impression_logs.get(device_id, "")
 
-    is_split_impression_start = (
-        "_OnImpressionDataReadyEvent" in log_entry
-        or "_OnLevelPlayImpressionDataReadyEvent" in log_entry
-    )
+    current_split_key = ""
+    if "_OnLevelPlayImpressionDataReadyEvent" in current_buffer:
+        current_split_key = "_OnLevelPlayImpressionDataReadyEvent"
+    elif "_OnImpressionDataReadyEvent" in current_buffer:
+        current_split_key = "_OnImpressionDataReadyEvent"
+
+    split_impression_key = ""
+    if "_OnLevelPlayImpressionDataReadyEvent" in log_entry:
+        split_impression_key = "_OnLevelPlayImpressionDataReadyEvent"
+    elif "_OnImpressionDataReadyEvent" in log_entry:
+        split_impression_key = "_OnImpressionDataReadyEvent"
+
+    is_split_impression_start = bool(split_impression_key)
 
     # If we are buffering, OR if this is a new split impression event
     if current_buffer or is_split_impression_start:
         with lock:
             # Re-read buffer inside lock to be safe (though simple logic here is fine)
             current_buffer = incomplete_impression_logs.get(device_id, "")
+            current_split_key = ""
+            if "_OnLevelPlayImpressionDataReadyEvent" in current_buffer:
+                current_split_key = "_OnLevelPlayImpressionDataReadyEvent"
+            elif "_OnImpressionDataReadyEvent" in current_buffer:
+                current_split_key = "_OnImpressionDataReadyEvent"
             
             # Case A: Start of new log
             if is_split_impression_start:
                 # Reset buffer with current line
                 current_buffer = log_entry
-            else:
+                current_split_key = split_impression_key
+            elif current_split_key and current_split_key in log_entry:
                 # Case B: Continuation line
                 current_buffer += "\n" + log_entry # Add newline to separate lines if needed, or just string concat
+            else:
+                # Buffer existed but this line is not the matching continuation.
+                # Keep the old buffer for its own pair and let this line continue
+                # through the normal parsing path below.
+                incomplete_impression_logs[device_id] = current_buffer
+                current_buffer = ""
 
-            # Try to find JSON
+            if not current_buffer:
+                pass
+            else:
+                # Try to find JSON
             # 1. Find first '{'
-            start_idx = current_buffer.find('{')
+                start_idx = current_buffer.find('{')
             
             # If no '{' yet, just keep buffering (unless it's been too long?)
-            if start_idx != -1:
+            if current_buffer and start_idx != -1:
                 # 2. Count braces to find end
                 open_braces = 0
                 end_idx = -1
@@ -3274,7 +3298,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                      # JSON start found but not ended -> Update buffer and wait for next line
                      incomplete_impression_logs[device_id] = current_buffer
                      return # Consumed line
-            else:
+            elif current_buffer:
                 # No JSON start found yet (e.g. log line is "_OnImpressionDataReadyEvent:" and JSON is on next line)
                 incomplete_impression_logs[device_id] = current_buffer
                 return # Consumed line
