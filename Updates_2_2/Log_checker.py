@@ -812,7 +812,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(19)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(20)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2100,6 +2100,34 @@ HTML_TEMPLATE = """
                 });
         }
 
+        function clearAllRecordedPackageHistory() {
+            const confirmed = confirm('Clear all recorded package logs from the database? This cannot be undone.');
+            if (!confirmed) return;
+            fetch('/api/package-log/clear', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clear_all: true }),
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.ok) throw new Error(data.error || 'failed_to_clear_package_logs');
+                    packageHistorySessions = [];
+                    const select = document.getElementById('packageHistorySessionSelect');
+                    if (select) {
+                        select.innerHTML = '<option value="">No saved sessions</option>';
+                    }
+                    document.getElementById('packageHistoryFilterInput').value = '';
+                    document.getElementById('packageHistoryFilterInput2').value = '';
+                    document.getElementById('packageHistoryFilterInput3').value = '';
+                    document.getElementById('packageHistoryMeta').textContent = 'No saved package-log sessions yet.';
+                    renderPackageHistoryRows([]);
+                    alert(`Cleared ${data.deleted_sessions} session(s) and ${data.deleted_rows} log row(s).`);
+                })
+                .catch(err => {
+                    alert(`Failed to clear recorded logs: ${err}`);
+                });
+        }
+
         // --- JSON Modal Handler ---
         document.body.addEventListener('click', (e) => {
             if (e.target && e.target.classList.contains('view-json-btn')) {
@@ -2387,6 +2415,7 @@ HTML_TEMPLATE = """
         document.getElementById('exportPackageHistoryFilteredBtn').addEventListener('click', () => exportSelectedPackageHistory(true));
         document.getElementById('exportPackageHistoryAllBtn').addEventListener('click', () => exportSelectedPackageHistory(false));
         document.getElementById('refreshPackageSessionsBtn').addEventListener('click', loadPackageHistorySessions);
+        document.getElementById('clearPackageHistoryBtn').addEventListener('click', clearAllRecordedPackageHistory);
         document.getElementById('packageHistorySessionSelect').addEventListener('change', loadSelectedPackageHistory);
         document.getElementById('packageHistoryFilterInput').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
@@ -2815,6 +2844,31 @@ def package_log_rows_api():
             "ok": True,
             "session_id": session_id,
             "rows": [dict(r) for r in rows],
+        })
+    finally:
+        conn.close()
+
+
+@app.post('/api/package-log/clear')
+def package_log_clear_api():
+    payload = request.get_json(silent=True) or {}
+    if not payload.get("clear_all"):
+        return jsonify({"ok": False, "error": "confirmation_required"}), 400
+    conn = _get_package_db_connection()
+    try:
+        session_count = conn.execute("SELECT COUNT(*) AS c FROM package_log_sessions").fetchone()["c"] or 0
+        row_count = conn.execute("SELECT COUNT(*) AS c FROM package_log_entries").fetchone()["c"] or 0
+        conn.execute("DELETE FROM package_log_entries")
+        conn.execute("DELETE FROM package_log_sessions")
+        conn.commit()
+        try:
+            conn.execute("VACUUM")
+        except Exception:
+            pass
+        return jsonify({
+            "ok": True,
+            "deleted_sessions": session_count,
+            "deleted_rows": row_count,
         })
     finally:
         conn.close()
