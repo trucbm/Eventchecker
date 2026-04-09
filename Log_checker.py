@@ -496,6 +496,77 @@ def extract_json_object_from_text(text):
     except:
         return None
 
+def split_top_level_csv(text):
+    parts = []
+    current = []
+    depth = 0
+    in_single = False
+    in_double = False
+    escape = False
+    for ch in text:
+        current.append(ch)
+        if escape:
+            escape = False
+            continue
+        if ch == '\\':
+            escape = True
+            continue
+        if ch == "'" and not in_double:
+            in_single = not in_single
+            continue
+        if ch == '"' and not in_single:
+            in_double = not in_double
+            continue
+        if in_single or in_double:
+            continue
+        if ch in '{[(':
+            depth += 1
+        elif ch in '}])':
+            depth = max(0, depth - 1)
+        elif ch == ',' and depth == 0:
+            current.pop()
+            part = ''.join(current).strip()
+            if part:
+                parts.append(part)
+            current = []
+    tail = ''.join(current).strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
+def parse_levelplay_impression_text(payload):
+    payload = (payload or '').strip()
+    marker = 'LevelPlayImpressionData'
+    if payload.startswith(marker):
+        payload = payload[len(marker):].strip()
+    if not (payload.startswith('{') and payload.endswith('}')):
+        return None
+    inner = payload[1:-1].strip()
+    result = {}
+    for item in split_top_level_csv(inner):
+        if '=' not in item:
+            continue
+        key, raw = item.split('=', 1)
+        key = key.strip()
+        raw = raw.strip()
+        if raw.startswith("'") and raw.endswith("'"):
+            value = raw[1:-1]
+        elif raw in ('null', 'None'):
+            value = None
+        elif raw == '':
+            value = ''
+        else:
+            try:
+                if any(ch in raw for ch in '.eE'):
+                    value = float(raw)
+                else:
+                    value = int(raw)
+            except:
+                value = raw
+        result[key] = value
+    return result or None
+
 def _read_profile_sheet(ws, allow_default_fill=True):
     event_map = {}
     current_event = None
@@ -813,7 +884,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(34)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(35)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3432,7 +3503,12 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
         if found_key == "Receive Ironsource Impression Data LevelPlayImpressionData":
              try:
                  payload = log_entry.split(found_key, 1)[1].strip()
-                 details = f'<div class="text-xs font-mono break-all">{html.escape(payload)}</div>' if payload else "Ironsource Impression Data"
+                 parsed_data = parse_levelplay_impression_text(payload)
+                 if parsed_data:
+                     details = format_json_html(parsed_data)
+                     json_data_for_log = json.dumps(parsed_data, ensure_ascii=False)
+                 else:
+                     details = f'<div class="text-xs font-mono break-all">{html.escape(payload)}</div>' if payload else "Ironsource Impression Data"
              except:
                  details = "Ironsource Impression Data"
         elif "Listener" in found_key:
