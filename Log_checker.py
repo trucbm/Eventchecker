@@ -884,7 +884,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(35)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(36)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2289,6 +2289,13 @@ HTML_TEMPLATE = """
             return fromKeys;
         }
 
+        function clearPackageHistorySelection() {
+            selectedPackageHistoryRowKeys.clear();
+            document.querySelectorAll('#packageHistoryTableBody tr.package-history-row.selected').forEach(r => r.classList.remove('selected'));
+            isSelectingHistoryRows = false;
+            historyDragStartIndex = null;
+        }
+
         function getActiveSelectedLogRows() {
             if (packageHistoryModal && !packageHistoryModal.classList.contains('hidden')) {
                 const historyRows = getSelectedPackageHistoryRows();
@@ -2582,7 +2589,18 @@ HTML_TEMPLATE = """
             packageHistoryModal?.classList.add('hidden');
         });
         packageHistoryModal?.addEventListener('click', (e) => {
-            if (e.target === packageHistoryModal) packageHistoryModal.classList.add('hidden');
+            if (e.target === packageHistoryModal) {
+                clearPackageHistorySelection();
+                packageHistoryModal.classList.add('hidden');
+                return;
+            }
+            if (!e.target.closest('#packageHistoryTableBody tr.package-history-row') && !e.target.closest('#logDetailModal')) {
+                clearPackageHistorySelection();
+            }
+        });
+        ['packageHistorySessionSelect','loadPackageHistoryBtn','refreshPackageSessionsBtn','exportPackageHistoryAllBtn','exportPackageHistoryFilteredBtn','clearPackageHistoryBtn','clearPackageHistoryFiltersBtn','packageHistoryFilterInput','packageHistoryFilterInput2','packageHistoryFilterInput3','closePackageHistoryModal'].forEach(id => {
+            document.getElementById(id)?.addEventListener('focus', clearPackageHistorySelection);
+            document.getElementById(id)?.addEventListener('click', () => { clearPackageHistorySelection(); });
         });
 
         // --- Row Selection for Package Log (click + drag) ---
