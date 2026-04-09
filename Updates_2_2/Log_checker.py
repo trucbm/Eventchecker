@@ -263,7 +263,7 @@ specific_event_params_filters = []
 
 # 5. Dữ liệu cho Tab Package Logcat
 package_log_cache = deque(maxlen=15000)
-PACKAGE_LOG_UI_MAX_ROWS = 1500
+PACKAGE_LOG_UI_MAX_ROWS = 8000
 target_package_name = ""
 active_package_pids = {}
 active_logcat_processes = {}
@@ -884,7 +884,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(38)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(39)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
