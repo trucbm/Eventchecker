@@ -884,7 +884,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(41)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(42)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1075,8 +1075,8 @@ HTML_TEMPLATE = """
                             </div>
                          </div>
                          <div>
-                            <label for="specificTextFilterInput" class="block text-xs font-medium text-gray-700 mb-1">Filter by Text:</label>
-                            <textarea id="specificTextFilterInput" rows="4" class="w-full p-2 border rounded-md shadow-sm" placeholder="Leave empty to show all logs..."></textarea>
+                            <label for="specificParamInput" class="block text-xs font-medium text-gray-700 mb-1">Validate Parameters:</label>
+                            <textarea id="specificParamInput" rows="4" class="w-full p-2 border rounded-md shadow-sm" placeholder="Leave empty to display all params..."></textarea>
                          </div>
                     </div>
                 </div>
@@ -1868,17 +1868,9 @@ HTML_TEMPLATE = """
              const tbody = document.getElementById('specificEventTableBody');
              if (!tbody) return;
              const sourceFilter = document.querySelector('input[name="specificSourceFilter"]:checked')?.value || 'all';
-             const textFilter = (document.getElementById('specificTextFilterInput')?.value || '').toLowerCase().trim();
              const filtered = lastSpecificEventData.filter(r => {
                  if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
                  if (sourceFilter !== 'all' && (r.source || 'firebase') !== sourceFilter) return false;
-                 if (textFilter) {
-                     const haystack = [r.event_name, r.raw_log, r.json_data, r.status]
-                         .filter(Boolean)
-                         .join('\n')
-                         .toLowerCase();
-                     if (!haystack.includes(textFilter)) return false;
-                 }
                  return true;
              });
              if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
@@ -2568,10 +2560,11 @@ HTML_TEMPLATE = """
         });
 
         const specificEventInput = document.getElementById('specificEventInput');
-        const specificTextFilterInput = document.getElementById('specificTextFilterInput');
-        const updateSpecific = () => socket.emit('update_specific_filter', { eventNames: specificEventInput.value.split('\\n').filter(p=>p.trim()), params: [] });
+        const specificParamInput = document.getElementById('specificParamInput');
+        const updateSpecific = () => socket.emit('update_specific_filter', { eventNames: specificEventInput.value.split('
+').filter(p=>p.trim()), params: parseParamList(specificParamInput.value) });
         specificEventInput.addEventListener('input', updateSpecific);
-        specificTextFilterInput.addEventListener('input', renderSpecificEventTable);
+        specificParamInput.addEventListener('input', updateSpecific);
         document.querySelectorAll('input[name="specificSourceFilter"]').forEach(r => {
             r.addEventListener('change', () => renderSpecificEventTable());
         });
