@@ -884,7 +884,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(42)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(39)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1782,9 +1782,8 @@ HTML_TEMPLATE = """
                 input.focus();
                 socket.emit('update_specific_filter', {
                     eventNames: [name],
-                    params: []
+                    params: parseParamList(document.getElementById('specificParamInput')?.value || '')
                 });
-                renderSpecificEventTable();
             }
         });
 
@@ -2561,8 +2560,15 @@ HTML_TEMPLATE = """
 
         const specificEventInput = document.getElementById('specificEventInput');
         const specificParamInput = document.getElementById('specificParamInput');
-        const updateSpecific = () => socket.emit('update_specific_filter', { eventNames: specificEventInput.value.split('
-').filter(p=>p.trim()), params: parseParamList(specificParamInput.value) });
+        const parseParamList = (text) => {
+            if (!text) return [];
+            return text
+                .replace(/,/g, ' ')
+                .split(/\\s+/)
+                .map(p => p.trim())
+                .filter(p => p);
+        };
+        const updateSpecific = () => socket.emit('update_specific_filter', { eventNames: specificEventInput.value.split('\\n').filter(p=>p.trim()), params: parseParamList(specificParamInput.value) });
         specificEventInput.addEventListener('input', updateSpecific);
         specificParamInput.addEventListener('input', updateSpecific);
         document.querySelectorAll('input[name="specificSourceFilter"]').forEach(r => {
@@ -4185,7 +4191,7 @@ def usf(d):
     global specific_event_name_filters, specific_event_params_filters
     with lock:
         specific_event_name_filters = d.get('eventNames', [])
-        specific_event_params_filters = []
+        specific_event_params_filters = d.get('params', [])
     _apply_specific_filter_and_emit()
 
 @socketio.on('update_adrevenue_filter')
