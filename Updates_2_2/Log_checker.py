@@ -884,7 +884,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(39)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(41)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2569,17 +2569,9 @@ HTML_TEMPLATE = """
 
         const specificEventInput = document.getElementById('specificEventInput');
         const specificTextFilterInput = document.getElementById('specificTextFilterInput');
-        const parseParamList = (text) => {
-            if (!text) return [];
-            return text
-                .replace(/,/g, ' ')
-                .split(/\\s+/)
-                .map(p => p.trim())
-                .filter(p => p);
-        };
-        const updateSpecific = () => socket.emit('update_specific_filter', { eventNames: specificEventInput.value.split('\\n').filter(p=>p.trim()), params: parseParamList(specificParamInput.value) });
+        const updateSpecific = () => socket.emit('update_specific_filter', { eventNames: specificEventInput.value.split('\\n').filter(p=>p.trim()), params: [] });
         specificEventInput.addEventListener('input', updateSpecific);
-        specificParamInput.addEventListener('input', updateSpecific);
+        specificTextFilterInput.addEventListener('input', renderSpecificEventTable);
         document.querySelectorAll('input[name="specificSourceFilter"]').forEach(r => {
             r.addEventListener('change', () => renderSpecificEventTable());
         });
