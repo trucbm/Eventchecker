@@ -884,7 +884,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(37)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(38)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1341,7 +1341,7 @@ HTML_TEMPLATE = """
                 </div>
                 <p id="packageHistoryMeta" class="text-[11px] text-gray-500">No session selected.</p>
             </div>
-            <div class="overflow-auto border rounded-md mt-3 flex-1">
+            <div id="packageHistoryTableWrap" class="overflow-auto border rounded-md mt-3 flex-1">
                 <table class="min-w-full bg-white">
                     <thead class="bg-gray-50 sticky top-0 z-10">
                         <tr>
@@ -2144,6 +2144,7 @@ HTML_TEMPLATE = """
         }
 
         function loadSelectedPackageHistory(append = false) {
+            if (packageHistoryLoading) return;
             const select = document.getElementById('packageHistorySessionSelect');
             const keyword1 = document.getElementById('packageHistoryFilterInput')?.value || '';
             const keyword2 = document.getElementById('packageHistoryFilterInput2')?.value || '';
@@ -2165,6 +2166,8 @@ HTML_TEMPLATE = """
                 offset: String(offset),
                 limit: String(PACKAGE_HISTORY_PAGE_SIZE),
             });
+            packageHistoryLoading = true;
+            updatePackageHistoryLoadMoreButton();
             fetch(`/api/package-log/logs?${query.toString()}`)
                 .then(r => r.json())
                 .then(data => {
@@ -2189,6 +2192,10 @@ HTML_TEMPLATE = """
                 .catch(err => {
                     document.getElementById('packageHistoryMeta').textContent = `Failed to load saved logs: ${err}`;
                     packageHistoryHasMore = false;
+                    updatePackageHistoryLoadMoreButton();
+                })
+                .finally(() => {
+                    packageHistoryLoading = false;
                     updatePackageHistoryLoadMoreButton();
                 });
         }
@@ -2256,14 +2263,14 @@ HTML_TEMPLATE = """
                 });
         }
 
-        function clearRecordedPackageHistoryFilters() {
+        function clearRecordedPackageHistoryFilters(reload = true) {
             const filter1 = document.getElementById('packageHistoryFilterInput');
             const filter2 = document.getElementById('packageHistoryFilterInput2');
             const filter3 = document.getElementById('packageHistoryFilterInput3');
             if (filter1) filter1.value = '';
             if (filter2) filter2.value = '';
             if (filter3) filter3.value = '';
-            loadSelectedPackageHistory(false);
+            if (reload) loadSelectedPackageHistory(false);
         }
 
         // --- JSON Modal Handler ---
@@ -2291,12 +2298,14 @@ HTML_TEMPLATE = """
         let packageHistoryLoadedRows = [];
         let packageHistoryOffset = 0;
         let packageHistoryHasMore = false;
+        let packageHistoryLoading = false;
 
         function updatePackageHistoryLoadMoreButton() {
             const btn = document.getElementById('loadMorePackageHistoryBtn');
             if (!btn) return;
             btn.classList.toggle('hidden', !packageHistoryHasMore);
-            btn.disabled = !packageHistoryHasMore;
+            btn.disabled = !packageHistoryHasMore || packageHistoryLoading;
+            btn.textContent = packageHistoryLoading ? 'Loading...' : 'Load More';
         }
 
         function getSelectedPackageRows() {
@@ -2602,8 +2611,11 @@ HTML_TEMPLATE = """
         document.getElementById('exportPackageHistoryAllBtn').addEventListener('click', () => exportSelectedPackageHistory(false));
         document.getElementById('refreshPackageSessionsBtn').addEventListener('click', loadPackageHistorySessions);
         document.getElementById('clearPackageHistoryBtn').addEventListener('click', clearAllRecordedPackageHistory);
-        document.getElementById('clearPackageHistoryFiltersBtn').addEventListener('click', clearRecordedPackageHistoryFilters);
-        document.getElementById('packageHistorySessionSelect').addEventListener('change', () => loadSelectedPackageHistory(false));
+        document.getElementById('clearPackageHistoryFiltersBtn').addEventListener('click', () => clearRecordedPackageHistoryFilters(true));
+        document.getElementById('packageHistorySessionSelect').addEventListener('change', () => {
+            clearRecordedPackageHistoryFilters(false);
+            loadSelectedPackageHistory(false);
+        });
         document.getElementById('packageHistoryFilterInput').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -2627,6 +2639,7 @@ HTML_TEMPLATE = """
         const closePackageHistoryModal = document.getElementById('closePackageHistoryModal');
         openPackageHistoryBtn?.addEventListener('click', () => {
             packageHistoryModal?.classList.remove('hidden');
+            clearRecordedPackageHistoryFilters(false);
             loadPackageHistorySessions();
         });
         closePackageHistoryModal?.addEventListener('click', () => {
@@ -2642,6 +2655,16 @@ HTML_TEMPLATE = """
                 clearPackageHistorySelection();
             }
         });
+
+        const packageHistoryTableWrap = document.getElementById('packageHistoryTableWrap');
+        packageHistoryTableWrap?.addEventListener('scroll', () => {
+            if (!packageHistoryHasMore || packageHistoryLoading) return;
+            const remaining = packageHistoryTableWrap.scrollHeight - packageHistoryTableWrap.scrollTop - packageHistoryTableWrap.clientHeight;
+            if (remaining < 120) {
+                loadSelectedPackageHistory(true);
+            }
+        });
+
         ['packageHistorySessionSelect','loadPackageHistoryBtn','loadMorePackageHistoryBtn','refreshPackageSessionsBtn','exportPackageHistoryAllBtn','exportPackageHistoryFilteredBtn','clearPackageHistoryBtn','clearPackageHistoryFiltersBtn','packageHistoryFilterInput','packageHistoryFilterInput2','packageHistoryFilterInput3','closePackageHistoryModal'].forEach(id => {
             document.getElementById(id)?.addEventListener('focus', clearPackageHistorySelection);
             document.getElementById(id)?.addEventListener('click', () => { clearPackageHistorySelection(); });
