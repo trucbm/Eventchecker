@@ -884,7 +884,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(36)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(37)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1305,6 +1305,7 @@ HTML_TEMPLATE = """
                 <div class="flex items-center gap-3 flex-wrap">
                     <h2 class="text-xl font-bold text-gray-800">Recorded Package Logs</h2>
                     <button id="loadPackageHistoryBtn" class="bg-slate-600 hover:bg-slate-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Load</button>
+                    <button id="loadMorePackageHistoryBtn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs py-2 px-4 rounded-lg h-9 hidden">Load More</button>
                     <button id="refreshPackageSessionsBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold text-xs py-2 px-4 rounded-lg h-9">Refresh Sessions</button>
                     <button id="exportPackageHistoryAllBtn" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Export Full</button>
                     <button id="exportPackageHistoryFilteredBtn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Export Filtered</button>
@@ -2076,6 +2077,10 @@ HTML_TEMPLATE = """
             packageHistorySessions = payload.sessions || [];
             select.innerHTML = '';
             if (packageHistorySessions.length === 0) {
+                packageHistoryLoadedRows = [];
+                packageHistoryOffset = 0;
+                packageHistoryHasMore = false;
+                updatePackageHistoryLoadMoreButton();
                 const opt = document.createElement('option');
                 opt.value = '';
                 opt.textContent = 'No saved sessions';
@@ -2101,24 +2106,29 @@ HTML_TEMPLATE = """
             return [row.time_display || '', row.device_name || row.device_id || '', row.tag || '', row.raw_log || row.message || ''].join('||');
         }
 
-        function renderPackageHistoryRows(rows) {
+        function renderPackageHistoryRows(rows, append = false) {
             const tbody = document.getElementById('packageHistoryTableBody');
             if (!tbody) return;
-            if (!rows || rows.length === 0) {
+            if ((!rows || rows.length === 0) && !append) {
                 tbody.innerHTML = '<tr><td colspan="4" class="py-3 px-2 text-xs text-gray-500">No saved logs found for this filter.</td></tr>';
                 return;
             }
-            tbody.innerHTML = rows.map((row, idx) => {
+            if (!rows || rows.length === 0) return;
+            if (!append) tbody.innerHTML = '';
+            const startIdx = append ? tbody.querySelectorAll('tr.package-history-row').length : 0;
+            const html = rows.map((row, idx) => {
                 const rowKey = getPackageHistoryRowKey(row);
                 const selectedClass = selectedPackageHistoryRowKeys.has(rowKey) ? 'selected' : '';
                 return `
-                <tr class="package-history-row hover:bg-gray-50 ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${idx}">
+                <tr class="package-history-row hover:bg-gray-50 ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${startIdx + idx}">
                     <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.time_display || '')}</td>
                     <td class="py-2 px-2 text-[11px] text-gray-700 align-top whitespace-nowrap">${escapeHTML(row.device_name || row.device_id || '')}</td>
                     <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-nowrap max-w-[88px] w-[88px] overflow-hidden text-ellipsis" title="${escapeHTML(row.tag || '')}">${escapeHTML(row.tag || '')}</td>
                     <td class="py-2 px-2 font-mono text-[11px] text-gray-700 align-top whitespace-pre-wrap break-all">${escapeHTML(row.raw_log || row.message || '')}</td>
                 </tr>
             `}).join('');
+            if (append) tbody.insertAdjacentHTML('beforeend', html);
+            else tbody.innerHTML = html;
         }
 
         function loadPackageHistorySessions() {
@@ -2133,20 +2143,27 @@ HTML_TEMPLATE = """
                 });
         }
 
-        function loadSelectedPackageHistory() {
+        function loadSelectedPackageHistory(append = false) {
             const select = document.getElementById('packageHistorySessionSelect');
             const keyword1 = document.getElementById('packageHistoryFilterInput')?.value || '';
             const keyword2 = document.getElementById('packageHistoryFilterInput2')?.value || '';
             const keyword3 = document.getElementById('packageHistoryFilterInput3')?.value || '';
             if (!select || !select.value) {
+                packageHistoryLoadedRows = [];
+                packageHistoryOffset = 0;
+                packageHistoryHasMore = false;
+                updatePackageHistoryLoadMoreButton();
                 renderPackageHistoryRows([]);
                 return;
             }
+            const offset = append ? packageHistoryOffset : 0;
             const query = new URLSearchParams({
                 session_id: select.value,
                 q1: keyword1,
                 q2: keyword2,
                 q3: keyword3,
+                offset: String(offset),
+                limit: String(PACKAGE_HISTORY_PAGE_SIZE),
             });
             fetch(`/api/package-log/logs?${query.toString()}`)
                 .then(r => r.json())
@@ -2154,14 +2171,25 @@ HTML_TEMPLATE = """
                     if (!data.ok) throw new Error(data.error || 'failed_to_load_logs');
                     const current = packageHistorySessions.find(s => String(s.id) === String(data.session_id));
                     const meta = document.getElementById('packageHistoryMeta');
+                    if (!append) {
+                        packageHistoryLoadedRows = [];
+                        packageHistoryOffset = 0;
+                        clearPackageHistorySelection();
+                    }
+                    packageHistoryLoadedRows = append ? packageHistoryLoadedRows.concat(data.rows || []) : (data.rows || []);
+                    packageHistoryOffset = packageHistoryLoadedRows.length;
+                    packageHistoryHasMore = !!data.has_more;
+                    updatePackageHistoryLoadMoreButton();
                     if (meta && current) {
                         const filters = [keyword1, keyword2, keyword3].filter(Boolean).join(' | ');
-                        meta.textContent = `Selected: ${current.package_id} | Started: ${current.started_label} | Status: ${current.status} | Showing: ${data.rows.length}${filters ? ` | Filter: ${filters}` : ''}`;
+                        meta.textContent = `Selected: ${current.package_id} | Started: ${current.started_label} | Status: ${current.status} | Showing: ${packageHistoryLoadedRows.length} / ${data.total_rows}${filters ? ` | Filter: ${filters}` : ''}`;
                     }
-                    renderPackageHistoryRows(data.rows || []);
+                    renderPackageHistoryRows(data.rows || [], append);
                 })
                 .catch(err => {
                     document.getElementById('packageHistoryMeta').textContent = `Failed to load saved logs: ${err}`;
+                    packageHistoryHasMore = false;
+                    updatePackageHistoryLoadMoreButton();
                 });
         }
 
@@ -2212,6 +2240,10 @@ HTML_TEMPLATE = """
                     if (select) {
                         select.innerHTML = '<option value="">No saved sessions</option>';
                     }
+                    packageHistoryLoadedRows = [];
+                    packageHistoryOffset = 0;
+                    packageHistoryHasMore = false;
+                    updatePackageHistoryLoadMoreButton();
                     document.getElementById('packageHistoryFilterInput').value = '';
                     document.getElementById('packageHistoryFilterInput2').value = '';
                     document.getElementById('packageHistoryFilterInput3').value = '';
@@ -2231,7 +2263,7 @@ HTML_TEMPLATE = """
             if (filter1) filter1.value = '';
             if (filter2) filter2.value = '';
             if (filter3) filter3.value = '';
-            loadSelectedPackageHistory();
+            loadSelectedPackageHistory(false);
         }
 
         // --- JSON Modal Handler ---
@@ -2255,6 +2287,17 @@ HTML_TEMPLATE = """
         let selectedPackageHistoryRowKeys = new Set();
         let isSelectingHistoryRows = false;
         let historyDragStartIndex = null;
+        const PACKAGE_HISTORY_PAGE_SIZE = 2000;
+        let packageHistoryLoadedRows = [];
+        let packageHistoryOffset = 0;
+        let packageHistoryHasMore = false;
+
+        function updatePackageHistoryLoadMoreButton() {
+            const btn = document.getElementById('loadMorePackageHistoryBtn');
+            if (!btn) return;
+            btn.classList.toggle('hidden', !packageHistoryHasMore);
+            btn.disabled = !packageHistoryHasMore;
+        }
 
         function getSelectedPackageRows() {
             const selected = Array.from(document.querySelectorAll('#packageLogTableBody tr.package-log-row.selected'));
@@ -2553,29 +2596,30 @@ HTML_TEMPLATE = """
         });
         document.getElementById('showErrorsOnly').addEventListener('change', () => renderPackageLogTable(true));
         document.getElementById('showWarningsOnly').addEventListener('change', () => renderPackageLogTable(true));
-        document.getElementById('loadPackageHistoryBtn').addEventListener('click', loadSelectedPackageHistory);
+        document.getElementById('loadPackageHistoryBtn').addEventListener('click', () => loadSelectedPackageHistory(false));
+        document.getElementById('loadMorePackageHistoryBtn').addEventListener('click', () => loadSelectedPackageHistory(true));
         document.getElementById('exportPackageHistoryFilteredBtn').addEventListener('click', () => exportSelectedPackageHistory(true));
         document.getElementById('exportPackageHistoryAllBtn').addEventListener('click', () => exportSelectedPackageHistory(false));
         document.getElementById('refreshPackageSessionsBtn').addEventListener('click', loadPackageHistorySessions);
         document.getElementById('clearPackageHistoryBtn').addEventListener('click', clearAllRecordedPackageHistory);
         document.getElementById('clearPackageHistoryFiltersBtn').addEventListener('click', clearRecordedPackageHistoryFilters);
-        document.getElementById('packageHistorySessionSelect').addEventListener('change', loadSelectedPackageHistory);
+        document.getElementById('packageHistorySessionSelect').addEventListener('change', () => loadSelectedPackageHistory(false));
         document.getElementById('packageHistoryFilterInput').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                loadSelectedPackageHistory();
+                loadSelectedPackageHistory(false);
             }
         });
         document.getElementById('packageHistoryFilterInput2').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                loadSelectedPackageHistory();
+                loadSelectedPackageHistory(false);
             }
         });
         document.getElementById('packageHistoryFilterInput3').addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
                 e.preventDefault();
-                loadSelectedPackageHistory();
+                loadSelectedPackageHistory(false);
             }
         });
         const packageHistoryModal = document.getElementById('packageHistoryModal');
@@ -2598,7 +2642,7 @@ HTML_TEMPLATE = """
                 clearPackageHistorySelection();
             }
         });
-        ['packageHistorySessionSelect','loadPackageHistoryBtn','refreshPackageSessionsBtn','exportPackageHistoryAllBtn','exportPackageHistoryFilteredBtn','clearPackageHistoryBtn','clearPackageHistoryFiltersBtn','packageHistoryFilterInput','packageHistoryFilterInput2','packageHistoryFilterInput3','closePackageHistoryModal'].forEach(id => {
+        ['packageHistorySessionSelect','loadPackageHistoryBtn','loadMorePackageHistoryBtn','refreshPackageSessionsBtn','exportPackageHistoryAllBtn','exportPackageHistoryFilteredBtn','clearPackageHistoryBtn','clearPackageHistoryFiltersBtn','packageHistoryFilterInput','packageHistoryFilterInput2','packageHistoryFilterInput3','closePackageHistoryModal'].forEach(id => {
             document.getElementById(id)?.addEventListener('focus', clearPackageHistorySelection);
             document.getElementById(id)?.addEventListener('click', () => { clearPackageHistorySelection(); });
         });
@@ -3008,12 +3052,14 @@ def package_log_rows_api():
     keyword1 = (request.args.get('q1') or request.args.get('q') or '').strip().lower()
     keyword2 = (request.args.get('q2') or '').strip().lower()
     keyword3 = (request.args.get('q3') or '').strip().lower()
+    offset = max(request.args.get('offset', default=0, type=int) or 0, 0)
+    limit = request.args.get('limit', default=2000, type=int) or 2000
+    limit = max(1, min(limit, 5000))
     if not session_id:
         return jsonify({"ok": False, "error": "session_id_required"}), 400
     conn = _get_package_db_connection()
     try:
-        sql = """
-            SELECT time_display, device_id, device_name, tag, message, raw_log
+        base_where = """
             FROM package_log_entries
             WHERE session_id = ?
         """
@@ -3030,26 +3076,37 @@ def package_log_rows_api():
             """
 
         if keyword1:
-            sql += search_clause()
+            base_where += search_clause()
             like1 = f"%{keyword1}%"
             params.extend([like1, like1, like1, like1])
         if keyword2:
-            sql += search_clause()
+            base_where += search_clause()
             like2 = f"%{keyword2}%"
             params.extend([like2, like2, like2, like2])
         if keyword3:
-            sql += search_clause()
+            base_where += search_clause()
             like3 = f"%{keyword3}%"
             params.extend([like3, like3, like3, like3])
 
-        sql += """
-            ORDER BY id ASC
+        total_rows = conn.execute(f"SELECT COUNT(*) AS c {base_where}", params).fetchone()["c"] or 0
+        sql = f"""
+            SELECT time_display, device_id, device_name, tag, message, raw_log
+            {base_where}
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?
         """
-        rows = conn.execute(sql, params).fetchall()
+        query_params = params + [limit, offset]
+        rows = conn.execute(sql, query_params).fetchall()
+        rows = list(reversed(rows))
+        loaded_count = offset + len(rows)
         return jsonify({
             "ok": True,
             "session_id": session_id,
             "rows": [dict(r) for r in rows],
+            "offset": offset,
+            "limit": limit,
+            "total_rows": total_rows,
+            "has_more": loaded_count < total_rows,
         })
     finally:
         conn.close()
