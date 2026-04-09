@@ -884,7 +884,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(39)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(43)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1075,8 +1075,8 @@ HTML_TEMPLATE = """
                             </div>
                          </div>
                          <div>
-                            <label for="specificParamInput" class="block text-xs font-medium text-gray-700 mb-1">Validate Parameters:</label>
-                            <textarea id="specificParamInput" rows="4" class="w-full p-2 border rounded-md shadow-sm" placeholder="Leave empty to display all params..."></textarea>
+                            <label for="specificParamInput" class="block text-xs font-medium text-gray-700 mb-1">Filter by Text:</label>
+                            <textarea id="specificParamInput" rows="4" class="w-full p-2 border rounded-md shadow-sm" placeholder="Leave empty to show all raw logs..."></textarea>
                          </div>
                     </div>
                 </div>
@@ -1782,8 +1782,9 @@ HTML_TEMPLATE = """
                 input.focus();
                 socket.emit('update_specific_filter', {
                     eventNames: [name],
-                    params: parseParamList(document.getElementById('specificParamInput')?.value || '')
+                    params: []
                 });
+                renderSpecificEventTable();
             }
         });
 
@@ -1867,9 +1868,11 @@ HTML_TEMPLATE = """
              const tbody = document.getElementById('specificEventTableBody');
              if (!tbody) return;
              const sourceFilter = document.querySelector('input[name="specificSourceFilter"]:checked')?.value || 'all';
+             const textFilter = (document.getElementById('specificParamInput')?.value || '').trim().toLowerCase();
              const filtered = lastSpecificEventData.filter(r => {
                  if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
                  if (sourceFilter !== 'all' && (r.source || 'firebase') !== sourceFilter) return false;
+                 if (textFilter && !(r.raw_log || '').toLowerCase().includes(textFilter)) return false;
                  return true;
              });
              if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
@@ -2560,17 +2563,15 @@ HTML_TEMPLATE = """
 
         const specificEventInput = document.getElementById('specificEventInput');
         const specificParamInput = document.getElementById('specificParamInput');
-        const parseParamList = (text) => {
-            if (!text) return [];
-            return text
-                .replace(/,/g, ' ')
-                .split(/\\s+/)
-                .map(p => p.trim())
-                .filter(p => p);
+        const updateSpecific = () => {
+            socket.emit('update_specific_filter', {
+                eventNames: specificEventInput.value.split('\\n').filter(p => p.trim()),
+                params: []
+            });
+            renderSpecificEventTable();
         };
-        const updateSpecific = () => socket.emit('update_specific_filter', { eventNames: specificEventInput.value.split('\\n').filter(p=>p.trim()), params: parseParamList(specificParamInput.value) });
         specificEventInput.addEventListener('input', updateSpecific);
-        specificParamInput.addEventListener('input', updateSpecific);
+        specificParamInput.addEventListener('input', renderSpecificEventTable);
         document.querySelectorAll('input[name="specificSourceFilter"]').forEach(r => {
             r.addEventListener('change', () => renderSpecificEventTable());
         });
