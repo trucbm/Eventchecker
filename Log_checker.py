@@ -884,7 +884,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(43)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(44)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -992,16 +992,16 @@ HTML_TEMPLATE = """
             <!-- TAB 3: Validator -->
             <div id="tabContentValidator" class="hidden">
                 <div class="bg-white rounded-xl shadow-md p-4 mb-4">
-                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
                         <div class="lg:col-span-1">
-                            <div class="space-y-4">
+                            <div class="space-y-3">
                                 <div>
-                                    <div class="flex items-center gap-3 mb-2">
-                                        <label for="profileSelect" class="text-xs font-medium text-gray-700">Game Profile:</label>
-                                        <p id="profileGameText" class="text-xs font-medium text-indigo-700"></p>
+                                    <div class="flex items-center gap-2 mb-1.5">
+                                        <label for="profileSelect" class="text-[11px] font-medium text-gray-700">Game Profile:</label>
+                                        <p id="profileGameText" class="text-[11px] font-medium text-indigo-700"></p>
                                     </div>
-                                    <div class="space-y-3">
-                                        <select id="profileSelect" class="w-full h-10 px-3 border rounded-md shadow-sm text-sm"></select>
+                                    <div class="space-y-2">
+                                        <select id="profileSelect" class="w-full h-9 px-3 border rounded-md shadow-sm text-xs"></select>
                                         <input type="file" id="profileFileInput" accept=".xlsx" class="hidden">
                                         <div class="flex flex-wrap items-center gap-3">
                                             <button id="importProfileBtn" class="bg-slate-700 hover:bg-slate-800 text-white font-medium text-xs px-3 rounded-lg h-9 min-w-[116px]">Import Profile</button>
@@ -1009,14 +1009,20 @@ HTML_TEMPLATE = """
                                         </div>
                                     </div>
                                 </div>
-                                <div>
-                                    <label for="validatorEventFilterInput" class="block text-xs font-medium text-gray-700 mb-1">Filter by Event Name:</label>
-                                    <input type="text" id="validatorEventFilterInput" class="w-full p-2 border rounded-md shadow-sm" placeholder="Type to filter events...">
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label for="validatorEventFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Filter by Event Name:</label>
+                                        <input type="text" id="validatorEventFilterInput" class="w-full h-9 px-3 border rounded-md shadow-sm text-xs" placeholder="Type to filter events...">
+                                    </div>
+                                    <div>
+                                        <label for="validatorRawFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Filter by Raw Log:</label>
+                                        <input type="text" id="validatorRawFilterInput" class="w-full h-9 px-3 border rounded-md shadow-sm text-xs" placeholder="Search raw log...">
+                                    </div>
                                 </div>
                                 <div class="flex items-center gap-3 pt-1">
                                     <button id="startValidationBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 rounded-lg h-9">Start Checking</button>
                                     <button id="clearValidatorFilterBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium text-xs px-4 rounded-lg h-9">Clear Filter</button>
-                                    <div class="flex items-center gap-3 text-xs text-gray-700 ml-1">
+                                    <div class="flex items-center gap-3 text-[11px] text-gray-700 ml-1">
                                         <label class="inline-flex items-center gap-1.5"><input type="radio" name="validatorSourceFilter" value="all" checked> <span>All</span></label>
                                         <label class="inline-flex items-center gap-1.5"><input type="radio" name="validatorSourceFilter" value="appmetrica"> <span>Appmetrica</span></label>
                                         <label class="inline-flex items-center gap-1.5"><input type="radio" name="validatorSourceFilter" value="firebase"> <span>Firebase</span></label>
@@ -1718,10 +1724,12 @@ HTML_TEMPLATE = """
              const tbody = document.getElementById('validatorTableBody');
              if (!tbody) return;
              const filterText = (document.getElementById('validatorEventFilterInput')?.value || '').toLowerCase().trim();
+             const rawFilterText = (document.getElementById('validatorRawFilterInput')?.value || '').toLowerCase().trim();
              const sourceFilter = document.querySelector('input[name="validatorSourceFilter"]:checked')?.value || 'all';
              const filtered = results.filter(r => {
                  if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
                  if (filterText && !(r.event_name || '').toLowerCase().includes(filterText)) return false;
+                 if (rawFilterText && !(r.raw_log || '').toLowerCase().includes(rawFilterText)) return false;
                  if (sourceFilter !== 'all' && (r.source || 'firebase') !== sourceFilter) return false;
                  return true;
              });
@@ -2543,13 +2551,18 @@ HTML_TEMPLATE = """
 
         document.getElementById('clearValidatorFilterBtn')?.addEventListener('click', () => {
             const eventInput = document.getElementById('validatorEventFilterInput');
+            const rawInput = document.getElementById('validatorRawFilterInput');
             if (eventInput) eventInput.value = '';
+            if (rawInput) rawInput.value = '';
             const allRadio = document.querySelector('input[name="validatorSourceFilter"][value="all"]');
             if (allRadio) allRadio.checked = true;
             renderValidatorTable(validator_results_cache);
         });
         
         document.getElementById('validatorEventFilterInput').addEventListener('input', () => {
+            renderValidatorTable(validator_results_cache);
+        });
+        document.getElementById('validatorRawFilterInput').addEventListener('input', () => {
             renderValidatorTable(validator_results_cache);
         });
 
