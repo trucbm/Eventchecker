@@ -813,7 +813,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(33)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(34)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1096,7 +1096,7 @@ HTML_TEMPLATE = """
                                 </label>
                                 <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="callbackTypeCallback" name="callbackType" type="radio" value="callback" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                    <span class="ml-2 text-sm text-gray-900">Callback</span>
+                                    <span class="ml-2 text-sm text-gray-900">Callback Levelplay</span>
                                 </label>
                                 <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="callbackTypeGadsme" name="callbackType" type="radio" value="gadsme_callback" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
@@ -1854,7 +1854,7 @@ HTML_TEMPLATE = """
                 if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
                 
                 // Type filter
-                if (typeFilter === 'callback' && r.type === 'Ad Event') return false;
+                if (typeFilter === 'callback' && (r.type === 'Ad Event' || r.type === 'Callback Gadsme' || r.type === 'Callback Adverty5')) return false;
                 if (typeFilter === 'gadsme_callback' && r.type !== 'Callback Gadsme') return false;
                 if (typeFilter === 'adverty5_callback' && r.type !== 'Callback Adverty5') return false;
                 if (typeFilter === 'ad_event' && r.type !== 'Ad Event') return false;
