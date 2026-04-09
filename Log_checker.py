@@ -1075,8 +1075,8 @@ HTML_TEMPLATE = """
                             </div>
                          </div>
                          <div>
-                            <label for="specificParamInput" class="block text-xs font-medium text-gray-700 mb-1">Validate Parameters:</label>
-                            <textarea id="specificParamInput" rows="4" class="w-full p-2 border rounded-md shadow-sm" placeholder="Leave empty to display all params..."></textarea>
+                            <label for="specificTextFilterInput" class="block text-xs font-medium text-gray-700 mb-1">Filter by Text:</label>
+                            <textarea id="specificTextFilterInput" rows="4" class="w-full p-2 border rounded-md shadow-sm" placeholder="Leave empty to show all logs..."></textarea>
                          </div>
                     </div>
                 </div>
@@ -1782,8 +1782,9 @@ HTML_TEMPLATE = """
                 input.focus();
                 socket.emit('update_specific_filter', {
                     eventNames: [name],
-                    params: parseParamList(document.getElementById('specificParamInput')?.value || '')
+                    params: []
                 });
+                renderSpecificEventTable();
             }
         });
 
@@ -1867,9 +1868,17 @@ HTML_TEMPLATE = """
              const tbody = document.getElementById('specificEventTableBody');
              if (!tbody) return;
              const sourceFilter = document.querySelector('input[name="specificSourceFilter"]:checked')?.value || 'all';
+             const textFilter = (document.getElementById('specificTextFilterInput')?.value || '').toLowerCase().trim();
              const filtered = lastSpecificEventData.filter(r => {
                  if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
                  if (sourceFilter !== 'all' && (r.source || 'firebase') !== sourceFilter) return false;
+                 if (textFilter) {
+                     const haystack = [r.event_name, r.raw_log, r.json_data, r.status]
+                         .filter(Boolean)
+                         .join('\n')
+                         .toLowerCase();
+                     if (!haystack.includes(textFilter)) return false;
+                 }
                  return true;
              });
              if(filtered.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>'; }
@@ -2559,7 +2568,7 @@ HTML_TEMPLATE = """
         });
 
         const specificEventInput = document.getElementById('specificEventInput');
-        const specificParamInput = document.getElementById('specificParamInput');
+        const specificTextFilterInput = document.getElementById('specificTextFilterInput');
         const parseParamList = (text) => {
             if (!text) return [];
             return text
@@ -4191,7 +4200,7 @@ def usf(d):
     global specific_event_name_filters, specific_event_params_filters
     with lock:
         specific_event_name_filters = d.get('eventNames', [])
-        specific_event_params_filters = d.get('params', [])
+        specific_event_params_filters = []
     _apply_specific_filter_and_emit()
 
 @socketio.on('update_adrevenue_filter')
