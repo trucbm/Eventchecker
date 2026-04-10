@@ -928,7 +928,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(45)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(46)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1019,11 +1019,17 @@ HTML_TEMPLATE = """
 
                     <div class="overflow-x-auto">
                         <table class="min-w-full w-full bg-white table-fixed">
+                            <colgroup>
+                                <col style="width:88px">
+                                <col style="width:96px">
+                                <col style="width:112px">
+                                <col>
+                            </colgroup>
                             <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Ad_source</th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Format</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b">Ad_network</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b">Format</th>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
                                 </tr>
                             </thead>
@@ -1671,9 +1677,9 @@ HTML_TEMPLATE = """
             const useAdNetwork = id === 'loadAdsExtTableBody';
             tbody.innerHTML = filtered.map(e => `
                 <tr class="hover:bg-gray-50 border-b text-sm">
-                    <td class="py-2 px-3 text-purple-700 text-sm font-medium">${e.device_name}</td>
-                    <td class="py-2 px-3 text-blue-600 text-sm font-medium">${useAdNetwork ? (e.ad_network || e.ad_source || '') : (e.ad_source || e.ad_network || '')}</td>
-                    <td class="py-2 px-3 text-green-600 text-sm font-medium">${e.ad_format}</td>
+                    <td class="py-2 px-2 text-purple-700 text-sm font-medium whitespace-nowrap">${e.device_name}</td>
+                    <td class="py-2 px-2 text-blue-600 text-sm font-medium whitespace-nowrap">${useAdNetwork ? (e.ad_network || e.ad_source || '') : (e.ad_source || e.ad_network || '')}</td>
+                    <td class="py-2 px-2 text-green-600 text-sm font-medium whitespace-nowrap">${e.ad_format}</td>
                     <td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${escapeHTML(e.raw_log || '')}</td>
                 </tr>
             `).join('');
