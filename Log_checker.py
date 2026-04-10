@@ -928,7 +928,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(46)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(47)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -962,8 +962,7 @@ HTML_TEMPLATE = """
         <div class="mb-3 flex-shrink-0">
             <div class="flex justify-between items-end border-b border-gray-200">
                 <div class="flex flex-wrap">
-                    <button id="tabBtnLoadAds" class="tab-btn active text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAds')">Load Ads</button>
-                    <button id="tabBtnLoadAdsExt" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAdsExt')">Load Ads Ext (CP, KN)</button>
+                    <button id="tabBtnLoadAdsExt" class="tab-btn active text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAdsExt')">Load Ads Ironsource</button>
                     
                     <button id="tabBtnValidator" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Validator')">Default Events/Params</button>
                     <button id="tabBtnSpecific" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Specific')">Specific Validator</button>
@@ -979,7 +978,7 @@ HTML_TEMPLATE = """
         <div class="flex-grow overflow-auto">
 
             <!-- TAB 1: Load Ads -->
-            <div id="tabContentLoadAds">
+            <div id="tabContentLoadAds" class="hidden">
                  <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border mb-3">
                         <span class="text-sm font-semibold text-gray-700">Record Load Ads:</span>
@@ -1008,11 +1007,11 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- TAB 2: Load Ads Ext (CP, KN)-->
-            <div id="tabContentLoadAdsExt" class="hidden">
+            <!-- TAB 2: Load Ads Ironsource -->
+            <div id="tabContentLoadAdsExt">
                  <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border mb-3">
-                        <span class="text-sm font-semibold text-gray-700">Record Load Ads Ext:</span>
+                        <span class="text-sm font-semibold text-gray-700">Record Load Ads Ironsource:</span>
                         <input type="text" id="sheetName_LoadAdsExt" placeholder="Tên Sheet..." class="border p-2 rounded text-sm w-48 outline-none">
                         <button id="btnRecord_LoadAdsExt" onclick="toggleRecord('LoadAdsExt')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-3 rounded shadow text-xs">Start Record</button>
                     </div>
@@ -1503,7 +1502,7 @@ HTML_TEMPLATE = """
     <!-- SCRIPTS -->
     <script>
         const socket = io();
-        let currentTab = 'LoadAds';
+        let currentTab = 'LoadAdsExt';
         let selectedDevice = 'all';
 
         // --- Common Elements ---
