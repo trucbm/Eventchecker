@@ -410,6 +410,7 @@ UNITY_TRACKING_PATTERN = re.compile(r'\[\s*Tracking\s*\]\s*TrackingService->Trac
 
 # Pattern cho Load Ads Ext (AppMetrica)
 METRICA_TRACKING_PATTERN = re.compile(r'Event sent: ad_impression with value\s*(\{.*\})')
+LOAD_ADS_EXT_ADREVENUE_PATTERN = re.compile(r'AdRevenue Received:\s*AdRevenue\{(.*)\}', re.IGNORECASE)
 METRICA_REGULAR_EVENT_PATTERN = re.compile(
     r'Event received on service:\s*EVENT_TYPE_REGULAR\s+with name\s+([A-Za-z0-9_.$-]+)\s+with value\s*(\{.*\})'
 )
@@ -559,6 +560,49 @@ def parse_levelplay_impression_text(payload):
         else:
             try:
                 if any(ch in raw for ch in '.eE'):
+                    value = float(raw)
+                else:
+                    value = int(raw)
+            except:
+                value = raw
+        result[key] = value
+    return result or None
+
+
+def parse_appmetrica_adrevenue_text(payload):
+    payload = (payload or "").strip()
+    marker = "AdRevenue{"
+    if payload.startswith(marker) and payload.endswith("}"):
+        payload = payload[len(marker):-1].strip()
+
+    result = {}
+    for item in split_top_level_csv(payload):
+        if "=" not in item:
+            continue
+        key, raw = item.split("=", 1)
+        key = key.strip()
+        raw = raw.strip()
+
+        if key == "payload" and raw.startswith("{") and raw.endswith("}"):
+            try:
+                result[key] = json.loads(raw)
+            except:
+                result[key] = raw
+            continue
+
+        if raw.startswith("'") and raw.endswith("'"):
+            value = raw[1:-1]
+        elif raw in ("null", "None", "<null>"):
+            value = None
+        elif raw == "":
+            value = ""
+        elif raw.lower() == "true":
+            value = True
+        elif raw.lower() == "false":
+            value = False
+        else:
+            try:
+                if any(ch in raw for ch in ".eE"):
                     value = float(raw)
                 else:
                     value = int(raw)
@@ -884,7 +928,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(44)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(45)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -953,7 +997,7 @@ HTML_TEMPLATE = """
                             <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
-                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Ad_source</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Ad_network</th>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Format</th>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
                                 </tr>
@@ -1624,10 +1668,11 @@ HTML_TEMPLATE = """
                  return;
             }
 
+            const useAdNetwork = id === 'loadAdsExtTableBody';
             tbody.innerHTML = filtered.map(e => `
                 <tr class="hover:bg-gray-50 border-b text-sm">
                     <td class="py-2 px-3 text-purple-700 text-sm font-medium">${e.device_name}</td>
-                    <td class="py-2 px-3 text-blue-600 text-sm font-medium">${e.ad_source}</td>
+                    <td class="py-2 px-3 text-blue-600 text-sm font-medium">${useAdNetwork ? (e.ad_network || e.ad_source || '') : (e.ad_source || e.ad_network || '')}</td>
                     <td class="py-2 px-3 text-green-600 text-sm font-medium">${e.ad_format}</td>
                     <td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${escapeHTML(e.raw_log || '')}</td>
                 </tr>
@@ -3315,35 +3360,38 @@ def process_load_ads_unity_log(line, device_id):
         except: pass
 
 def process_load_ads_ext_log(line, device_id):
-    """Xử lý log cho Tab 2: Load Ads Ext (Metrica)"""
+    """Xử lý log cho Tab 2: Load Ads Ext (AppMetrica AdRevenue)"""
     # CHỈ XỬ LÝ NẾU ĐANG GHI (RECORDING)
     if not recording_states["LoadAdsExt"]["is_recording"]:
         return
 
-    match = METRICA_TRACKING_PATTERN.search(line)
+    match = LOAD_ADS_EXT_ADREVENUE_PATTERN.search(line)
     if match:
         try:
-            params = json.loads(match.group(1))
-            src = params.get("ad_source")
-            fmt = params.get("ad_format")
-            if params.get("mediation_ad_unit_name") == "MREC": fmt = "MREC"
-            
-            if src and fmt:
+            parsed = parse_appmetrica_adrevenue_text(f"AdRevenue{{{match.group(1)}}}") or {}
+            payload = parsed.get("payload") if isinstance(parsed.get("payload"), dict) else {}
+
+            ad_network = parsed.get("adNetwork") or payload.get("ad_network")
+            fmt = parsed.get("adType") or payload.get("ad_format")
+            if fmt and str(fmt).strip().lower() == "mrec":
+                fmt = "MREC"
+
+            if ad_network and fmt:
                 d_name = get_device_name(device_id)
                 with lock:
-                    if (device_id, src, fmt, "metrica") not in unique_load_ads_ext:
-                        unique_load_ads_ext.add((device_id, src, fmt, "metrica"))
+                    if (device_id, ad_network, fmt, "metrica") not in unique_load_ads_ext:
+                        unique_load_ads_ext.add((device_id, ad_network, fmt, "metrica"))
                         load_ads_ext_events.append({
                             "device_id": device_id,
                             "device_name": d_name, 
-                            "ad_source": src, 
+                            "ad_network": ad_network,
                             "ad_format": fmt, 
                             "raw_log": line.strip()
                         })
                         socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
                         
                         # Gửi với type "LoadAdsExt"
-                        send_to_sheet(d_name, src, fmt, line.strip(), "LoadAdsExt")
+                        send_to_sheet(d_name, ad_network, fmt, line.strip(), "LoadAdsExt")
         except: pass
 
 def find_and_parse_event(log_entry):
