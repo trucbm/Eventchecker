@@ -928,7 +928,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(48)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(49)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2903,6 +2903,35 @@ HTML_TEMPLATE = """
             packageStreamModal?.classList.add('hidden');
         }
 
+        function resetPackageLogUiState() {
+            const packageIdInput = document.getElementById('packageIdInput');
+            const tagInput = document.getElementById('packageTagFilterInput');
+            const filter1 = document.getElementById('packageFilterInput');
+            const filter2 = document.getElementById('packageFilterInput2');
+            const showErrorsOnly = document.getElementById('showErrorsOnly');
+            const showWarningsOnly = document.getElementById('showWarningsOnly');
+            const autoScroll = document.getElementById('autoScroll');
+            const allQuickTag = document.querySelector('input[name="tagQuickFilter"][value=""]');
+            const packageContainer = document.getElementById('packageLogContainer');
+
+            if (packageIdInput) packageIdInput.value = '';
+            document.querySelectorAll('.package-id-checkbox').forEach(cb => { cb.checked = false; });
+            if (tagInput) tagInput.value = '';
+            if (filter1) filter1.value = '';
+            if (filter2) filter2.value = '';
+            if (showErrorsOnly) showErrorsOnly.checked = false;
+            if (showWarningsOnly) showWarningsOnly.checked = false;
+            if (autoScroll) autoScroll.checked = true;
+            if (allQuickTag) allQuickTag.checked = true;
+            packageSelectedRowIndex = null;
+            packageDragAnchor = null;
+            packageLastClickedIndex = null;
+            packageUiPaused = false;
+            pausedPackageSnapshot = [];
+            if (packageContainer) packageContainer.scrollTop = 0;
+            renderPackageLogTable(true);
+        }
+
         function setPackagePauseState(isPaused) {
             packageUiPaused = isPaused;
             if (pausePackageLogBtn) {
@@ -2937,6 +2966,7 @@ HTML_TEMPLATE = """
             setPackagePauseState(false);
             closePackageStreamModal();
             setPackageRunningState(false);
+            resetPackageLogUiState();
         });
 
         // --- Column Resizer (Package Log Table) ---
@@ -3010,6 +3040,7 @@ HTML_TEMPLATE = """
                 setPackagePauseState(false);
                 closePackageStreamModal();
                 setPackageRunningState(false);
+                resetPackageLogUiState();
             }
             setPackageControlsEnabled(true);
         });
