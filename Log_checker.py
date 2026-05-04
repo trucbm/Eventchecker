@@ -1132,7 +1132,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(2)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(3)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1491,10 +1491,22 @@ HTML_TEMPLATE = """
                     </div>
                 </div>
                 <div class="bg-white rounded-xl shadow-md p-4">
-                    <h2 class="text-lg font-semibold mb-2">SDK Check Results</h2>
-                    <div class="overflow-x-auto">
+                    <div class="flex items-center justify-between gap-3 mb-2">
+                        <h2 class="text-lg font-semibold">SDK Check Results</h2>
+                        <span id="sdkCheckPlatformBadge" class="text-xs font-semibold bg-slate-100 text-slate-700 px-3 py-1 rounded-full">Android Table</span>
+                    </div>
+                    <div id="sdkCheckAndroidPanel" class="sdk-check-panel overflow-x-auto" data-sdk-platform="android">
+                        <div class="text-xs font-semibold text-slate-500 mb-2">Android SDK Check</div>
                         <table class="min-w-full bg-white">
                             <tbody id="sdkCheckTableBody" class="divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
+                    <div id="sdkCheckIosPanel" class="sdk-check-panel overflow-x-auto hidden" data-sdk-platform="ios">
+                        <div class="text-xs font-semibold text-slate-500 mb-2">iOS SDK Check</div>
+                        <table class="min-w-full bg-white">
+                            <tbody id="sdkCheckIosTableBody" class="divide-y divide-gray-200">
+                                <tr><td class="py-2 px-4 text-sm text-gray-500 italic">iOS table ready. Device connection will be added in the next step.</td></tr>
+                            </tbody>
                         </table>
                     </div>
                 </div>
@@ -1755,11 +1767,37 @@ HTML_TEMPLATE = """
             platformModal?.classList.remove('flex');
         }
 
+        function syncPlatformUi() {
+            const platform = activePlatform === 'ios' ? 'ios' : 'android';
+            document.querySelectorAll('.sdk-check-panel').forEach(panel => {
+                panel.classList.toggle('hidden', panel.getAttribute('data-sdk-platform') !== platform);
+            });
+            const sdkBadge = document.getElementById('sdkCheckPlatformBadge');
+            if (sdkBadge) sdkBadge.textContent = `${platformLabel(platform)} Table`;
+        }
+
+        function resetRuntimeUiForPlatformSwitch() {
+            if (typeof sdkCheckRunning !== 'undefined') {
+                sdkCheckRunning = false;
+                const sdkBtn = document.getElementById('startSdkCheckBtn');
+                if (sdkBtn) sdkBtn.textContent = 'Start Checking';
+            }
+            if (typeof setPackagePauseState === 'function') setPackagePauseState(false);
+            if (typeof closePackageStreamModal === 'function') closePackageStreamModal();
+            if (typeof setPackageRunningState === 'function') setPackageRunningState(false);
+            if (typeof resetPackageLogUiState === 'function') resetPackageLogUiState();
+            document.getElementById('sdkCheckTableBody')?.replaceChildren();
+            const iosBody = document.getElementById('sdkCheckIosTableBody');
+            if (iosBody) iosBody.innerHTML = '<tr><td class="py-2 px-4 text-sm text-gray-500 italic">iOS table ready. Device connection will be added in the next step.</td></tr>';
+            syncPlatformUi();
+        }
+
         function setActivePlatform(platform, persist = true) {
             activePlatform = platform === 'ios' ? 'ios' : 'android';
             if (persist) localStorage.setItem('eventInspectorPlatform', activePlatform);
             if (platformBtn) platformBtn.textContent = `Platform: ${platformLabel(activePlatform)}`;
-            socket.emit('set_platform', { platform: activePlatform });
+            syncPlatformUi();
+            socket.emit('set_platform', { platform: activePlatform, reset: !!persist });
         }
 
         document.querySelectorAll('[data-platform-choice]').forEach(btn => {
@@ -2269,7 +2307,7 @@ HTML_TEMPLATE = """
         document.getElementById('callbackAdFilterInput').addEventListener('input', renderCallbackTable);
 
         socket.on('update_sdk_check_table', (data) => {
-            const tbody = document.getElementById('sdkCheckTableBody');
+            const tbody = document.getElementById(activePlatform === 'ios' ? 'sdkCheckIosTableBody' : 'sdkCheckTableBody');
             if (!tbody) return;
             tbody.innerHTML = data.map(res => {
                  let rowClass = (selectedDevice !== 'all' && res.status !== 'HEADER') ? 'pl-8' : '';
@@ -2288,6 +2326,10 @@ HTML_TEMPLATE = """
                  
                  return `<tr><td class="py-1 px-4 ${rowClass}"><pre style="font-family: monospace; margin: 0; white-space: pre-wrap;">${escapeHTML(res.display_text)}${statusText}</pre></td></tr>`;
             }).join('');
+        });
+
+        socket.on('runtime_reset', () => {
+            resetRuntimeUiForPlatformSwitch();
         });
 
         let lastPackageLogs = [];
@@ -2833,6 +2875,7 @@ HTML_TEMPLATE = """
             const platform = status?.platform === 'ios' ? 'ios' : 'android';
             activePlatform = platform;
             if (platformBtn) platformBtn.textContent = `Platform: ${platformLabel(platform)}`;
+            syncPlatformUi();
         });
         
         // --- FIXED: Trigger refresh on device change to update all tables including callback
@@ -4179,6 +4222,12 @@ def _apply_adrevenue_filter_and_emit():
 def _emit_sdk_check_results():
     res = []
     with lock:
+        if active_platform == "ios":
+            res.append({"status": "HEADER", "display_text": "--- iOS ---", "device_name": "iOS", "device_id": "ios"})
+            res.append({"status": "WAITING", "display_text": "iOS SDK table ready. Device connection will be added in the next step.", "device_id": "ios"})
+            socketio.emit('update_sdk_check_table', res)
+            return
+
         def append_sdk_network_rows(device_id, network_key, block):
             if _normalize_sdk_network_name(block.get("display_name")) == "googleplayservices":
                 return
@@ -4624,11 +4673,64 @@ def handle_change_tab(data):
     if data.get('tab_name') == 'SdkCheck': _emit_sdk_check_results()
     if data.get('tab_name') == 'CallbackAd': socketio.emit('update_callback_ad_table', list(callback_ad_logs))
 
+def _reset_runtime_for_platform_switch():
+    global is_paused, validator_active, sdk_check_active, sdk_check_current_network
+    global target_package_name, active_package_log_session_id
+    global specific_event_name_filters, specific_event_params_filters
+    with lock:
+        is_paused = False
+        validator_active = False
+        sdk_check_active = False
+        sdk_check_search_list.clear()
+        sdk_check_results.clear()
+        sdk_check_input_list.clear()
+        sdk_check_expected_map.clear()
+        sdk_check_runtime_state.clear()
+        sdk_check_current_network = {}
+        sdk_check_expected_order.clear()
+
+        load_ads_events.clear(); unique_load_ads.clear()
+        load_ads_ext_events.clear(); unique_load_ads_ext.clear()
+        validator_results.clear()
+        specific_event_name_filters = []
+        specific_event_params_filters = []
+        specific_event_results.clear(); event_log_cache.clear()
+        adrevenue_logs.clear(); adrevenue_log_cache.clear()
+        callback_ad_logs.clear(); incomplete_impression_logs.clear()
+        package_log_cache.clear(); active_package_pids.clear()
+        target_package_name = ""
+        if active_package_log_session_id:
+            _finish_package_log_session(active_package_log_session_id)
+            active_package_log_session_id = None
+
+        for state in recording_states.values():
+            state["is_recording"] = False
+
+    socketio.emit('pause_status', {'is_paused': False})
+    socketio.emit('validator_status', {'active': False})
+    for tab, state in recording_states.items():
+        socketio.emit('record_status', {
+            "tab_name": tab,
+            "is_recording": False,
+            "current_sheet": state.get("current_sheet", "")
+        })
+    socketio.emit('update_load_ads', [])
+    socketio.emit('update_load_ads_ext', [])
+    socketio.emit('update_validator_table', [])
+    socketio.emit('update_specific_event_table', [])
+    socketio.emit('update_adrevenue_table', [])
+    socketio.emit('update_callback_ad_table', [])
+    socketio.emit('package_log_cache', [])
+    socketio.emit('runtime_reset', {})
+    _emit_sdk_check_results()
+
 @socketio.on('set_platform')
 def set_platform(data):
     global active_platform
     platform = (data or {}).get('platform', 'android')
     active_platform = 'ios' if platform == 'ios' else 'android'
+    if (data or {}).get('reset'):
+        _reset_runtime_for_platform_switch()
     socketio.emit('platform_status', {'platform': active_platform})
 
 @socketio.on('toggle_record')
