@@ -584,9 +584,9 @@ def _process_sdk_external_line(line, device_id):
             changed = True
 
     if "advertysdk" in normalized_line:
-        version = _extract_sdk_comparable_version(line)
-        if version:
-            update_block("Adverty", adapter_version=version)
+        match = re.search(r'AdvertySDK\s+([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
+        if match:
+            update_block("Adverty", adapter_version=match.group(1))
     if "gadsmeservice->initialize" in normalized_line:
         version = _extract_json_field_version(line, "Version")
         if version:
@@ -616,10 +616,18 @@ def _process_sdk_external_line(line, device_id):
         version = _extract_json_field_version(line, "pluginVersion")
         if version:
             update_block("Appsflyer", adapter_version=version)
-    if "appsflyer:" in normalized_line:
+    appsflyer_sdk = ""
+    sdk_field = _extract_json_field_version(line, "AppsFlyer.getSdkVersion()")
+    if sdk_field:
+        sdk_match = re.search(r'version\s*:\s*([0-9]+(?:\.[0-9]+)+)', sdk_field, re.IGNORECASE)
+        if sdk_match:
+            appsflyer_sdk = sdk_match.group(1)
+    if not appsflyer_sdk and "appsflyer:" in normalized_line:
         match = re.search(r'AppsFlyer:\s*\(v?([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
         if match:
-            update_block("Appsflyer", sdk_version=match.group(1))
+            appsflyer_sdk = match.group(1)
+    if appsflyer_sdk:
+        update_block("Appsflyer", sdk_version=appsflyer_sdk)
     if "firebase crashlytics" in normalized_line and "initializing" in normalized_line:
         match = re.search(r'Firebase\s+Crashlytics\s+([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
         if match:
