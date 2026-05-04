@@ -8,11 +8,11 @@ import sys
 import requests
 
 APP_NAME = "EventInspector"
-CHANNEL_ID = "v220"
-CONFIG_FILENAME = "remote_update_config_v220.json"
-STATE_FILENAME = "update_state_v220.json"
-UPDATES_DIRNAME = "updates_v220"
-DEFAULT_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_2/remote_manifest.json"
+CHANNEL_ID = "v230"
+CONFIG_FILENAME = "remote_update_config_v230.json"
+STATE_FILENAME = "update_state_v230.json"
+UPDATES_DIRNAME = "updates_v230"
+DEFAULT_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json"
 
 
 def _user_data_dir():
