@@ -468,9 +468,12 @@ def _normalize_sdk_network_name(name):
 
 SDK_NETWORK_ALIASES = {
     "bigo": "bigoads",
+    "fyber": "digitalturbinefyber",
+    "digitalturbine": "digitalturbinefyber",
     "google": "googleadmobandadmanager",
     "admob": "googleadmobandadmanager",
     "googleadmanager": "googleadmobandadmanager",
+    "line": "lineads",
     "mytarget": "mytargetvkads",
     "vkads": "mytargetvkads",
     "pubmatic": "pubmaticopenwrap",
@@ -1106,7 +1109,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(53)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(54)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4599,12 +4602,12 @@ def sdk_check(data):
         sdk_check_runtime_state = {}
         sdk_check_current_network = {}
         sdk_check_expected_order = []
-        lines = [line.strip() for line in data.get('text', '').splitlines() if line.strip()]
+        lines = [line.rstrip('\r') for line in data.get('text', '').splitlines() if line.strip()]
         if lines:
-            header = [col.strip() for col in re.split(r'\t+', lines[0])]
+            header = [col.strip() for col in lines[0].split('\t')]
             if len(header) >= 3 and header[0].lower().startswith('ads network'):
                 for line in lines[1:]:
-                    cols = [col.strip() for col in re.split(r'\t+', line)]
+                    cols = [col.strip() for col in line.split('\t')]
                     if not cols or not cols[0]:
                         continue
                     network = cols[0]
