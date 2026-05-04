@@ -510,6 +510,18 @@ def _extract_sdk_comparable_version(value):
     match = re.search(r'(\d+(?:\.\d+)+)', text)
     return match.group(1) if match else text
 
+
+def _sdk_result_status(actual_value, expected_value):
+    actual_text = str(actual_value or "").strip()
+    expected_text = str(expected_value or "").strip()
+    if not actual_text or actual_text.upper() in {"NOT FOUND", "MISSING"}:
+        return "NOT_FOUND"
+    actual_compare = _extract_sdk_comparable_version(actual_text)
+    expected_compare = _extract_sdk_comparable_version(expected_text)
+    if expected_compare:
+        return "PASSED" if actual_compare == expected_compare else "FAILED"
+    return "FOUND"
+
 # --- HELPER FUNCTIONS FOR FORMATTING ---
 def format_json_html(data):
     """Format JSON object to HTML string with indentation and colors"""
@@ -4002,11 +4014,7 @@ def _emit_sdk_check_results():
 
                 actual_sdk = block.get("sdk_version", "")
                 expected_sdk = expected.get("sdk", "")
-                actual_sdk_compare = _extract_sdk_comparable_version(actual_sdk)
-                expected_sdk_compare = _extract_sdk_comparable_version(expected_sdk)
-                sdk_status = "NOT_FOUND"
-                if actual_sdk:
-                    sdk_status = "PASSED" if expected_sdk_compare and actual_sdk_compare == expected_sdk_compare else ("FAILED" if expected_sdk else "FOUND")
+                sdk_status = _sdk_result_status(actual_sdk, expected_sdk)
                 res.append({
                     "status": sdk_status,
                     "display_text": f"SDK  Actual: {actual_sdk or 'NOT FOUND'}  Expected: {expected_sdk}",
@@ -4017,11 +4025,7 @@ def _emit_sdk_check_results():
                 if not actual_adapter and block.get("adapter_missing"):
                     actual_adapter = "MISSING"
                 expected_adapter = expected.get("adapter", "")
-                actual_adapter_compare = _extract_sdk_comparable_version(actual_adapter)
-                expected_adapter_compare = _extract_sdk_comparable_version(expected_adapter)
-                adapter_status = "NOT_FOUND"
-                if actual_adapter:
-                    adapter_status = "PASSED" if expected_adapter_compare and actual_adapter_compare == expected_adapter_compare else ("FAILED" if expected_adapter else "FOUND")
+                adapter_status = _sdk_result_status(actual_adapter, expected_adapter)
                 res.append({
                     "status": adapter_status,
                     "display_text": f"Adapter  Actual: {actual_adapter or 'NOT FOUND'}  Expected: {expected_adapter}",
