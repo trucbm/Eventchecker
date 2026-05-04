@@ -1131,7 +1131,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(58)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(59)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2232,7 +2232,7 @@ HTML_TEMPLATE = """
                  else if (res.status === 'NOT_FOUND') statusText = '<span class="font-semibold text-red-600"> - Not Found</span>';
                  else if (res.status === 'FOUND') statusText = '<span class="font-semibold text-amber-600"> - FOUND</span>';
                  else if (res.status === 'HEADER') rowClass += ' font-semibold text-sm text-indigo-600 bg-gray-50';
-                 else if (res.status === 'LABEL') rowClass += ' font-medium text-sm text-gray-800 pt-2';
+                 else if (res.status === 'LABEL') rowClass += ' font-bold text-base text-indigo-700 pt-3';
                  else if (res.status === 'WAITING') rowClass += ' text-sm text-gray-500 italic';
                  
                  // Filter
