@@ -1131,7 +1131,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(59)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(60)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2233,10 +2233,11 @@ HTML_TEMPLATE = """
                  else if (res.status === 'FOUND') statusText = '<span class="font-semibold text-amber-600"> - FOUND</span>';
                  else if (res.status === 'HEADER') rowClass += ' font-semibold text-sm text-indigo-600 bg-gray-50';
                  else if (res.status === 'LABEL') rowClass += ' font-bold text-base text-indigo-700 pt-3';
+                 else if (res.status === 'SECTION') rowClass += ' font-bold text-sm text-slate-500 pt-4 border-t border-gray-200';
                  else if (res.status === 'WAITING') rowClass += ' text-sm text-gray-500 italic';
                  
                  // Filter
-                 if (selectedDevice !== 'all' && res.device_id !== selectedDevice && res.status !== 'LABEL' && res.status !== 'WAITING') return '';
+                 if (selectedDevice !== 'all' && res.device_id !== selectedDevice && res.status !== 'LABEL' && res.status !== 'SECTION' && res.status !== 'WAITING') return '';
                  
                  return `<tr><td class="py-1 px-4 ${rowClass}"><pre style="font-family: monospace; margin: 0; white-space: pre-wrap;">${escapeHTML(res.display_text)}${statusText}</pre></td></tr>`;
             }).join('');
@@ -4125,6 +4126,57 @@ def _apply_adrevenue_filter_and_emit():
 def _emit_sdk_check_results():
     res = []
     with lock:
+        def append_sdk_network_rows(device_id, network_key, block):
+            if _normalize_sdk_network_name(block.get("display_name")) == "googleplayservices":
+                return
+            expected_key = block.get("expected_key") or _match_sdk_expected_key(block.get("display_name"))
+            expected = sdk_check_expected_map.get(expected_key, {})
+            res.append({"status": "LABEL", "display_text": block.get("display_name", network_key), "device_id": device_id})
+
+            actual_sdk = block.get("sdk_version", "")
+            expected_sdk = expected.get("sdk", "")
+            actual_adapter = block.get("adapter_version", "")
+            if not actual_adapter and block.get("adapter_missing"):
+                actual_adapter = "MISSING"
+            expected_adapter = expected.get("adapter", "")
+
+            if bool(expected_sdk) ^ bool(expected_adapter):
+                if expected_sdk:
+                    actual_single = actual_sdk
+                    expected_single = expected_sdk
+                else:
+                    actual_single = actual_adapter
+                    expected_single = expected_adapter
+                single_status = _sdk_result_status(actual_single, expected_single)
+                actual_single_display = actual_single
+                if actual_single_display and actual_single_display.upper() not in {"NOT FOUND", "MISSING"}:
+                    actual_single_display = _extract_sdk_comparable_version(actual_single_display, expected_single)
+                res.append({
+                    "status": single_status,
+                    "display_text": f"Version  Actual: {actual_single_display or 'NOT FOUND'}  Expected: {expected_single}",
+                    "device_id": device_id
+                })
+            else:
+                sdk_status = _sdk_result_status(actual_sdk, expected_sdk)
+                actual_sdk_display = actual_sdk
+                if actual_sdk_display and actual_sdk_display.upper() not in {"NOT FOUND", "MISSING"}:
+                    actual_sdk_display = _extract_sdk_comparable_version(actual_sdk_display, expected_sdk)
+                res.append({
+                    "status": sdk_status,
+                    "display_text": f"SDK  Actual: {actual_sdk_display or 'NOT FOUND'}  Expected: {expected_sdk}",
+                    "device_id": device_id
+                })
+
+                adapter_status = _sdk_result_status(actual_adapter, expected_adapter)
+                actual_adapter_display = actual_adapter
+                if actual_adapter_display and actual_adapter_display.upper() not in {"NOT FOUND", "MISSING"}:
+                    actual_adapter_display = _extract_sdk_comparable_version(actual_adapter_display, expected_adapter)
+                res.append({
+                    "status": adapter_status,
+                    "display_text": f"Adapter  Actual: {actual_adapter_display or 'NOT FOUND'}  Expected: {expected_adapter}",
+                    "device_id": device_id
+                })
+
         for dev in connected_devices_info:
             res.append({"status": "HEADER", "display_text": f"--- {dev['name']} ---", "device_name": dev['name'], "device_id": dev['id']})
             device_state = sdk_check_runtime_state.get(dev['id'], {})
@@ -4134,57 +4186,16 @@ def _emit_sdk_check_results():
 
             _ensure_sdk_expected_blocks_for_device(dev['id'])
             device_state = sdk_check_runtime_state.get(dev['id'], {})
-            for network_key in _sdk_state_network_keys(dev['id']):
-                block = device_state.get(network_key, {})
-                if _normalize_sdk_network_name(block.get("display_name")) == "googleplayservices":
-                    continue
-                expected_key = block.get("expected_key") or _match_sdk_expected_key(block.get("display_name"))
-                expected = sdk_check_expected_map.get(expected_key, {})
-                res.append({"status": "LABEL", "display_text": block.get("display_name", network_key), "device_id": dev['id']})
+            in_list_keys = [key for key in _sdk_state_network_keys(dev['id']) if key in sdk_check_expected_map]
+            not_in_list_keys = [key for key in _sdk_state_network_keys(dev['id']) if key not in sdk_check_expected_map]
 
-                actual_sdk = block.get("sdk_version", "")
-                expected_sdk = expected.get("sdk", "")
-                actual_adapter = block.get("adapter_version", "")
-                if not actual_adapter and block.get("adapter_missing"):
-                    actual_adapter = "MISSING"
-                expected_adapter = expected.get("adapter", "")
+            for network_key in in_list_keys:
+                append_sdk_network_rows(dev['id'], network_key, device_state.get(network_key, {}))
 
-                if bool(expected_sdk) ^ bool(expected_adapter):
-                    if expected_sdk:
-                        actual_single = actual_sdk
-                        expected_single = expected_sdk
-                    else:
-                        actual_single = actual_adapter
-                        expected_single = expected_adapter
-                    single_status = _sdk_result_status(actual_single, expected_single)
-                    actual_single_display = actual_single
-                    if actual_single_display and actual_single_display.upper() not in {"NOT FOUND", "MISSING"}:
-                        actual_single_display = _extract_sdk_comparable_version(actual_single_display, expected_single)
-                    res.append({
-                        "status": single_status,
-                        "display_text": f"Version  Actual: {actual_single_display or 'NOT FOUND'}  Expected: {expected_single}",
-                        "device_id": dev['id']
-                    })
-                else:
-                    sdk_status = _sdk_result_status(actual_sdk, expected_sdk)
-                    actual_sdk_display = actual_sdk
-                    if actual_sdk_display and actual_sdk_display.upper() not in {"NOT FOUND", "MISSING"}:
-                        actual_sdk_display = _extract_sdk_comparable_version(actual_sdk_display, expected_sdk)
-                    res.append({
-                        "status": sdk_status,
-                        "display_text": f"SDK  Actual: {actual_sdk_display or 'NOT FOUND'}  Expected: {expected_sdk}",
-                        "device_id": dev['id']
-                    })
-
-                    adapter_status = _sdk_result_status(actual_adapter, expected_adapter)
-                    actual_adapter_display = actual_adapter
-                    if actual_adapter_display and actual_adapter_display.upper() not in {"NOT FOUND", "MISSING"}:
-                        actual_adapter_display = _extract_sdk_comparable_version(actual_adapter_display, expected_adapter)
-                    res.append({
-                        "status": adapter_status,
-                        "display_text": f"Adapter  Actual: {actual_adapter_display or 'NOT FOUND'}  Expected: {expected_adapter}",
-                        "device_id": dev['id']
-                    })
+            if not_in_list_keys:
+                res.append({"status": "SECTION", "display_text": "----------- Not in List -------", "device_id": dev['id']})
+                for network_key in not_in_list_keys:
+                    append_sdk_network_rows(dev['id'], network_key, device_state.get(network_key, {}))
     socketio.emit('update_sdk_check_table', res)
 
 
