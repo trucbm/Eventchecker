@@ -1109,7 +1109,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(54)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(55)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4144,10 +4144,11 @@ def _emit_sdk_check_results():
 
 def _sdk_check_block_for_device(device_id, network_name):
     device_state = sdk_check_runtime_state.setdefault(device_id, {})
-    network_key = _normalize_sdk_network_name(network_name)
-    block = device_state.get(network_key)
+    raw_network_key = _normalize_sdk_network_name(network_name)
+    expected_key = _match_sdk_expected_key(network_name) or raw_network_key
+    storage_key = expected_key or raw_network_key
+    block = device_state.get(storage_key)
     if not block:
-        expected_key = _match_sdk_expected_key(network_name) or network_key
         expected = sdk_check_expected_map.get(expected_key, {})
         block = {
             "display_name": network_name.strip() or expected.get("display_name", network_name.strip()),
@@ -4158,11 +4159,13 @@ def _sdk_check_block_for_device(device_id, network_name):
             "expected_key": expected_key,
             "updated_at": time.time(),
         }
-        device_state[network_key] = block
+        if expected.get("display_name"):
+            block["display_name"] = expected.get("display_name")
+        device_state[storage_key] = block
     else:
-        expected_key = block.get("expected_key") or _match_sdk_expected_key(network_name) or network_key
+        expected_key = block.get("expected_key") or _match_sdk_expected_key(network_name) or raw_network_key
         expected = sdk_check_expected_map.get(expected_key, {})
-        block["display_name"] = network_name.strip() or block["display_name"] or expected.get("display_name", network_name.strip())
+        block["display_name"] = expected.get("display_name") or network_name.strip() or block["display_name"] or expected.get("display_name", network_name.strip())
         block["expected_key"] = expected_key
         block["updated_at"] = time.time()
     return block
