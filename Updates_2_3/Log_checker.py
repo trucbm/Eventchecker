@@ -288,6 +288,7 @@ sdk_check_expected_map = {}
 sdk_check_runtime_state = {}
 sdk_check_current_network = {}
 sdk_check_expected_order = []
+active_platform = "android"
 
 # Dữ liệu hệ thống chung
 active_log_readers = {}
@@ -1131,13 +1132,14 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(1)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(2)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
                     <div class="flex items-center gap-2">
                     <button id="restartAppBtn" class="bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Check Update</button>
                     <button id="manualRestartBtn" class="bg-slate-500 hover:bg-slate-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Restart</button>
+                    <button id="platformBtn" class="bg-white hover:bg-gray-50 text-slate-700 border border-slate-300 text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Platform: Android</button>
                 </div>
                 </div>
                 <div class="flex items-center gap-4">
@@ -1157,6 +1159,16 @@ HTML_TEMPLATE = """
                             <option value="all">All Devices</option>
                         </select>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="platformModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 px-4">
+            <div class="bg-white rounded-xl shadow-xl border w-full max-w-md p-5">
+                <h2 class="text-lg font-bold text-slate-800 mb-2">Select Platform</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                    <button data-platform-choice="android" class="platform-choice-btn rounded-lg border border-slate-200 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-300 text-slate-800 font-semibold py-4 px-4 transition-colors">Android</button>
+                    <button data-platform-choice="ios" class="platform-choice-btn rounded-lg border border-slate-200 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-300 text-slate-800 font-semibold py-4 px-4 transition-colors">iOS</button>
                 </div>
             </div>
         </div>
@@ -1725,6 +1737,41 @@ HTML_TEMPLATE = """
         const deviceFilter = document.getElementById('deviceFilter');
         const clearAllBtn = document.getElementById('clearAllBtn');
         const restartAppBtn = document.getElementById('restartAppBtn');
+        const platformBtn = document.getElementById('platformBtn');
+        const platformModal = document.getElementById('platformModal');
+        let activePlatform = localStorage.getItem('eventInspectorPlatform') || '';
+
+        function platformLabel(platform) {
+            return platform === 'ios' ? 'iOS' : 'Android';
+        }
+
+        function showPlatformModal() {
+            platformModal?.classList.remove('hidden');
+            platformModal?.classList.add('flex');
+        }
+
+        function hidePlatformModal() {
+            platformModal?.classList.add('hidden');
+            platformModal?.classList.remove('flex');
+        }
+
+        function setActivePlatform(platform, persist = true) {
+            activePlatform = platform === 'ios' ? 'ios' : 'android';
+            if (persist) localStorage.setItem('eventInspectorPlatform', activePlatform);
+            if (platformBtn) platformBtn.textContent = `Platform: ${platformLabel(activePlatform)}`;
+            socket.emit('set_platform', { platform: activePlatform });
+        }
+
+        document.querySelectorAll('[data-platform-choice]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                setActivePlatform(btn.getAttribute('data-platform-choice') || 'android');
+                hidePlatformModal();
+            });
+        });
+
+        platformBtn?.addEventListener('click', showPlatformModal);
+        if (activePlatform) setActivePlatform(activePlatform, false);
+        else showPlatformModal();
 
         // --- Tab Logic ---
         function switchTab(tabName) {
@@ -2780,6 +2827,12 @@ HTML_TEMPLATE = """
             } else {
                  deviceListEl.innerHTML = `<p class="text-orange-500">${status.message || 'Waiting...'}</p>`;
             }
+        });
+
+        socket.on('platform_status', (status) => {
+            const platform = status?.platform === 'ios' ? 'ios' : 'android';
+            activePlatform = platform;
+            if (platformBtn) platformBtn.textContent = `Platform: ${platformLabel(platform)}`;
         });
         
         // --- FIXED: Trigger refresh on device change to update all tables including callback
@@ -4571,6 +4624,13 @@ def handle_change_tab(data):
     if data.get('tab_name') == 'SdkCheck': _emit_sdk_check_results()
     if data.get('tab_name') == 'CallbackAd': socketio.emit('update_callback_ad_table', list(callback_ad_logs))
 
+@socketio.on('set_platform')
+def set_platform(data):
+    global active_platform
+    platform = (data or {}).get('platform', 'android')
+    active_platform = 'ios' if platform == 'ios' else 'android'
+    socketio.emit('platform_status', {'platform': active_platform})
+
 @socketio.on('toggle_record')
 def tr(data):
     tab_name = data.get('tab_name')
@@ -4736,6 +4796,7 @@ def refresh():
 def connect(): 
     socketio.emit('pause_status', {'is_paused': is_paused})
     socketio.emit('validator_status', {'active': validator_active})
+    socketio.emit('platform_status', {'platform': active_platform})
     # Sync recording buttons on connect
     for tab, state in recording_states.items():
         socketio.emit('record_status', {
