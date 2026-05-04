@@ -505,14 +505,24 @@ def _match_sdk_expected_key(actual_name):
     return ""
 
 
-def _extract_sdk_comparable_version(value):
+def _extract_sdk_comparable_version(value, expected_value=""):
     if value is None:
         return ""
     text = str(value).strip()
     if not text:
         return ""
     match = re.search(r'(\d+(?:\.\d+)+)', text)
-    return match.group(1) if match else text
+    if not match:
+        return text
+    version = match.group(1)
+    expected_text = str(expected_value or "").strip()
+    expected_match = re.search(r'(\d+(?:\.\d+)+)', expected_text)
+    if expected_match:
+        expected_parts = expected_match.group(1).split('.')
+        version_parts = version.split('.')
+        if len(version_parts) >= len(expected_parts):
+            return '.'.join(version_parts[:len(expected_parts)])
+    return version
 
 
 def _sdk_result_status(actual_value, expected_value):
@@ -520,7 +530,7 @@ def _sdk_result_status(actual_value, expected_value):
     expected_text = str(expected_value or "").strip()
     if not actual_text or actual_text.upper() in {"NOT FOUND", "MISSING"}:
         return "NOT_FOUND"
-    actual_compare = _extract_sdk_comparable_version(actual_text)
+    actual_compare = _extract_sdk_comparable_version(actual_text, expected_text)
     expected_compare = _extract_sdk_comparable_version(expected_text)
     if expected_compare:
         return "PASSED" if actual_compare == expected_compare else "FAILED"
@@ -1121,7 +1131,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(57)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(58)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4134,29 +4144,47 @@ def _emit_sdk_check_results():
 
                 actual_sdk = block.get("sdk_version", "")
                 expected_sdk = expected.get("sdk", "")
-                sdk_status = _sdk_result_status(actual_sdk, expected_sdk)
-                actual_sdk_display = actual_sdk
-                if actual_sdk_display and actual_sdk_display.upper() not in {"NOT FOUND", "MISSING"}:
-                    actual_sdk_display = _extract_sdk_comparable_version(actual_sdk_display)
-                res.append({
-                    "status": sdk_status,
-                    "display_text": f"SDK  Actual: {actual_sdk_display or 'NOT FOUND'}  Expected: {expected_sdk}",
-                    "device_id": dev['id']
-                })
-
                 actual_adapter = block.get("adapter_version", "")
                 if not actual_adapter and block.get("adapter_missing"):
                     actual_adapter = "MISSING"
                 expected_adapter = expected.get("adapter", "")
-                adapter_status = _sdk_result_status(actual_adapter, expected_adapter)
-                actual_adapter_display = actual_adapter
-                if actual_adapter_display and actual_adapter_display.upper() not in {"NOT FOUND", "MISSING"}:
-                    actual_adapter_display = _extract_sdk_comparable_version(actual_adapter_display)
-                res.append({
-                    "status": adapter_status,
-                    "display_text": f"Adapter  Actual: {actual_adapter_display or 'NOT FOUND'}  Expected: {expected_adapter}",
-                    "device_id": dev['id']
-                })
+
+                if bool(expected_sdk) ^ bool(expected_adapter):
+                    if expected_sdk:
+                        actual_single = actual_sdk
+                        expected_single = expected_sdk
+                    else:
+                        actual_single = actual_adapter
+                        expected_single = expected_adapter
+                    single_status = _sdk_result_status(actual_single, expected_single)
+                    actual_single_display = actual_single
+                    if actual_single_display and actual_single_display.upper() not in {"NOT FOUND", "MISSING"}:
+                        actual_single_display = _extract_sdk_comparable_version(actual_single_display, expected_single)
+                    res.append({
+                        "status": single_status,
+                        "display_text": f"Version  Actual: {actual_single_display or 'NOT FOUND'}  Expected: {expected_single}",
+                        "device_id": dev['id']
+                    })
+                else:
+                    sdk_status = _sdk_result_status(actual_sdk, expected_sdk)
+                    actual_sdk_display = actual_sdk
+                    if actual_sdk_display and actual_sdk_display.upper() not in {"NOT FOUND", "MISSING"}:
+                        actual_sdk_display = _extract_sdk_comparable_version(actual_sdk_display, expected_sdk)
+                    res.append({
+                        "status": sdk_status,
+                        "display_text": f"SDK  Actual: {actual_sdk_display or 'NOT FOUND'}  Expected: {expected_sdk}",
+                        "device_id": dev['id']
+                    })
+
+                    adapter_status = _sdk_result_status(actual_adapter, expected_adapter)
+                    actual_adapter_display = actual_adapter
+                    if actual_adapter_display and actual_adapter_display.upper() not in {"NOT FOUND", "MISSING"}:
+                        actual_adapter_display = _extract_sdk_comparable_version(actual_adapter_display, expected_adapter)
+                    res.append({
+                        "status": adapter_status,
+                        "display_text": f"Adapter  Actual: {actual_adapter_display or 'NOT FOUND'}  Expected: {expected_adapter}",
+                        "device_id": dev['id']
+                    })
     socketio.emit('update_sdk_check_table', res)
 
 
