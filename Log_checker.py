@@ -287,6 +287,7 @@ sdk_check_active = False
 sdk_check_expected_map = {}
 sdk_check_runtime_state = {}
 sdk_check_current_network = {}
+sdk_check_expected_order = []
 
 # Dữ liệu hệ thống chung
 active_log_readers = {}
@@ -521,6 +522,107 @@ def _sdk_result_status(actual_value, expected_value):
     if expected_compare:
         return "PASSED" if actual_compare == expected_compare else "FAILED"
     return "FOUND"
+
+
+def _sdk_state_network_keys(device_id):
+    keys = []
+    seen = set()
+    device_state = sdk_check_runtime_state.get(device_id, {})
+    for expected_key in sdk_check_expected_order:
+        if expected_key not in seen:
+            keys.append(expected_key)
+            seen.add(expected_key)
+    for network_key in device_state.keys():
+        if network_key not in seen:
+            keys.append(network_key)
+            seen.add(network_key)
+    return keys
+
+
+def _ensure_sdk_expected_blocks_for_device(device_id):
+    device_state = sdk_check_runtime_state.setdefault(device_id, {})
+    for expected_key in sdk_check_expected_order:
+        expected = sdk_check_expected_map.get(expected_key, {})
+        if expected_key not in device_state:
+            device_state[expected_key] = {
+                "display_name": expected.get("display_name", expected_key),
+                "sdk_version": "",
+                "adapter_version": "",
+                "adapter_missing": False,
+                "verification": "",
+                "expected_key": expected_key,
+                "updated_at": time.time(),
+            }
+
+
+def _extract_json_field_version(line, field_name):
+    pattern = re.compile(rf'"{re.escape(field_name)}"\s*:\s*"([^"]+)"', re.IGNORECASE)
+    match = pattern.search(line)
+    return match.group(1).strip() if match else ""
+
+
+def _process_sdk_external_line(line, device_id):
+    normalized_line = _normalize_sdk_search_text(line)
+    changed = False
+
+    def update_block(network_name, sdk_version=None, adapter_version=None, adapter_missing=False):
+        nonlocal changed
+        block = _sdk_check_block_for_device(device_id, network_name)
+        if sdk_version is not None and block.get("sdk_version") != sdk_version:
+            block["sdk_version"] = sdk_version
+            changed = True
+        if adapter_version is not None and (block.get("adapter_version") != adapter_version or block.get("adapter_missing")):
+            block["adapter_version"] = adapter_version
+            block["adapter_missing"] = False
+            changed = True
+        if adapter_missing and (not block.get("adapter_missing") or block.get("adapter_version")):
+            block["adapter_missing"] = True
+            block["adapter_version"] = ""
+            changed = True
+
+    if "advertysdk" in normalized_line:
+        version = _extract_sdk_comparable_version(line)
+        if version:
+            update_block("Adverty", adapter_version=version)
+    if "gadsmeservice->initialize" in normalized_line:
+        version = _extract_json_field_version(line, "Version")
+        if version:
+            update_block("Gadsme", adapter_version=version)
+    if "audiomob" in normalized_line:
+        match = re.search(r'Audiomob\s+v?([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
+        if match:
+            update_block("AudioMob", adapter_version=match.group(1))
+    if "adquality" in normalized_line:
+        match = re.search(r'AdQuality\s+([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
+        if match:
+            version = match.group(1)
+            update_block("AdQuality", adapter_version=version, sdk_version=version)
+    if "facebook unity sdk" in normalized_line:
+        match = re.search(r'Facebook\s+Unity\s+SDK\s+v?([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
+        if match:
+            update_block("Facebook SDK", adapter_version=match.group(1))
+    if "fbandroidsdk/" in normalized_line:
+        match = re.search(r'FBAndroidSDK/([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
+        if match:
+            update_block("Facebook SDK", sdk_version=match.group(1))
+    if "appmetrica" in normalized_line and "release type" in normalized_line and "version" in normalized_line:
+        match = re.search(r'AppMetrica.*?Version\s+([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
+        if match:
+            update_block("AppMetrica", sdk_version=match.group(1))
+    if '"pluginversion"' in normalized_line:
+        version = _extract_json_field_version(line, "pluginVersion")
+        if version:
+            update_block("Appsflyer", adapter_version=version)
+    if "appsflyer:" in normalized_line:
+        match = re.search(r'AppsFlyer:\s*\(v?([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
+        if match:
+            update_block("Appsflyer", sdk_version=match.group(1))
+    if "firebase crashlytics" in normalized_line and "initializing" in normalized_line:
+        match = re.search(r'Firebase\s+Crashlytics\s+([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
+        if match:
+            update_block("Firebase Crashlytics", sdk_version=match.group(1))
+
+    return changed
 
 # --- HELPER FUNCTIONS FOR FORMATTING ---
 def format_json_html(data):
@@ -1004,7 +1106,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(52)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(53)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4001,11 +4103,14 @@ def _emit_sdk_check_results():
         for dev in connected_devices_info:
             res.append({"status": "HEADER", "display_text": f"--- {dev['name']} ---", "device_name": dev['name'], "device_id": dev['id']})
             device_state = sdk_check_runtime_state.get(dev['id'], {})
-            if not device_state:
+            if not device_state and not sdk_check_expected_order:
                 res.append({"status": "WAITING", "display_text": "Waiting for IntegrationHelper logs...", "device_id": dev['id']})
                 continue
 
-            for network_key, block in device_state.items():
+            _ensure_sdk_expected_blocks_for_device(dev['id'])
+            device_state = sdk_check_runtime_state.get(dev['id'], {})
+            for network_key in _sdk_state_network_keys(dev['id']):
+                block = device_state.get(network_key, {})
                 if _normalize_sdk_network_name(block.get("display_name")) == "googleplayservices":
                     continue
                 expected_key = block.get("expected_key") or _match_sdk_expected_key(block.get("display_name"))
@@ -4039,19 +4144,23 @@ def _sdk_check_block_for_device(device_id, network_name):
     network_key = _normalize_sdk_network_name(network_name)
     block = device_state.get(network_key)
     if not block:
+        expected_key = _match_sdk_expected_key(network_name) or network_key
+        expected = sdk_check_expected_map.get(expected_key, {})
         block = {
-            "display_name": network_name.strip(),
+            "display_name": network_name.strip() or expected.get("display_name", network_name.strip()),
             "sdk_version": "",
             "adapter_version": "",
             "adapter_missing": False,
             "verification": "",
-            "expected_key": _match_sdk_expected_key(network_name),
+            "expected_key": expected_key,
             "updated_at": time.time(),
         }
         device_state[network_key] = block
     else:
-        block["display_name"] = network_name.strip() or block["display_name"]
-        block["expected_key"] = block.get("expected_key") or _match_sdk_expected_key(network_name)
+        expected_key = block.get("expected_key") or _match_sdk_expected_key(network_name) or network_key
+        expected = sdk_check_expected_map.get(expected_key, {})
+        block["display_name"] = network_name.strip() or block["display_name"] or expected.get("display_name", network_name.strip())
+        block["expected_key"] = expected_key
         block["updated_at"] = time.time()
     return block
 
@@ -4073,50 +4182,54 @@ def adb_log_reader(device_id):
             process_load_ads_ext_log(line, device_id)
             
             # 3. Process SDK Check
-            if not is_paused and sdk_check_active and "IntegrationHelper" in line:
+            if not is_paused and sdk_check_active:
                 changed = False
                 with lock:
-                    current_network = sdk_check_current_network.get(device_id, "")
-                    header_match = SDK_HEADER_PATTERN.search(line)
-                    if header_match:
-                        current_network = header_match.group(1).strip()
-                        _sdk_check_block_for_device(device_id, current_network)
-                        sdk_check_current_network[device_id] = current_network
-                        changed = True
-                    else:
-                        sdk_match = SDK_VERSION_LINE_PATTERN.search(line)
-                        adapter_match = SDK_ADAPTER_VERSION_LINE_PATTERN.search(line)
-                        adapter_missing_match = SDK_ADAPTER_MISSING_PATTERN.search(line)
-                        verification_match = SDK_VERIFICATION_PATTERN.search(line)
-
-                        if verification_match:
-                            current_network = verification_match.group(1).strip()
-                            block = _sdk_check_block_for_device(device_id, current_network)
-                            status = verification_match.group(2).strip().upper()
-                            if block.get("verification") != status:
-                                block["verification"] = status
-                                changed = True
+                    if "IntegrationHelper" in line:
+                        current_network = sdk_check_current_network.get(device_id, "")
+                        header_match = SDK_HEADER_PATTERN.search(line)
+                        if header_match:
+                            current_network = header_match.group(1).strip()
+                            _sdk_check_block_for_device(device_id, current_network)
                             sdk_check_current_network[device_id] = current_network
+                            changed = True
+                        else:
+                            sdk_match = SDK_VERSION_LINE_PATTERN.search(line)
+                            adapter_match = SDK_ADAPTER_VERSION_LINE_PATTERN.search(line)
+                            adapter_missing_match = SDK_ADAPTER_MISSING_PATTERN.search(line)
+                            verification_match = SDK_VERIFICATION_PATTERN.search(line)
 
-                        target_network = current_network
-                        if target_network:
-                            block = _sdk_check_block_for_device(device_id, target_network)
-                            if sdk_match:
-                                sdk_version = sdk_match.group(1).strip()
-                                if block.get("sdk_version") != sdk_version:
-                                    block["sdk_version"] = sdk_version
+                            if verification_match:
+                                current_network = verification_match.group(1).strip()
+                                block = _sdk_check_block_for_device(device_id, current_network)
+                                status = verification_match.group(2).strip().upper()
+                                if block.get("verification") != status:
+                                    block["verification"] = status
                                     changed = True
-                            if adapter_match:
-                                adapter_version = adapter_match.group(1).strip()
-                                if block.get("adapter_version") != adapter_version or block.get("adapter_missing"):
-                                    block["adapter_version"] = adapter_version
-                                    block["adapter_missing"] = False
-                                    changed = True
-                            elif adapter_missing_match:
-                                if not block.get("adapter_missing") or block.get("adapter_version"):
-                                    block["adapter_missing"] = True
-                                    block["adapter_version"] = ""
-                                    changed = True
+                                sdk_check_current_network[device_id] = current_network
+
+                            target_network = current_network
+                            if target_network:
+                                block = _sdk_check_block_for_device(device_id, target_network)
+                                if sdk_match:
+                                    sdk_version = sdk_match.group(1).strip()
+                                    if block.get("sdk_version") != sdk_version:
+                                        block["sdk_version"] = sdk_version
+                                        changed = True
+                                if adapter_match:
+                                    adapter_version = adapter_match.group(1).strip()
+                                    if block.get("adapter_version") != adapter_version or block.get("adapter_missing"):
+                                        block["adapter_version"] = adapter_version
+                                        block["adapter_missing"] = False
+                                        changed = True
+                                elif adapter_missing_match:
+                                    if not block.get("adapter_missing") or block.get("adapter_version"):
+                                        block["adapter_missing"] = True
+                                        block["adapter_version"] = ""
+                                        changed = True
+
+                    if _process_sdk_external_line(line, device_id):
+                        changed = True
 
                 if changed:
                     _emit_sdk_check_results()
@@ -4477,7 +4590,7 @@ def uaf(_d=None):
 
 @socketio.on('start_sdk_check')
 def sdk_check(data):
-    global sdk_check_search_list, sdk_check_results, sdk_check_input_list, sdk_check_active, sdk_check_expected_map, sdk_check_runtime_state, sdk_check_current_network
+    global sdk_check_search_list, sdk_check_results, sdk_check_input_list, sdk_check_active, sdk_check_expected_map, sdk_check_runtime_state, sdk_check_current_network, sdk_check_expected_order
     with lock:
         sdk_check_search_list = []
         sdk_check_results = {}
@@ -4485,6 +4598,7 @@ def sdk_check(data):
         sdk_check_expected_map = {}
         sdk_check_runtime_state = {}
         sdk_check_current_network = {}
+        sdk_check_expected_order = []
         lines = [line.strip() for line in data.get('text', '').splitlines() if line.strip()]
         if lines:
             header = [col.strip() for col in re.split(r'\t+', lines[0])]
@@ -4496,11 +4610,15 @@ def sdk_check(data):
                     network = cols[0]
                     adapter = cols[1] if len(cols) > 1 else ""
                     sdk = cols[2] if len(cols) > 2 else ""
-                    sdk_check_expected_map[_normalize_sdk_network_name(network)] = {
+                    log_search = cols[3] if len(cols) > 3 else ""
+                    expected_key = _normalize_sdk_network_name(network)
+                    sdk_check_expected_map[expected_key] = {
                         "display_name": network,
                         "adapter": adapter,
                         "sdk": sdk,
+                        "log_search": log_search,
                     }
+                    sdk_check_expected_order.append(expected_key)
             else:
                 for line in lines:
                     match = SDK_CHECK_SEARCH_PATTERN.search(line)
