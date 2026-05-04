@@ -612,22 +612,26 @@ def _process_sdk_external_line(line, device_id):
         match = re.search(r'AppMetrica.*?Version\s+([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
         if match:
             update_block("AppMetrica", sdk_version=match.group(1))
-    if '"pluginversion"' in normalized_line:
-        version = _extract_json_field_version(line, "pluginVersion")
-        if version:
-            update_block("Appsflyer", adapter_version=version)
-    appsflyer_sdk = ""
-    sdk_field = _extract_json_field_version(line, "AppsFlyer.getSdkVersion()")
-    if sdk_field:
-        sdk_match = re.search(r'version\s*:\s*([0-9]+(?:\.[0-9]+)+)', sdk_field, re.IGNORECASE)
-        if sdk_match:
-            appsflyer_sdk = sdk_match.group(1)
-    if not appsflyer_sdk and "appsflyer:" in normalized_line:
-        match = re.search(r'AppsFlyer:\s*\(v?([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
-        if match:
-            appsflyer_sdk = match.group(1)
-    if appsflyer_sdk:
-        update_block("Appsflyer", sdk_version=appsflyer_sdk)
+    if "appsflyer" in normalized_line:
+        adapter_match = re.search(r'"pluginVersion"\s*:\s*"([0-9]+(?:\.[0-9]+)+)"', line, re.IGNORECASE)
+        if adapter_match:
+            update_block("Appsflyer", adapter_version=adapter_match.group(1))
+        appsflyer_sdk = ""
+        sdk_json_match = re.search(r'"AppsFlyer\.getSdkVersion\(\)"\s*:\s*"version\s*:\s*([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
+        if sdk_json_match:
+            appsflyer_sdk = sdk_json_match.group(1)
+        if not appsflyer_sdk:
+            sdk_field = _extract_json_field_version(line, "AppsFlyer.getSdkVersion()")
+            if sdk_field:
+                sdk_match = re.search(r'version\s*:\s*([0-9]+(?:\.[0-9]+)+)', sdk_field, re.IGNORECASE)
+                if sdk_match:
+                    appsflyer_sdk = sdk_match.group(1)
+        if not appsflyer_sdk and "appsflyer:" in normalized_line:
+            match = re.search(r'AppsFlyer:\s*\(v?([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
+            if match:
+                appsflyer_sdk = match.group(1)
+        if appsflyer_sdk:
+            update_block("Appsflyer", sdk_version=appsflyer_sdk)
     if "firebase crashlytics" in normalized_line and "initializing" in normalized_line:
         match = re.search(r'Firebase\s+Crashlytics\s+([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
         if match:
@@ -1117,7 +1121,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(56)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(57)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4131,9 +4135,12 @@ def _emit_sdk_check_results():
                 actual_sdk = block.get("sdk_version", "")
                 expected_sdk = expected.get("sdk", "")
                 sdk_status = _sdk_result_status(actual_sdk, expected_sdk)
+                actual_sdk_display = actual_sdk
+                if actual_sdk_display and actual_sdk_display.upper() not in {"NOT FOUND", "MISSING"}:
+                    actual_sdk_display = _extract_sdk_comparable_version(actual_sdk_display)
                 res.append({
                     "status": sdk_status,
-                    "display_text": f"SDK  Actual: {actual_sdk or 'NOT FOUND'}  Expected: {expected_sdk}",
+                    "display_text": f"SDK  Actual: {actual_sdk_display or 'NOT FOUND'}  Expected: {expected_sdk}",
                     "device_id": dev['id']
                 })
 
@@ -4142,9 +4149,12 @@ def _emit_sdk_check_results():
                     actual_adapter = "MISSING"
                 expected_adapter = expected.get("adapter", "")
                 adapter_status = _sdk_result_status(actual_adapter, expected_adapter)
+                actual_adapter_display = actual_adapter
+                if actual_adapter_display and actual_adapter_display.upper() not in {"NOT FOUND", "MISSING"}:
+                    actual_adapter_display = _extract_sdk_comparable_version(actual_adapter_display)
                 res.append({
                     "status": adapter_status,
-                    "display_text": f"Adapter  Actual: {actual_adapter or 'NOT FOUND'}  Expected: {expected_adapter}",
+                    "display_text": f"Adapter  Actual: {actual_adapter_display or 'NOT FOUND'}  Expected: {expected_adapter}",
                     "device_id": dev['id']
                 })
     socketio.emit('update_sdk_check_table', res)
