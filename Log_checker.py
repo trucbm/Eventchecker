@@ -302,6 +302,8 @@ active_platform = "android"
 
 # Dữ liệu hệ thống chung
 active_log_readers = {}
+active_ios_log_readers = {}
+active_ios_log_processes = {}
 connected_devices_info = []
 is_paused = False
 lock = threading.Lock()
@@ -596,6 +598,34 @@ def _ios_device_status_message():
     if _resolve_ios_tool("idevice_id") or _resolve_ios_tool("tidevice") or _resolve_ios_tool("system_profiler"):
         return "Waiting... (iOS: connect trusted device)"
     return "Waiting... (iOS: install libimobiledevice/idevice_id or connect trusted device)"
+
+def _resolve_ios_syslog_command(device_id):
+    idevicesyslog = _resolve_ios_tool("idevicesyslog")
+    if idevicesyslog:
+        return [idevicesyslog, "-u", device_id]
+    tidevice = _resolve_ios_tool("tidevice")
+    if tidevice:
+        return [tidevice, "-u", device_id, "syslog"]
+    return None
+
+def _normalize_ios_log_line(raw_line, device_id):
+    raw = (raw_line or "").rstrip("\n")
+    message = raw.strip()
+    tag = ""
+
+    tag_match = re.search(r'\b([A-Za-z0-9_.\-/\[\],]+)\s*[:：]\s*(.*)$', message)
+    if tag_match:
+        tag = tag_match.group(1).strip()
+        message = tag_match.group(2).strip() or message
+
+    return {
+        "device_id": device_id,
+        "device_name": get_ios_device_name(device_id),
+        "tag": tag,
+        "message": message,
+        "raw_log": raw,
+        "platform": "ios",
+    }
 
 def _normalize_sdk_search_text(text):
     if text is None:
@@ -1281,7 +1311,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(6)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(7)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4371,14 +4401,9 @@ def _apply_adrevenue_filter_and_emit():
 def _emit_sdk_check_results():
     res = []
     with lock:
-        if active_platform == "ios":
-            ios_devices = list(connected_devices_info)
-            if not ios_devices:
-                res.append({"status": "HEADER", "display_text": "--- iOS ---", "device_name": "iOS", "device_id": "ios"})
-                res.append({"status": "WAITING", "display_text": "Waiting for iOS device...", "device_id": "ios"})
-            for dev in ios_devices:
-                res.append({"status": "HEADER", "display_text": f"--- {dev['name']} ---", "device_name": dev['name'], "device_id": dev['id']})
-                res.append({"status": "WAITING", "display_text": "iOS SDK log reader will be added in the next step.", "device_id": dev['id']})
+        if active_platform == "ios" and not connected_devices_info:
+            res.append({"status": "HEADER", "display_text": "--- iOS ---", "device_name": "iOS", "device_id": "ios"})
+            res.append({"status": "WAITING", "display_text": "Waiting for iOS device...", "device_id": "ios"})
             socketio.emit('update_sdk_check_table', res)
             return
 
@@ -4437,7 +4462,8 @@ def _emit_sdk_check_results():
             res.append({"status": "HEADER", "display_text": f"--- {dev['name']} ---", "device_name": dev['name'], "device_id": dev['id']})
             device_state = sdk_check_runtime_state.get(dev['id'], {})
             if not device_state and not sdk_check_expected_order:
-                res.append({"status": "WAITING", "display_text": "Waiting for IntegrationHelper logs...", "device_id": dev['id']})
+                wait_text = "Waiting for iOS SDK logs..." if active_platform == "ios" else "Waiting for IntegrationHelper logs..."
+                res.append({"status": "WAITING", "display_text": wait_text, "device_id": dev['id']})
                 continue
 
             _ensure_sdk_expected_blocks_for_device(dev['id'])
@@ -4485,6 +4511,61 @@ def _sdk_check_block_for_device(device_id, network_name):
 
 # --- THREADS & PROCESSES ---
 
+def _process_sdk_check_line(line, device_id):
+    if is_paused or not sdk_check_active:
+        return
+
+    changed = False
+    with lock:
+        if "IntegrationHelper" in line:
+            current_network = sdk_check_current_network.get(device_id, "")
+            header_match = SDK_HEADER_PATTERN.search(line)
+            if header_match:
+                current_network = header_match.group(1).strip()
+                _sdk_check_block_for_device(device_id, current_network)
+                sdk_check_current_network[device_id] = current_network
+                changed = True
+            else:
+                sdk_match = SDK_VERSION_LINE_PATTERN.search(line)
+                adapter_match = SDK_ADAPTER_VERSION_LINE_PATTERN.search(line)
+                adapter_missing_match = SDK_ADAPTER_MISSING_PATTERN.search(line)
+                verification_match = SDK_VERIFICATION_PATTERN.search(line)
+
+                if verification_match:
+                    current_network = verification_match.group(1).strip()
+                    block = _sdk_check_block_for_device(device_id, current_network)
+                    status = verification_match.group(2).strip().upper()
+                    if block.get("verification") != status:
+                        block["verification"] = status
+                        changed = True
+                    sdk_check_current_network[device_id] = current_network
+
+                target_network = current_network
+                if target_network:
+                    block = _sdk_check_block_for_device(device_id, target_network)
+                    if sdk_match:
+                        sdk_version = sdk_match.group(1).strip()
+                        if block.get("sdk_version") != sdk_version:
+                            block["sdk_version"] = sdk_version
+                            changed = True
+                    if adapter_match:
+                        adapter_version = adapter_match.group(1).strip()
+                        if block.get("adapter_version") != adapter_version or block.get("adapter_missing"):
+                            block["adapter_version"] = adapter_version
+                            block["adapter_missing"] = False
+                            changed = True
+                    elif adapter_missing_match:
+                        if not block.get("adapter_missing") or block.get("adapter_version"):
+                            block["adapter_missing"] = True
+                            block["adapter_version"] = ""
+                            changed = True
+
+        if _process_sdk_external_line(line, device_id):
+            changed = True
+
+    if changed:
+        _emit_sdk_check_results()
+
 def adb_log_reader(device_id):
     print(f"INFO: Starting log reader for {device_id}")
     try:
@@ -4503,57 +4584,7 @@ def adb_log_reader(device_id):
             process_load_ads_ext_log(line, device_id)
             
             # 3. Process SDK Check
-            if not is_paused and sdk_check_active:
-                changed = False
-                with lock:
-                    if "IntegrationHelper" in line:
-                        current_network = sdk_check_current_network.get(device_id, "")
-                        header_match = SDK_HEADER_PATTERN.search(line)
-                        if header_match:
-                            current_network = header_match.group(1).strip()
-                            _sdk_check_block_for_device(device_id, current_network)
-                            sdk_check_current_network[device_id] = current_network
-                            changed = True
-                        else:
-                            sdk_match = SDK_VERSION_LINE_PATTERN.search(line)
-                            adapter_match = SDK_ADAPTER_VERSION_LINE_PATTERN.search(line)
-                            adapter_missing_match = SDK_ADAPTER_MISSING_PATTERN.search(line)
-                            verification_match = SDK_VERIFICATION_PATTERN.search(line)
-
-                            if verification_match:
-                                current_network = verification_match.group(1).strip()
-                                block = _sdk_check_block_for_device(device_id, current_network)
-                                status = verification_match.group(2).strip().upper()
-                                if block.get("verification") != status:
-                                    block["verification"] = status
-                                    changed = True
-                                sdk_check_current_network[device_id] = current_network
-
-                            target_network = current_network
-                            if target_network:
-                                block = _sdk_check_block_for_device(device_id, target_network)
-                                if sdk_match:
-                                    sdk_version = sdk_match.group(1).strip()
-                                    if block.get("sdk_version") != sdk_version:
-                                        block["sdk_version"] = sdk_version
-                                        changed = True
-                                if adapter_match:
-                                    adapter_version = adapter_match.group(1).strip()
-                                    if block.get("adapter_version") != adapter_version or block.get("adapter_missing"):
-                                        block["adapter_version"] = adapter_version
-                                        block["adapter_missing"] = False
-                                        changed = True
-                                elif adapter_missing_match:
-                                    if not block.get("adapter_missing") or block.get("adapter_version"):
-                                        block["adapter_missing"] = True
-                                        block["adapter_version"] = ""
-                                        changed = True
-
-                    if _process_sdk_external_line(line, device_id):
-                        changed = True
-
-                if changed:
-                    _emit_sdk_check_results()
+            _process_sdk_check_line(line, device_id)
 
             # 4. Process AdRevenue
             handled_adrevenue = False
@@ -4646,6 +4677,46 @@ def adb_log_reader(device_id):
 
     except Exception as e: print(f"Error {device_id}: {e}")
 
+def ios_log_reader(device_id):
+    print(f"INFO: Starting iOS log reader for {device_id}")
+    proc = None
+    try:
+        cmd = _resolve_ios_syslog_command(device_id)
+        if not cmd:
+            print("WARNING: No iOS syslog command found. Install idevicesyslog or tidevice.")
+            return
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding='utf-8',
+            errors='ignore',
+            creationflags=creation_flags,
+        )
+        with lock:
+            active_ios_log_processes[device_id] = proc
+
+        for raw_line in iter(proc.stdout.readline, ''):
+            if not raw_line:
+                break
+            if active_platform != "ios":
+                continue
+            log_obj = _normalize_ios_log_line(raw_line, device_id)
+            # Task 4/5 scope: iOS logs are normalized, then fed only into SDK Check for now.
+            _process_sdk_check_line(log_obj["raw_log"], device_id)
+    except Exception as e:
+        print(f"iOS log reader error {device_id}: {e}")
+    finally:
+        with lock:
+            active_ios_log_processes.pop(device_id, None)
+            active_ios_log_readers.pop(device_id, None)
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+
 def device_manager():
     global connected_devices_info
     while True:
@@ -4654,6 +4725,21 @@ def device_manager():
             if platform == "ios":
                 ids = set(_list_ios_device_ids())
                 with lock:
+                    for did in ids - set(active_ios_log_readers.keys()):
+                        t = threading.Thread(target=ios_log_reader, args=(did,), daemon=True)
+                        active_ios_log_readers[did] = t
+                        t.start()
+
+                    for did in set(active_ios_log_readers.keys()) - ids:
+                        proc = active_ios_log_processes.get(did)
+                        if proc:
+                            try:
+                                proc.terminate()
+                            except Exception:
+                                pass
+                        active_ios_log_processes.pop(did, None)
+                        active_ios_log_readers.pop(did, None)
+
                     connected_devices_info = [_make_device_info(i, 'ios') for i in ids]
                 if connected_devices_info:
                     socketio.emit('device_status', {"connected_devices": connected_devices_info})
@@ -4664,6 +4750,15 @@ def device_manager():
                     })
                 _emit_sdk_check_results()
             else:
+                with lock:
+                    for did, proc in list(active_ios_log_processes.items()):
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                    active_ios_log_processes.clear()
+                    active_ios_log_readers.clear()
+
                 output = subprocess.run([ADB_EXECUTABLE, 'devices'], capture_output=True, text=True, creationflags=creation_flags).stdout
                 ids = {l.split('\t')[0] for l in output.strip().split('\n')[1:] if '\tdevice' in l}
                 
@@ -4880,6 +4975,13 @@ def _reset_runtime_for_platform_switch():
         adrevenue_logs.clear(); adrevenue_log_cache.clear()
         callback_ad_logs.clear(); incomplete_impression_logs.clear()
         package_log_cache.clear(); active_package_pids.clear()
+        for proc in active_ios_log_processes.values():
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        active_ios_log_processes.clear()
+        active_ios_log_readers.clear()
         connected_devices_info = []
         target_package_name = ""
         if active_package_log_session_id:
