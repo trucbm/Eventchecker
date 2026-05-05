@@ -646,6 +646,9 @@ def _normalize_sdk_search_text(text):
     normalized = re.sub(r'\s+', ' ', normalized)
     return normalized.strip()
 
+def _normalize_sdk_search_compact(text):
+    return re.sub(r'[^a-z0-9]+', '', _normalize_sdk_search_text(text))
+
 
 def _normalize_sdk_network_name(name):
     if not name:
@@ -817,6 +820,7 @@ def _parse_sdk_search_pattern_line(line, current_label=""):
         "field": field,
         "search_pattern": pattern,
         "search_pattern_normalized": _normalize_sdk_search_text(pattern),
+        "search_pattern_compact": _normalize_sdk_search_compact(pattern),
     }
 
 def _register_sdk_expected(network, adapter="", sdk="", log_search=""):
@@ -880,6 +884,7 @@ def _extract_json_field_version(line, field_name):
 
 def _process_sdk_external_line(line, device_id):
     normalized_line = _normalize_sdk_search_text(line)
+    compact_line = _normalize_sdk_search_compact(line)
     changed = False
 
     def update_block(network_name, sdk_version=None, adapter_version=None, adapter_missing=False):
@@ -899,7 +904,8 @@ def _process_sdk_external_line(line, device_id):
 
     for item in sdk_check_search_list:
         pattern_norm = item.get("search_pattern_normalized", "")
-        if pattern_norm and pattern_norm in normalized_line:
+        pattern_compact = item.get("search_pattern_compact", "")
+        if pattern_norm and (pattern_norm in normalized_line or (pattern_compact and pattern_compact in compact_line)):
             version = item.get("version", "")
             field = item.get("field", "adapter")
             network_name = item.get("display_name") or item.get("network") or item.get("version_label") or item.get("search_pattern")
@@ -1448,7 +1454,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(11)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(12)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
