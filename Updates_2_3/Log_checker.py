@@ -225,6 +225,16 @@ DEVICE_NAMES = {
     "7ec7bca6": "Xiaomi 13 Lite"
 }
 
+IOS_DEVICE_NAMES = {
+    "eb6b13cc453f5a53ef07ff7149858a8635d18c10": "Iphone X",
+    "00008030-000D54412EC0802E": "Iphone 11 pro",
+    "00008120-001C0D3C0C61A01E": "Iphone 15",
+    "00008020-001D70442113802E": "Ipad Air",
+    "00008030-0009398422F3C02E": "Ipad Gen 9",
+    "c1ae4200716a97b5b92a377a255d80fc002e7908": "7 Plus white",
+    "2327f3aecd8ddc636571c6a8572f87f4fdbcfac0": "7 Plus black",
+}
+
 # --- DỮ LIỆU TOÀN CỤC ---
 
 # Giới hạn cache để UI không giữ quá nhiều log trong RAM.
@@ -446,7 +456,54 @@ CALLBACK_DISPLAY_NAMES = {
 }
 
 def get_device_name(device_id):
-    return DEVICE_NAMES.get(device_id, device_id)
+    return DEVICE_NAMES.get(device_id) or IOS_DEVICE_NAMES.get(device_id) or device_id
+
+def _list_ios_device_ids():
+    ids = []
+    idevice_id = shutil.which("idevice_id")
+    if idevice_id:
+        try:
+            output = subprocess.run(
+                [idevice_id, "-l"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                creationflags=creation_flags,
+            ).stdout
+            ids.extend([line.strip() for line in output.splitlines() if line.strip()])
+        except Exception:
+            pass
+
+    if not ids:
+        xcrun = shutil.which("xcrun")
+        if xcrun:
+            try:
+                output = subprocess.run(
+                    [xcrun, "xctrace", "list", "devices"],
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                    creationflags=creation_flags,
+                ).stdout
+                for line in output.splitlines():
+                    match = re.search(r'\(([0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}|[0-9a-fA-F]{40})\)\s*$', line.strip())
+                    if match:
+                        ids.append(match.group(1))
+            except Exception:
+                pass
+
+    seen = set()
+    unique_ids = []
+    for device_id in ids:
+        if device_id not in seen:
+            seen.add(device_id)
+            unique_ids.append(device_id)
+    return unique_ids
+
+def _ios_device_status_message():
+    if shutil.which("idevice_id"):
+        return "Waiting... (iOS: connect trusted device)"
+    return "Waiting... (iOS: install libimobiledevice/idevice_id or connect trusted device)"
 
 def _normalize_sdk_search_text(text):
     if text is None:
@@ -1132,7 +1189,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(3)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(4)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4223,8 +4280,13 @@ def _emit_sdk_check_results():
     res = []
     with lock:
         if active_platform == "ios":
-            res.append({"status": "HEADER", "display_text": "--- iOS ---", "device_name": "iOS", "device_id": "ios"})
-            res.append({"status": "WAITING", "display_text": "iOS SDK table ready. Device connection will be added in the next step.", "device_id": "ios"})
+            ios_devices = list(connected_devices_info)
+            if not ios_devices:
+                res.append({"status": "HEADER", "display_text": "--- iOS ---", "device_name": "iOS", "device_id": "ios"})
+                res.append({"status": "WAITING", "display_text": "Waiting for iOS device...", "device_id": "ios"})
+            for dev in ios_devices:
+                res.append({"status": "HEADER", "display_text": f"--- {dev['name']} ---", "device_name": dev['name'], "device_id": dev['id']})
+                res.append({"status": "WAITING", "display_text": "iOS SDK log reader will be added in the next step.", "device_id": dev['id']})
             socketio.emit('update_sdk_check_table', res)
             return
 
@@ -4339,6 +4401,8 @@ def adb_log_reader(device_id):
         
         for line in iter(proc.stdout.readline, ''):
             if not line: break
+            if active_platform != "android":
+                continue
             
             # 1. Process Load Ads (Unity) - ONLY IF RECORDING
             process_load_ads_unity_log(line, device_id)
@@ -4494,19 +4558,33 @@ def device_manager():
     global connected_devices_info
     while True:
         try:
-            output = subprocess.run([ADB_EXECUTABLE, 'devices'], capture_output=True, text=True, creationflags=creation_flags).stdout
-            ids = {l.split('\t')[0] for l in output.strip().split('\n')[1:] if '\tdevice' in l}
-            
-            with lock:
-                for did in ids - set(active_log_readers.keys()):
-                    t = threading.Thread(target=adb_log_reader, args=(did,), daemon=True)
-                    active_log_readers[did] = t
-                    t.start()
+            platform = active_platform
+            if platform == "ios":
+                ids = set(_list_ios_device_ids())
+                with lock:
+                    connected_devices_info = [{'id': i, 'name': get_device_name(i), 'platform': 'ios'} for i in ids]
+                if connected_devices_info:
+                    socketio.emit('device_status', {"connected_devices": connected_devices_info})
+                else:
+                    socketio.emit('device_status', {
+                        "connected_devices": [],
+                        "message": _ios_device_status_message()
+                    })
+                _emit_sdk_check_results()
+            else:
+                output = subprocess.run([ADB_EXECUTABLE, 'devices'], capture_output=True, text=True, creationflags=creation_flags).stdout
+                ids = {l.split('\t')[0] for l in output.strip().split('\n')[1:] if '\tdevice' in l}
                 
-                for did in set(active_log_readers.keys()) - ids:
-                    del active_log_readers[did]
-                
-                connected_devices_info = [{'id': i, 'name': get_device_name(i)} for i in ids]
+                with lock:
+                    for did in ids - set(active_log_readers.keys()):
+                        t = threading.Thread(target=adb_log_reader, args=(did,), daemon=True)
+                        active_log_readers[did] = t
+                        t.start()
+                    
+                    for did in set(active_log_readers.keys()) - ids:
+                        del active_log_readers[did]
+                    
+                    connected_devices_info = [{'id': i, 'name': get_device_name(i), 'platform': 'android'} for i in ids]
                 if connected_devices_info:
                     socketio.emit('device_status', {"connected_devices": connected_devices_info})
                 else:
@@ -4517,7 +4595,7 @@ def device_manager():
         except Exception as e:
             socketio.emit('device_status', {
                 "connected_devices": [],
-                "message": f"ADB error: {e}"
+                "message": f"{'iOS' if active_platform == 'ios' else 'ADB'} error: {e}"
             })
         time.sleep(3)
 
@@ -4578,6 +4656,17 @@ def package_pid_monitor():
     global active_package_pids
     while True:
         time.sleep(3)
+
+        if active_platform != "android":
+            with lock:
+                for p in active_logcat_processes.values():
+                    try:
+                        p.terminate()
+                    except Exception:
+                        pass
+                active_logcat_processes.clear()
+                active_package_pids.clear()
+            continue
 
         with lock:
             pkg = target_package_name
@@ -4677,6 +4766,7 @@ def _reset_runtime_for_platform_switch():
     global is_paused, validator_active, sdk_check_active, sdk_check_current_network
     global target_package_name, active_package_log_session_id
     global specific_event_name_filters, specific_event_params_filters
+    global connected_devices_info
     with lock:
         is_paused = False
         validator_active = False
@@ -4698,6 +4788,7 @@ def _reset_runtime_for_platform_switch():
         adrevenue_logs.clear(); adrevenue_log_cache.clear()
         callback_ad_logs.clear(); incomplete_impression_logs.clear()
         package_log_cache.clear(); active_package_pids.clear()
+        connected_devices_info = []
         target_package_name = ""
         if active_package_log_session_id:
             _finish_package_log_session(active_package_log_session_id)
@@ -4721,6 +4812,10 @@ def _reset_runtime_for_platform_switch():
     socketio.emit('update_adrevenue_table', [])
     socketio.emit('update_callback_ad_table', [])
     socketio.emit('package_log_cache', [])
+    socketio.emit('device_status', {
+        "connected_devices": [],
+        "message": _ios_device_status_message() if active_platform == "ios" else f"Waiting... (ADB: {ADB_EXECUTABLE})"
+    })
     socketio.emit('runtime_reset', {})
     _emit_sdk_check_results()
 
