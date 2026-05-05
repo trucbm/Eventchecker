@@ -444,8 +444,12 @@ ADVERTY5_KEYWORD = "[InPlayAds,Adverty]"
 SDK_HEADER_PATTERN = re.compile(r'-{5,}\s*(.*?)\s*-{5,}')
 SDK_VERSION_LINE_PATTERN = re.compile(r'SDK\s+Version\s*[-–—]\s*(.+)$', re.IGNORECASE)
 SDK_ADAPTER_VERSION_LINE_PATTERN = re.compile(r'Adapter\s+Version\s*[-–—]\s*(.+)$', re.IGNORECASE)
+IOS_SDK_VERSION_LINE_PATTERN = re.compile(r'SDK\s*[-–—]\s*Version\s+([0-9]+(?:\.[0-9]+)+)', re.IGNORECASE)
+IOS_ADAPTER_VERSION_LINE_PATTERN = re.compile(r'Adapter\s*[-–—]\s*Version\s+([0-9]+(?:\.[0-9]+)+)', re.IGNORECASE)
 SDK_ADAPTER_MISSING_PATTERN = re.compile(r'Adapter\s*[-–—]\s*MISSING\b', re.IGNORECASE)
+IOS_ADAPTER_MISSING_PATTERN = re.compile(r'Adapter\s+\*+\s*MISSING\s*\*+', re.IGNORECASE)
 SDK_VERIFICATION_PATTERN = re.compile(r'>{3,}\s*(.*?)\s*-\s*(VERIFIED|NOT VERIFIED)\b', re.IGNORECASE)
+IOS_VERIFICATION_PATTERN = re.compile(r'IntegrationHelper\s+(.+?)\s+\*+\s*(NOT VERIFIED|VERIFIED)\s*\*+', re.IGNORECASE)
 
 # Mapping tên hiển thị cho Callback
 CALLBACK_DISPLAY_NAMES = {
@@ -1317,7 +1321,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(8)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(9)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4532,10 +4536,10 @@ def _process_sdk_check_line(line, device_id):
                 sdk_check_current_network[device_id] = current_network
                 changed = True
             else:
-                sdk_match = SDK_VERSION_LINE_PATTERN.search(line)
-                adapter_match = SDK_ADAPTER_VERSION_LINE_PATTERN.search(line)
-                adapter_missing_match = SDK_ADAPTER_MISSING_PATTERN.search(line)
-                verification_match = SDK_VERIFICATION_PATTERN.search(line)
+                sdk_match = SDK_VERSION_LINE_PATTERN.search(line) or IOS_SDK_VERSION_LINE_PATTERN.search(line)
+                adapter_match = SDK_ADAPTER_VERSION_LINE_PATTERN.search(line) or IOS_ADAPTER_VERSION_LINE_PATTERN.search(line)
+                adapter_missing_match = SDK_ADAPTER_MISSING_PATTERN.search(line) or IOS_ADAPTER_MISSING_PATTERN.search(line)
+                verification_match = SDK_VERIFICATION_PATTERN.search(line) or IOS_VERIFICATION_PATTERN.search(line)
 
                 if verification_match:
                     current_network = verification_match.group(1).strip()
