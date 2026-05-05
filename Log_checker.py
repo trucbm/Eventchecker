@@ -769,6 +769,77 @@ def _parse_sdk_expected_line(line):
         "log_search": "",
     }
 
+def _extract_sdk_search_pattern(line):
+    match = re.search(r'"search_pattern"\s*:\s*(.+)$', line or "", re.IGNORECASE)
+    if not match:
+        return ""
+    pattern = match.group(1).strip().rstrip(",")
+    if (pattern.startswith('"') and pattern.endswith('"')) or (pattern.startswith("'") and pattern.endswith("'")):
+        pattern = pattern[1:-1]
+    else:
+        pattern = pattern.strip('"').strip("'")
+    return pattern.strip()
+
+def _parse_sdk_search_pattern_line(line, current_label=""):
+    pattern = _extract_sdk_search_pattern(line)
+    if not pattern:
+        return None
+
+    prefix = line[:re.search(r'"search_pattern"\s*:', line, re.IGNORECASE).start()].rstrip(", ").strip().strip('"').strip("'")
+    version_match = re.search(r'\b\d+(?:\.\d+)+\b', prefix)
+    if version_match:
+        name_part = prefix[:version_match.start()].strip(" -–—\t")
+        version = version_match.group(0)
+    else:
+        name_part = prefix or current_label or pattern
+        version_match = re.search(r'\b\d+(?:\.\d+)+\b', pattern)
+        version = version_match.group(0) if version_match else ""
+
+    network = current_label or name_part or pattern
+    name_norm = _normalize_sdk_network_name(name_part)
+    network_norm = _normalize_sdk_network_name(network)
+
+    field = "adapter"
+    if name_norm in {"sdk", "sdkversion"} or "sdkversion" in name_norm:
+        field = "sdk"
+    elif network_norm.startswith("firebase") or network_norm in {"appmetrica"}:
+        field = "sdk"
+    elif network_norm == "adquality":
+        field = "both"
+    elif name_norm in {"unity", "plugin", "pluginversion"}:
+        field = "adapter"
+
+    return {
+        "network": network,
+        "display_name": network,
+        "version_label": name_part or network,
+        "version": version,
+        "field": field,
+        "search_pattern": pattern,
+        "search_pattern_normalized": _normalize_sdk_search_text(pattern),
+    }
+
+def _register_sdk_expected(network, adapter="", sdk="", log_search=""):
+    expected_key = _normalize_sdk_network_name(network)
+    if not expected_key:
+        return ""
+    existing = sdk_check_expected_map.setdefault(expected_key, {
+        "display_name": network,
+        "adapter": "",
+        "sdk": "",
+        "log_search": "",
+    })
+    existing["display_name"] = existing.get("display_name") or network
+    if adapter:
+        existing["adapter"] = adapter
+    if sdk:
+        existing["sdk"] = sdk
+    if log_search:
+        existing["log_search"] = log_search
+    if expected_key not in sdk_check_expected_order:
+        sdk_check_expected_order.append(expected_key)
+    return expected_key
+
 
 def _sdk_state_network_keys(device_id):
     keys = []
@@ -825,6 +896,19 @@ def _process_sdk_external_line(line, device_id):
             block["adapter_missing"] = True
             block["adapter_version"] = ""
             changed = True
+
+    for item in sdk_check_search_list:
+        pattern_norm = item.get("search_pattern_normalized", "")
+        if pattern_norm and pattern_norm in normalized_line:
+            version = item.get("version", "")
+            field = item.get("field", "adapter")
+            network_name = item.get("display_name") or item.get("network") or item.get("version_label") or item.get("search_pattern")
+            if field == "sdk":
+                update_block(network_name, sdk_version=version)
+            elif field == "both":
+                update_block(network_name, sdk_version=version, adapter_version=version)
+            else:
+                update_block(network_name, adapter_version=version)
 
     if "advertysdk" in normalized_line:
         match = re.search(r'AdvertySDK\s+([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
@@ -1364,7 +1448,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(10)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(11)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5178,42 +5262,29 @@ def sdk_check(data):
                     adapter = parsed["adapter"]
                     sdk = parsed["sdk"]
                     log_search = parsed["log_search"]
-                    expected_key = _normalize_sdk_network_name(network)
-                    sdk_check_expected_map[expected_key] = {
-                        "display_name": network,
-                        "adapter": adapter,
-                        "sdk": sdk,
-                        "log_search": log_search,
-                    }
-                    sdk_check_expected_order.append(expected_key)
+                    _register_sdk_expected(network, adapter=adapter, sdk=sdk, log_search=log_search)
             else:
+                current_label = ""
                 for line in lines:
+                    search_item = _parse_sdk_search_pattern_line(line, current_label)
+                    if search_item:
+                        version = search_item.get("version", "")
+                        field = search_item.get("field", "adapter")
+                        adapter = version if field in {"adapter", "both"} else ""
+                        sdk = version if field in {"sdk", "both"} else ""
+                        _register_sdk_expected(search_item["network"], adapter=adapter, sdk=sdk, log_search=search_item["search_pattern"])
+                        sdk_check_search_list.append(search_item)
+                        sdk_check_input_list.append(search_item)
+                        continue
+
                     parsed = _parse_sdk_expected_line(line)
                     if parsed:
                         network = parsed["network"]
-                        expected_key = _normalize_sdk_network_name(network)
-                        sdk_check_expected_map[expected_key] = {
-                            "display_name": network,
-                            "adapter": parsed["adapter"],
-                            "sdk": parsed["sdk"],
-                            "log_search": parsed["log_search"],
-                        }
-                        sdk_check_expected_order.append(expected_key)
+                        _register_sdk_expected(network, adapter=parsed["adapter"], sdk=parsed["sdk"], log_search=parsed["log_search"])
+                        current_label = network
                         continue
-                    match = SDK_CHECK_SEARCH_PATTERN.search(line)
-                    if match:
-                        pat = match.group(1)
-                        disp = line[:match.start()].rstrip(', ').strip().strip('"') or pat
-                        item = {
-                            "type": "search",
-                            "display_name": disp,
-                            "search_pattern": pat,
-                            "search_pattern_normalized": _normalize_sdk_search_text(pat),
-                        }
-                        sdk_check_search_list.append(item)
-                        sdk_check_input_list.append(item)
-                    else:
-                        sdk_check_input_list.append({"type": "label", "display_name": line})
+                    current_label = line.strip()
+                    sdk_check_input_list.append({"type": "label", "display_name": line})
         sdk_check_active = True
     _emit_sdk_check_results()
 
