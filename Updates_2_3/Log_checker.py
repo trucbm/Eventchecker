@@ -726,6 +726,49 @@ def _sdk_result_status(actual_value, expected_value):
         return "PASSED" if actual_compare == expected_compare else "FAILED"
     return "FOUND"
 
+def _parse_sdk_expected_line(line):
+    raw = (line or "").strip()
+    if not raw:
+        return None
+
+    if "\t" in raw:
+        cols = [col.strip() for col in raw.split("\t")]
+        if not cols or not cols[0]:
+            return None
+        return {
+            "network": cols[0],
+            "adapter": cols[1] if len(cols) > 1 else "",
+            "sdk": cols[2] if len(cols) > 2 else "",
+            "log_search": cols[3] if len(cols) > 3 else "",
+        }
+
+    version_matches = list(re.finditer(r'\b\d+(?:\.\d+)+\b', raw))
+    if not version_matches:
+        return None
+
+    network = raw[:version_matches[0].start()].strip(" -–—\t")
+    if not network:
+        return None
+
+    versions = [m.group(0) for m in version_matches]
+    adapter = ""
+    sdk = ""
+    if len(versions) >= 2:
+        adapter, sdk = versions[0], versions[1]
+    else:
+        expected_key = _normalize_sdk_network_name(network)
+        if expected_key in {"appmetrica", "firebasecrashlytics"}:
+            sdk = versions[0]
+        else:
+            adapter = versions[0]
+
+    return {
+        "network": network,
+        "adapter": adapter,
+        "sdk": sdk,
+        "log_search": "",
+    }
+
 
 def _sdk_state_network_keys(device_id):
     keys = []
@@ -1321,7 +1364,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(9)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(10)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5125,16 +5168,16 @@ def sdk_check(data):
         sdk_check_expected_order = []
         lines = [line.rstrip('\r') for line in data.get('text', '').splitlines() if line.strip()]
         if lines:
-            header = [col.strip() for col in lines[0].split('\t')]
-            if len(header) >= 3 and header[0].lower().startswith('ads network'):
+            header_text = _normalize_sdk_network_name(lines[0])
+            if header_text.startswith('adsnetwork') and ('adapter' in header_text or 'sdk' in header_text):
                 for line in lines[1:]:
-                    cols = [col.strip() for col in line.split('\t')]
-                    if not cols or not cols[0]:
+                    parsed = _parse_sdk_expected_line(line)
+                    if not parsed:
                         continue
-                    network = cols[0]
-                    adapter = cols[1] if len(cols) > 1 else ""
-                    sdk = cols[2] if len(cols) > 2 else ""
-                    log_search = cols[3] if len(cols) > 3 else ""
+                    network = parsed["network"]
+                    adapter = parsed["adapter"]
+                    sdk = parsed["sdk"]
+                    log_search = parsed["log_search"]
                     expected_key = _normalize_sdk_network_name(network)
                     sdk_check_expected_map[expected_key] = {
                         "display_name": network,
@@ -5145,6 +5188,18 @@ def sdk_check(data):
                     sdk_check_expected_order.append(expected_key)
             else:
                 for line in lines:
+                    parsed = _parse_sdk_expected_line(line)
+                    if parsed:
+                        network = parsed["network"]
+                        expected_key = _normalize_sdk_network_name(network)
+                        sdk_check_expected_map[expected_key] = {
+                            "display_name": network,
+                            "adapter": parsed["adapter"],
+                            "sdk": parsed["sdk"],
+                            "log_search": parsed["log_search"],
+                        }
+                        sdk_check_expected_order.append(expected_key)
+                        continue
                     match = SDK_CHECK_SEARCH_PATTERN.search(line)
                     if match:
                         pat = match.group(1)
