@@ -458,6 +458,30 @@ CALLBACK_DISPLAY_NAMES = {
 def get_device_name(device_id):
     return DEVICE_NAMES.get(device_id) or IOS_DEVICE_NAMES.get(device_id) or device_id
 
+def get_ios_device_name(device_id):
+    return IOS_DEVICE_NAMES.get(device_id) or "iOS Device"
+
+def _short_device_id(device_id, length=8):
+    if not device_id:
+        return ""
+    return f"{device_id[:length]}..."
+
+def _make_device_info(device_id, platform):
+    if platform == "ios":
+        name = get_ios_device_name(device_id)
+        return {
+            "id": device_id,
+            "name": name,
+            "platform": "ios",
+            "display_name": f"{name} ({_short_device_id(device_id)})",
+        }
+    return {
+        "id": device_id,
+        "name": get_device_name(device_id),
+        "platform": "android",
+        "display_name": f"{device_id} - {get_device_name(device_id)}",
+    }
+
 def _resolve_ios_tool(name):
     candidates = [
         shutil.which(name),
@@ -500,8 +524,33 @@ def _list_ios_device_ids():
         except Exception:
             pass
 
+    if not ids:
+        system_profiler = _resolve_ios_tool("system_profiler")
+        if system_profiler:
+            try:
+                output = subprocess.run(
+                    [system_profiler, "SPUSBDataType"],
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                    creationflags=creation_flags,
+                ).stdout
+                in_ios_block = False
+                for line in output.splitlines():
+                    stripped = line.strip()
+                    if stripped in {"iPhone:", "iPad:", "iPod:"}:
+                        in_ios_block = True
+                        continue
+                    if in_ios_block and stripped.startswith("Serial Number:"):
+                        ids.append(_normalize_ios_udid(stripped.split(":", 1)[1].strip()))
+                        in_ios_block = False
+                    elif in_ios_block and stripped.endswith(":") and stripped not in {"iPhone:", "iPad:", "iPod:"}:
+                        in_ios_block = False
+            except Exception:
+                pass
+
     tidevice = _resolve_ios_tool("tidevice")
-    if tidevice:
+    if not ids and tidevice:
         try:
             output = subprocess.run(
                 [tidevice, "list"],
@@ -532,31 +581,6 @@ def _list_ios_device_ids():
                     match = re.search(r'\(([0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}|[0-9A-Fa-f]{24}|[0-9a-fA-F]{40})\)\s*$', line.strip())
                     if match:
                         ids.append(_normalize_ios_udid(match.group(1)))
-            except Exception:
-                pass
-
-    if not ids:
-        system_profiler = _resolve_ios_tool("system_profiler")
-        if system_profiler:
-            try:
-                output = subprocess.run(
-                    [system_profiler, "SPUSBDataType"],
-                    capture_output=True,
-                    text=True,
-                    timeout=8,
-                    creationflags=creation_flags,
-                ).stdout
-                in_ios_block = False
-                for line in output.splitlines():
-                    stripped = line.strip()
-                    if stripped in {"iPhone:", "iPad:", "iPod:"}:
-                        in_ios_block = True
-                        continue
-                    if in_ios_block and stripped.startswith("Serial Number:"):
-                        ids.append(_normalize_ios_udid(stripped.split(":", 1)[1].strip()))
-                        in_ios_block = False
-                    elif in_ios_block and stripped.endswith(":") and stripped not in {"iPhone:", "iPad:", "iPod:"}:
-                        in_ios_block = False
             except Exception:
                 pass
 
@@ -1257,7 +1281,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(5)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(6)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2980,7 +3004,7 @@ HTML_TEMPLATE = """
             if (status.connected_devices) {
                 status.connected_devices.forEach(d => {
                     const opt = document.createElement('option');
-                    opt.value = d.id; opt.textContent = d.name;
+                    opt.value = d.id; opt.textContent = d.display_name || d.name || d.id;
                     deviceFilter.appendChild(opt);
                 });
             }
@@ -2989,7 +3013,7 @@ HTML_TEMPLATE = """
 
             if (status.connected_devices && status.connected_devices.length > 0) {
                  deviceListEl.innerHTML = '<ul class="list-disc list-inside text-left">' + 
-                    status.connected_devices.map(d => `<li class="text-green-600 font-semibold animate-pulse-green">${d.id} - ${d.name}</li>`).join('') + 
+                    status.connected_devices.map(d => `<li class="text-green-600 font-semibold animate-pulse-green">${escapeHTML(d.display_name || d.name || d.id)}</li>`).join('') + 
                     '</ul>';
             } else {
                  deviceListEl.innerHTML = `<p class="text-orange-500">${status.message || 'Waiting...'}</p>`;
@@ -4630,7 +4654,7 @@ def device_manager():
             if platform == "ios":
                 ids = set(_list_ios_device_ids())
                 with lock:
-                    connected_devices_info = [{'id': i, 'name': get_device_name(i), 'platform': 'ios'} for i in ids]
+                    connected_devices_info = [_make_device_info(i, 'ios') for i in ids]
                 if connected_devices_info:
                     socketio.emit('device_status', {"connected_devices": connected_devices_info})
                 else:
@@ -4652,7 +4676,7 @@ def device_manager():
                     for did in set(active_log_readers.keys()) - ids:
                         del active_log_readers[did]
                     
-                    connected_devices_info = [{'id': i, 'name': get_device_name(i), 'platform': 'android'} for i in ids]
+                    connected_devices_info = [_make_device_info(i, 'android') for i in ids]
                 if connected_devices_info:
                     socketio.emit('device_status', {"connected_devices": connected_devices_info})
                 else:
