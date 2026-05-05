@@ -512,6 +512,37 @@ def _normalize_ios_udid(value):
 
 def _list_ios_device_ids():
     ids = []
+    system_profiler = _resolve_ios_tool("system_profiler")
+    if system_profiler:
+        try:
+            output = subprocess.run(
+                [system_profiler, "SPUSBDataType"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=creation_flags,
+            ).stdout
+            in_ios_block = False
+            for line in output.splitlines():
+                stripped = line.strip()
+                if stripped in {"iPhone:", "iPad:", "iPod:"}:
+                    in_ios_block = True
+                    continue
+                if in_ios_block and stripped.startswith("Serial Number:"):
+                    ids.append(_normalize_ios_udid(stripped.split(":", 1)[1].strip()))
+                    in_ios_block = False
+                elif in_ios_block and stripped.endswith(":") and stripped not in {"iPhone:", "iPad:", "iPod:"}:
+                    in_ios_block = False
+            seen = set()
+            unique_ids = []
+            for device_id in ids:
+                if device_id not in seen:
+                    seen.add(device_id)
+                    unique_ids.append(device_id)
+            return unique_ids
+        except Exception:
+            ids = []
+
     idevice_id = _resolve_ios_tool("idevice_id")
     if idevice_id:
         try:
@@ -525,31 +556,6 @@ def _list_ios_device_ids():
             ids.extend([_normalize_ios_udid(line.strip()) for line in output.splitlines() if line.strip()])
         except Exception:
             pass
-
-    if not ids:
-        system_profiler = _resolve_ios_tool("system_profiler")
-        if system_profiler:
-            try:
-                output = subprocess.run(
-                    [system_profiler, "SPUSBDataType"],
-                    capture_output=True,
-                    text=True,
-                    timeout=8,
-                    creationflags=creation_flags,
-                ).stdout
-                in_ios_block = False
-                for line in output.splitlines():
-                    stripped = line.strip()
-                    if stripped in {"iPhone:", "iPad:", "iPod:"}:
-                        in_ios_block = True
-                        continue
-                    if in_ios_block and stripped.startswith("Serial Number:"):
-                        ids.append(_normalize_ios_udid(stripped.split(":", 1)[1].strip()))
-                        in_ios_block = False
-                    elif in_ios_block and stripped.endswith(":") and stripped not in {"iPhone:", "iPad:", "iPod:"}:
-                        in_ios_block = False
-            except Exception:
-                pass
 
     tidevice = _resolve_ios_tool("tidevice")
     if not ids and tidevice:
@@ -1311,7 +1317,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(7)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(8)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
