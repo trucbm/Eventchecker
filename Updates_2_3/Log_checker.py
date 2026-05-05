@@ -458,9 +458,35 @@ CALLBACK_DISPLAY_NAMES = {
 def get_device_name(device_id):
     return DEVICE_NAMES.get(device_id) or IOS_DEVICE_NAMES.get(device_id) or device_id
 
+def _resolve_ios_tool(name):
+    candidates = [
+        shutil.which(name),
+        os.path.join(os.path.expanduser("~/Library/Python/3.12/bin"), name),
+        os.path.join(os.path.expanduser("~/Library/Python/3.11/bin"), name),
+        os.path.join(os.path.expanduser("~/Library/Python/3.10/bin"), name),
+        os.path.join("/opt/homebrew/bin", name),
+        os.path.join("/usr/local/bin", name),
+        os.path.join("/usr/bin", name),
+        os.path.join("/usr/sbin", name),
+    ]
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+def _normalize_ios_udid(value):
+    if not value:
+        return ""
+    cleaned = re.sub(r'[^0-9A-Fa-f]', '', str(value)).upper()
+    if len(cleaned) == 24:
+        return f"{cleaned[:8]}-{cleaned[8:]}"
+    if len(cleaned) == 40:
+        return cleaned.lower()
+    return str(value).strip()
+
 def _list_ios_device_ids():
     ids = []
-    idevice_id = shutil.which("idevice_id")
+    idevice_id = _resolve_ios_tool("idevice_id")
     if idevice_id:
         try:
             output = subprocess.run(
@@ -470,12 +496,29 @@ def _list_ios_device_ids():
                 timeout=5,
                 creationflags=creation_flags,
             ).stdout
-            ids.extend([line.strip() for line in output.splitlines() if line.strip()])
+            ids.extend([_normalize_ios_udid(line.strip()) for line in output.splitlines() if line.strip()])
+        except Exception:
+            pass
+
+    tidevice = _resolve_ios_tool("tidevice")
+    if tidevice:
+        try:
+            output = subprocess.run(
+                [tidevice, "list"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=creation_flags,
+            ).stdout
+            for line in output.splitlines():
+                match = re.search(r'\b([0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}|[0-9A-Fa-f]{24}|[0-9A-Fa-f]{40})\b', line)
+                if match:
+                    ids.append(_normalize_ios_udid(match.group(1)))
         except Exception:
             pass
 
     if not ids:
-        xcrun = shutil.which("xcrun")
+        xcrun = _resolve_ios_tool("xcrun")
         if xcrun:
             try:
                 output = subprocess.run(
@@ -486,9 +529,34 @@ def _list_ios_device_ids():
                     creationflags=creation_flags,
                 ).stdout
                 for line in output.splitlines():
-                    match = re.search(r'\(([0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}|[0-9a-fA-F]{40})\)\s*$', line.strip())
+                    match = re.search(r'\(([0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}|[0-9A-Fa-f]{24}|[0-9a-fA-F]{40})\)\s*$', line.strip())
                     if match:
-                        ids.append(match.group(1))
+                        ids.append(_normalize_ios_udid(match.group(1)))
+            except Exception:
+                pass
+
+    if not ids:
+        system_profiler = _resolve_ios_tool("system_profiler")
+        if system_profiler:
+            try:
+                output = subprocess.run(
+                    [system_profiler, "SPUSBDataType"],
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                    creationflags=creation_flags,
+                ).stdout
+                in_ios_block = False
+                for line in output.splitlines():
+                    stripped = line.strip()
+                    if stripped in {"iPhone:", "iPad:", "iPod:"}:
+                        in_ios_block = True
+                        continue
+                    if in_ios_block and stripped.startswith("Serial Number:"):
+                        ids.append(_normalize_ios_udid(stripped.split(":", 1)[1].strip()))
+                        in_ios_block = False
+                    elif in_ios_block and stripped.endswith(":") and stripped not in {"iPhone:", "iPad:", "iPod:"}:
+                        in_ios_block = False
             except Exception:
                 pass
 
@@ -501,7 +569,7 @@ def _list_ios_device_ids():
     return unique_ids
 
 def _ios_device_status_message():
-    if shutil.which("idevice_id"):
+    if _resolve_ios_tool("idevice_id") or _resolve_ios_tool("tidevice") or _resolve_ios_tool("system_profiler"):
         return "Waiting... (iOS: connect trusted device)"
     return "Waiting... (iOS: install libimobiledevice/idevice_id or connect trusted device)"
 
@@ -1189,7 +1257,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(4)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(5)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
