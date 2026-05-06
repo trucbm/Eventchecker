@@ -1237,6 +1237,7 @@ def _normalize_adrevenue_sheet_key(name):
     aliases = {
         "appmetrica": {"appmetrica", "adrevenueappmetrica", "appmetricaadrevenue"},
         "appsflyer": {"appsflyer", "adrevenueappsflyer", "appsflyeradrevenue"},
+        "adjust": {"adjust", "adrevenueadjust", "adjustadrevenue"},
         "all": {"adrevenue", "all", "default", "common", "shared"},
     }
     for key, values in aliases.items():
@@ -1246,15 +1247,15 @@ def _normalize_adrevenue_sheet_key(name):
 
 
 def _read_adrevenue_sheet(ws):
-    """Read AdRevenue params from a dedicated sheet with Appmetrica/Appsflyer columns."""
-    params_by_source = {"appmetrica": [], "appsflyer": []}
-    source_cols = {"appmetrica": None, "appsflyer": None}
+    """Read AdRevenue params from a dedicated sheet with source-specific columns."""
+    params_by_source = {"appmetrica": [], "appsflyer": [], "adjust": []}
+    source_cols = {"appmetrica": None, "appsflyer": None, "adjust": None}
     header_row = None
 
-    # The adrevenue sheet can have headers on row 1 or row 2 (e.g. B=AdRevenue, C=Appmetrica, D=AppsFlyer).
-    # Find the first row near the top that declares Appmetrica / Appsflyer columns.
+    # The adrevenue sheet can have headers on row 1 or row 2.
+    # Find the first row near the top that declares source columns.
     for row in range(1, min(ws.max_row, 5) + 1):
-        candidate_cols = {"appmetrica": None, "appsflyer": None}
+        candidate_cols = {"appmetrica": None, "appsflyer": None, "adjust": None}
         for col in range(1, ws.max_column + 1):
             header = _normalize_adrevenue_sheet_key(ws.cell(row, col).value)
             if header in candidate_cols and candidate_cols[header] is None:
@@ -1511,7 +1512,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(17)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(18)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1774,6 +1775,10 @@ HTML_TEMPLATE = """
                                     <label class="inline-flex items-center whitespace-nowrap">
                                         <input name="adRevenueSourceFilter" type="radio" value="appsflyer" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
                                         <span class="ml-2 text-sm text-gray-900">Appsflyer</span>
+                                    </label>
+                                    <label class="inline-flex items-center whitespace-nowrap">
+                                        <input name="adRevenueSourceFilter" type="radio" value="adjust" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                        <span class="ml-2 text-sm text-gray-900">Adjust</span>
                                     </label>
                                 </div>
                             </div>
@@ -4601,6 +4606,149 @@ def cache_specific_event_log(event_name, params, json_string, log_entry, device_
     with lock: event_log_cache.append({'log': log_entry, 'device_id': device_id, 'json_data': json_string})
     _apply_specific_filter_and_emit()
 
+def _record_adrevenue_log(device_id, source, event_name, parsed_data, raw_log, raw_details=None, raw_event_prefix=None):
+    payload = parsed_data if isinstance(parsed_data, dict) else {}
+    item = {
+        "device_id": device_id,
+        "device_name": get_device_name(device_id),
+        "status": "INFO",
+        "event_name": event_name,
+        "source": source,
+        "details": format_json_html(payload) if payload else (raw_details or ""),
+        "raw_details": raw_details or "",
+        "raw_log": raw_log.strip(),
+        "json_data": json.dumps(payload, ensure_ascii=False) if payload else "{}",
+        "parsed_data": payload,
+    }
+    if raw_event_prefix:
+        item["raw_event_prefix"] = raw_event_prefix
+    adrevenue_logs.append(item)
+
+def _normalize_ios_appmetrica_adrevenue(ad_revenue):
+    payload = ad_revenue.get("Payload") if isinstance(ad_revenue.get("Payload"), dict) else {}
+    return {
+        "adRevenue": ad_revenue.get("AdRevenueValue"),
+        "currency": ad_revenue.get("Currency"),
+        "adType": ad_revenue.get("AdType"),
+        "adNetwork": ad_revenue.get("AdNetwork"),
+        "adUnitId": ad_revenue.get("AdUnitId"),
+        "adUnitName": ad_revenue.get("AdUnitName"),
+        "adPlacementId": ad_revenue.get("AdPlacementId"),
+        "adPlacementName": ad_revenue.get("AdPlacementName"),
+        "precision": ad_revenue.get("Precision"),
+        "payload": payload,
+    }
+
+def _normalize_ios_appsflyer_adrevenue(data):
+    revenue = data.get("logRevenue") if isinstance(data.get("logRevenue"), dict) else {}
+    additional = data.get("additionalParams") if isinstance(data.get("additionalParams"), dict) else {}
+    payload = dict(additional)
+    payload["custom_parameters"] = additional
+    return {
+        "ad_network": {
+            "name": "ad_revenue",
+            "monetization_network": revenue.get("monetizationNetwork"),
+            "event_revenue_currency": revenue.get("currencyIso4217Code"),
+            "mediation_network": revenue.get("mediationNetwork"),
+            "event_revenue": revenue.get("eventRevenue"),
+            "custom_parameters": additional,
+            "payload": payload,
+        }
+    }
+
+def process_adrevenue_log(line, device_id):
+    handled = False
+
+    if "AdRevenue Received:" in line:
+        match = ADREVENUE_LOG_PATTERN.search(line)
+        if match:
+            content = match.group(1)
+            ad_data = {}
+            try:
+                payload_obj = {}
+                payload_match = re.search(r'payload=(\{.*?\})(?:,|$)', content)
+
+                clean_content = content
+                if payload_match:
+                    payload_str = payload_match.group(1)
+                    try:
+                        payload_obj = json.loads(payload_str)
+                    except:
+                        payload_obj = {}
+                    clean_content = content.replace(f'payload={payload_str}', '')
+
+                parts = [p.strip() for p in clean_content.split(',') if p.strip()]
+                for part in parts:
+                    if '=' in part:
+                        k, v = part.split('=', 1)
+                        ad_data[k.strip()] = v.strip()
+
+                if payload_obj:
+                    ad_data['payload'] = payload_obj
+            except:
+                ad_data = {}
+
+            with lock:
+                _record_adrevenue_log(device_id, "appmetrica", "AdRevenue - Appmetrica", ad_data, line, content)
+            handled = True
+
+    if (not handled) and "AppsFlyer" in line and "ADREVENUE-" in line and "preparing data:" in line:
+        match = APPSFLYER_ADREVENUE_PATTERN.search(line)
+        if match:
+            event_prefix = match.group(1).upper()
+            json_str = match.group(2)
+            appsflyer_data = {}
+            try:
+                appsflyer_data = json.loads(json_str)
+            except:
+                appsflyer_data = {}
+            with lock:
+                _record_adrevenue_log(device_id, "appsflyer", "AdRevenue - Appsflyer", appsflyer_data, line, json_str, event_prefix)
+            handled = True
+
+    if (not handled) and "AppMetricaAdRevenueTrackingHandler->Handle:" in line:
+        try:
+            after_keyword = line.split("AppMetricaAdRevenueTrackingHandler->Handle:", 1)[1]
+            json_str = extract_json_object_from_text(after_keyword)
+            data = json.loads(json_str) if json_str else {}
+            ad_revenue = data.get("adRevenue") if isinstance(data.get("adRevenue"), dict) else {}
+            normalized = _normalize_ios_appmetrica_adrevenue(ad_revenue) if ad_revenue else data
+            with lock:
+                _record_adrevenue_log(device_id, "appmetrica", "AdRevenue - Appmetrica", normalized, line, json_str)
+            handled = True
+        except:
+            pass
+
+    if (not handled) and "AppsFlyerAdRevenueTrackingHandler->Handle:" in line:
+        try:
+            after_keyword = line.split("AppsFlyerAdRevenueTrackingHandler->Handle:", 1)[1]
+            json_str = extract_json_object_from_text(after_keyword)
+            data = json.loads(json_str) if json_str else {}
+            normalized = _normalize_ios_appsflyer_adrevenue(data) if data else {}
+            with lock:
+                _record_adrevenue_log(device_id, "appsflyer", "AdRevenue - Appsflyer", normalized, line, json_str)
+            handled = True
+        except:
+            pass
+
+    if (not handled) and "Adjust" in line and ("callback_params" in line or "partner_params" in line):
+        match = re.search(r'\b(callback_params|partner_params)\b\s*(\{.*\})', line, re.IGNORECASE)
+        if match:
+            param_type = match.group(1).lower()
+            json_str = match.group(2).strip()
+            adjust_data = {}
+            try:
+                adjust_data = json.loads(json_str)
+            except:
+                adjust_data = {}
+            with lock:
+                _record_adrevenue_log(device_id, "adjust", f"AdRevenue - Adjust {param_type}", adjust_data, line, json_str, param_type)
+            handled = True
+
+    if handled:
+        _apply_adrevenue_filter_and_emit()
+    return handled
+
 def _apply_adrevenue_filter_and_emit():
     rendered = []
     with lock:
@@ -4857,82 +5005,7 @@ def adb_log_reader(device_id):
             _process_sdk_check_line(line, device_id)
 
             # 4. Process AdRevenue
-            handled_adrevenue = False
-            if "AdRevenue Received:" in line:
-                with lock:
-                    match = ADREVENUE_LOG_PATTERN.search(line)
-                    if match:
-                        content = match.group(1)
-                        ad_data = {}
-
-                        try:
-                            payload_obj = {}
-                            payload_match = re.search(r'payload=(\{.*?\})(?:,|$)', content)
-
-                            clean_content = content
-                            if payload_match:
-                                payload_str = payload_match.group(1)
-                                try:
-                                    payload_obj = json.loads(payload_str)
-                                except:
-                                    payload_obj = {}
-                                clean_content = content.replace(f'payload={payload_str}', '')
-
-                            parts = [p.strip() for p in clean_content.split(',') if p.strip()]
-                            for part in parts:
-                                if '=' in part:
-                                    k, v = part.split('=', 1)
-                                    ad_data[k.strip()] = v.strip()
-
-                            if payload_obj:
-                                ad_data['payload'] = payload_obj
-                        except:
-                            ad_data = {}
-
-                        adrevenue_logs.append({
-                            "device_id": device_id,
-                            "device_name": get_device_name(device_id),
-                            "status": "INFO",
-                            "event_name": "AdRevenue - Appmetrica",
-                            "source": "appmetrica",
-                            "details": format_json_html(ad_data) if ad_data else content,
-                            "raw_details": content,
-                            "raw_log": line.strip(),
-                            "json_data": json.dumps(ad_data, ensure_ascii=False) if ad_data else "{}",
-                            "parsed_data": ad_data,
-                        })
-                        handled_adrevenue = True
-                _apply_adrevenue_filter_and_emit()
-
-            if (not handled_adrevenue) and "AppsFlyer" in line and "ADREVENUE-" in line and "preparing data:" in line:
-                with lock:
-                    match = APPSFLYER_ADREVENUE_PATTERN.search(line)
-                    if match:
-                        event_prefix = match.group(1).upper()
-                        json_str = match.group(2)
-                        appsflyer_data = {}
-                        try:
-                            appsflyer_data = json.loads(json_str)
-                        except:
-                            appsflyer_data = {}
-
-                        ad_network_data = appsflyer_data.get("ad_network") if isinstance(appsflyer_data.get("ad_network"), dict) else {}
-                        adrevenue_logs.append({
-                            "device_id": device_id,
-                            "device_name": get_device_name(device_id),
-                            "status": "INFO",
-                            "event_name": "AdRevenue - Appsflyer",
-                            "source": "appsflyer",
-                            "details": format_json_html(ad_network_data) if ad_network_data else format_json_html(appsflyer_data),
-                            "raw_details": json_str,
-                            "raw_log": line.strip(),
-                            "json_data": json.dumps(appsflyer_data, ensure_ascii=False) if appsflyer_data else "{}",
-                            "parsed_data": appsflyer_data,
-                            "raw_event_prefix": event_prefix,
-                        })
-                        handled_adrevenue = True
-                if handled_adrevenue:
-                    _apply_adrevenue_filter_and_emit()
+            process_adrevenue_log(line, device_id)
 
             # 5. Process Callback & Events
             process_callback_and_ad_event_log(line, device_id)
@@ -4974,6 +5047,7 @@ def ios_log_reader(device_id):
                 continue
             log_obj = _normalize_ios_log_line(raw_line, device_id)
             process_load_ads_ext_log(log_obj["raw_log"], device_id)
+            process_adrevenue_log(log_obj["raw_log"], device_id)
             _process_sdk_check_line(log_obj["raw_log"], device_id)
             event_name, params, json_string = find_and_parse_event(log_obj["raw_log"])
             if event_name:
