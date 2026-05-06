@@ -650,6 +650,14 @@ def _normalize_sdk_search_compact(text):
     return re.sub(r'[^a-z0-9]+', '', _normalize_sdk_search_text(text))
 
 
+def _extract_first_sdk_version(line, patterns):
+    for pattern in patterns:
+        match = re.search(pattern, line, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return ""
+
+
 def _normalize_sdk_network_name(name):
     if not name:
         return ""
@@ -965,10 +973,34 @@ def _process_sdk_external_line(line, device_id):
                 appsflyer_sdk = match.group(1)
         if appsflyer_sdk:
             update_block("Appsflyer", sdk_version=appsflyer_sdk)
+    firebase_analytics_version = _extract_first_sdk_version(line, [
+        r'Analytics\s+v\.?([0-9]+(?:\.[0-9]+)+)\s+started',
+        r'FirebaseAnalytics[^0-9]*([0-9]+(?:\.[0-9]+)+)',
+    ])
+    if firebase_analytics_version:
+        update_block("Firebase Analytics", sdk_version=firebase_analytics_version)
+    firebase_messaging_version = _extract_first_sdk_version(line, [
+        r'([0-9]+(?:\.[0-9]+)+)\s*-\s*\[FirebaseMessaging\]',
+        r'FirebaseMessaging[^0-9]*([0-9]+(?:\.[0-9]+)+)',
+    ])
+    if firebase_messaging_version:
+        update_block("Firebase Cloud Messaging", sdk_version=firebase_messaging_version)
     if "firebase crashlytics" in normalized_line and "initializing" in normalized_line:
         match = re.search(r'Firebase\s+Crashlytics\s+([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
         if match:
             update_block("Firebase Crashlytics", sdk_version=match.group(1))
+    firebase_crashlytics_version = _extract_first_sdk_version(line, [
+        r'\[Firebase/Crashlytics\]\s*Version\s*([0-9]+(?:\.[0-9]+)+)',
+        r'FirebaseCrashlytics[^0-9]*([0-9]+(?:\.[0-9]+)+)',
+    ])
+    if firebase_crashlytics_version:
+        update_block("Firebase Crashlytics", sdk_version=firebase_crashlytics_version)
+    firebase_performance_version = _extract_first_sdk_version(line, [
+        r'([0-9]+(?:\.[0-9]+)+)\s*-\s*\[FirebasePerformance\]',
+        r'FirebasePerformance[^0-9]*([0-9]+(?:\.[0-9]+)+)',
+    ])
+    if firebase_performance_version:
+        update_block("Firebase Performance Monitoring", sdk_version=firebase_performance_version)
 
     return changed
 
@@ -1454,7 +1486,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(12)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(13)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
