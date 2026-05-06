@@ -861,6 +861,7 @@ def _normalize_adrevenue_sheet_key(name):
     aliases = {
         "appmetrica": {"appmetrica", "adrevenueappmetrica", "appmetricaadrevenue"},
         "appsflyer": {"appsflyer", "adrevenueappsflyer", "appsflyeradrevenue"},
+        "adjust": {"adjust", "adrevenueadjust", "adjustadrevenue"},
         "all": {"adrevenue", "all", "default", "common", "shared"},
     }
     for key, values in aliases.items():
@@ -870,15 +871,15 @@ def _normalize_adrevenue_sheet_key(name):
 
 
 def _read_adrevenue_sheet(ws):
-    """Read AdRevenue params from a dedicated sheet with Appmetrica/Appsflyer columns."""
-    params_by_source = {"appmetrica": [], "appsflyer": []}
-    source_cols = {"appmetrica": None, "appsflyer": None}
+    """Read AdRevenue params from a dedicated sheet with source-specific columns."""
+    params_by_source = {"appmetrica": [], "appsflyer": [], "adjust": []}
+    source_cols = {"appmetrica": None, "appsflyer": None, "adjust": None}
     header_row = None
 
-    # The adrevenue sheet can have headers on row 1 or row 2 (e.g. B=AdRevenue, C=Appmetrica, D=AppsFlyer).
-    # Find the first row near the top that declares Appmetrica / Appsflyer columns.
+    # The adrevenue sheet can have headers on row 1 or row 2 (e.g. B=AdRevenue, C=Appmetrica, D=AppsFlyer, E=Adjust).
+    # Find the first row near the top that declares source columns.
     for row in range(1, min(ws.max_row, 5) + 1):
-        candidate_cols = {"appmetrica": None, "appsflyer": None}
+        candidate_cols = {"appmetrica": None, "appsflyer": None, "adjust": None}
         for col in range(1, ws.max_column + 1):
             header = _normalize_adrevenue_sheet_key(ws.cell(row, col).value)
             if header in candidate_cols and candidate_cols[header] is None:
@@ -1135,7 +1136,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(62)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(63)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1387,6 +1388,10 @@ HTML_TEMPLATE = """
                                     <label class="inline-flex items-center whitespace-nowrap">
                                         <input name="adRevenueSourceFilter" type="radio" value="appsflyer" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
                                         <span class="ml-2 text-sm text-gray-900">Appsflyer</span>
+                                    </label>
+                                    <label class="inline-flex items-center whitespace-nowrap">
+                                        <input name="adRevenueSourceFilter" type="radio" value="adjust" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                        <span class="ml-2 text-sm text-gray-900">Adjust</span>
                                     </label>
                                 </div>
                             </div>
@@ -4374,6 +4379,35 @@ def adb_log_reader(device_id):
                             "json_data": json.dumps(appsflyer_data, ensure_ascii=False) if appsflyer_data else "{}",
                             "parsed_data": appsflyer_data,
                             "raw_event_prefix": event_prefix,
+                        })
+                        handled_adrevenue = True
+                if handled_adrevenue:
+                    _apply_adrevenue_filter_and_emit()
+
+            if (not handled_adrevenue) and "Adjust" in line and ("callback_params" in line or "partner_params" in line):
+                with lock:
+                    match = re.search(r'\b(callback_params|partner_params)\b\s*(\{.*\})', line, re.IGNORECASE)
+                    if match:
+                        param_type = match.group(1).lower()
+                        json_str = match.group(2).strip()
+                        adjust_data = {}
+                        try:
+                            adjust_data = json.loads(json_str)
+                        except:
+                            adjust_data = {}
+
+                        adrevenue_logs.append({
+                            "device_id": device_id,
+                            "device_name": get_device_name(device_id),
+                            "status": "INFO",
+                            "event_name": f"AdRevenue - Adjust {param_type}",
+                            "source": "adjust",
+                            "details": format_json_html(adjust_data) if adjust_data else json_str,
+                            "raw_details": json_str,
+                            "raw_log": line.strip(),
+                            "json_data": json.dumps(adjust_data, ensure_ascii=False) if adjust_data else "{}",
+                            "parsed_data": adjust_data,
+                            "raw_event_prefix": param_type,
                         })
                         handled_adrevenue = True
                 if handled_adrevenue:
