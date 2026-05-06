@@ -1106,6 +1106,63 @@ def extract_json_object_from_text(text):
     except:
         return None
 
+def _decode_ios_levelplay_json_text(text):
+    # iOS syslog sometimes writes \" as \134", which is not valid JSON.
+    return (text or "").replace(r"\134", "\\")
+
+def _parse_callback_json_payload(json_str):
+    for candidate in (json_str, _decode_ios_levelplay_json_text(json_str)):
+        try:
+            data = json.loads(candidate)
+            break
+        except Exception:
+            data = None
+    if not isinstance(data, dict):
+        return None
+
+    for key in ("adInfo", "error", "impressionData"):
+        value = data.get(key)
+        if isinstance(value, str):
+            nested_text = _decode_ios_levelplay_json_text(value).strip()
+            if nested_text.startswith("{") and nested_text.endswith("}"):
+                try:
+                    data[key] = json.loads(nested_text)
+                except Exception:
+                    pass
+    return data
+
+def _find_first_key_deep(data, keys):
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if key in keys:
+                return value
+            found = _find_first_key_deep(value, keys)
+            if found is not None:
+                return found
+    elif isinstance(data, list):
+        for value in data:
+            found = _find_first_key_deep(value, keys)
+            if found is not None:
+                return found
+    return None
+
+def _normalize_ad_format_label(value, fallback=""):
+    raw = str(value or fallback or "").strip().lower()
+    if raw == "mrec":
+        return "MREC"
+    if raw == "banner":
+        return "Banner"
+    if raw in {"reward", "rewarded", "rewarded_video", "rewardedvideo"}:
+        return "Reward"
+    if raw in {"interstitial", "inter"}:
+        return "Interstitial"
+    return str(value or fallback or "").strip()
+
+def _levelplay_impression_event_name(data, fallback_format=""):
+    ad_format = _find_first_key_deep(data, {"AdFormat", "adFormat", "ad_format"})
+    label = _normalize_ad_format_label(ad_format, fallback_format)
+    return f"_OnLevelPlayImpressionDataReadyEvent - {label}" if label else "_OnLevelPlayImpressionDataReadyEvent"
+
 def split_top_level_csv(text):
     parts = []
     current = []
@@ -1538,7 +1595,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(20)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(21)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4291,11 +4348,18 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
         details = "Callback fired"
         json_data_for_log = "{}"
         if json_str:
-            try:
-                data = json.loads(json_str)
+            data = _parse_callback_json_payload(json_str)
+            if data is not None:
+                fallback_format = ""
+                if "[Ad,LevelPlay,Banner]" in ios_callback_key:
+                    fallback_format = "banner"
+                elif "[Ad,LevelPlay,Mrec" in ios_callback_key:
+                    fallback_format = "mrec"
+                if "_OnImpressionDataReady" in ios_callback_key or "_OnLevelPlayImpressionDataReadyEvent" in ios_callback_key:
+                    display_name = _levelplay_impression_event_name(data, fallback_format)
                 details = format_json_html(data)
                 json_data_for_log = json.dumps(data, ensure_ascii=False)
-            except:
+            else:
                 details = f'<div class="text-xs font-mono break-all text-red-600">JSON Parse Error</div><div class="text-xs font-mono break-all">{html.escape(json_str)}</div>'
         elif after_keyword:
             details = f'<div class="text-xs font-mono break-all">{html.escape(after_keyword.lstrip(":").strip())}</div>'
@@ -4463,18 +4527,17 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                     json_str = parse_buffer[start_idx : end_idx+1]
                     details = ""
                     json_data_for_log = "{}"
-                    display_name = (
-                        "LevelPlay Impression Data"
-                        if "_OnLevelPlayImpressionDataReadyEvent" in current_buffer
-                        else "Impression Data"
-                    )
+                    display_name = "_OnLevelPlayImpressionDataReadyEvent"
                     
                     try:
-                        data = json.loads(json_str)
+                        data = _parse_callback_json_payload(json_str)
+                        if data is None:
+                            data = json.loads(json_str)
                         if 'impressionData' in data:
                             details_target = data['impressionData']
                         else:
                             details_target = data
+                        display_name = _levelplay_impression_event_name(details_target)
                         details = format_json_html(details_target)
                         json_data_for_log = json.dumps(details_target, ensure_ascii=False)
                     except:
@@ -4530,6 +4593,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                  payload = log_entry.split(found_key, 1)[1].strip()
                  parsed_data = parse_levelplay_impression_text(payload)
                  if parsed_data:
+                     display_name = _levelplay_impression_event_name(parsed_data)
                      details = format_json_html(parsed_data)
                      json_data_for_log = json.dumps(parsed_data, ensure_ascii=False)
                  else:
