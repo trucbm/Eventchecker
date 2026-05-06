@@ -731,9 +731,15 @@ def _sdk_result_status(actual_value, expected_value):
     expected_text = str(expected_value or "").strip()
     if not actual_text or actual_text.upper() in {"NOT FOUND", "MISSING"}:
         return "NOT_FOUND"
-    actual_compare = _extract_sdk_comparable_version(actual_text, expected_text)
+    actual_compare = _extract_sdk_comparable_version(actual_text)
     expected_compare = _extract_sdk_comparable_version(expected_text)
     if expected_compare:
+        actual_parts = actual_compare.split(".")
+        expected_parts = expected_compare.split(".")
+        if actual_parts and expected_parts:
+            compare_len = min(len(actual_parts), len(expected_parts))
+            if compare_len >= 3 and actual_parts[:compare_len] == expected_parts[:compare_len]:
+                return "PASSED"
         return "PASSED" if actual_compare == expected_compare else "FAILED"
     return "FOUND"
 
@@ -1500,7 +1506,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(14)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(15)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
