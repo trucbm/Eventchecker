@@ -466,6 +466,28 @@ CALLBACK_DISPLAY_NAMES = {
     "Receive Ironsource Impression Data LevelPlayImpressionData": "LevelPlayImpressionData"
 }
 
+IOS_LEVELPLAY_CALLBACK_KEYS = {
+    "[Ad,LevelPlay,Reward] LevelPlayRewardAdWrapper->_OnAdRewarded": "Reward _OnAdRewarded",
+    "[Ad,LevelPlay,Reward] LevelPlayRewardAdWrapper->_OnAdClosed": "Reward _OnAdClosed",
+    "[Ad,LevelPlay,Reward] LevelPlayRewardAdWrapper->_OnAdLoaded": "Reward _OnAdLoaded",
+    "[Ad,LevelPlay,Reward] LevelPlayRewardAdWrapper->_OnAdClicked": "Reward _OnAdClicked",
+    "[Ad,LevelPlay,Reward] LevelPlayRewardAdWrapper->OnADAdLoadFailed": "Reward OnADAdLoadFailed",
+    "[Ad,LevelPlay,Interstitial] LevelPlayInterstitialAdWrapper->_OnAdLoaded": "Interstitial _OnAdLoaded",
+    "[Ad,LevelPlay,Interstitial] LevelPlayInterstitialAdWrapper->_OnAdInfoChanged": "Interstitial _OnAdInfoChanged",
+    "[Ad,LevelPlay,Interstitial] LevelPlayInterstitialAdWrapper->_OnAdDisplayed": "Interstitial _OnAdDisplayed",
+    "[Ad,LevelPlay,Interstitial] LevelPlayInterstitialAdWrapper->_OnAdClosed": "Interstitial _OnAdClosed",
+    "[Ad,LevelPlay,Interstitial] LevelPlayInterstitialAdWrapper->_OnAdClicked": "Interstitial _OnAdClicked",
+    "[Ad,LevelPlay,Interstitial] LevelPlayInterstitialAdWrapper->OnADAdLoadFailed": "Interstitial OnADAdLoadFailed",
+    "[Ad,LevelPlay,Banner] LevelPlayBannerAdService->_OnImpressionDataReady": "Banner _OnImpressionDataReady",
+    "[Ad,LevelPlay,Banner] LevelPlayBannerWrapper->OnADAdDisplayed": "Banner OnADAdDisplayed",
+    "[Ad,LevelPlay,Banner] LevelPlayBannerWrapper->OnADAdLoaded": "Banner OnADAdLoaded",
+    "[Ad,LevelPlay,Banner] LevelPlayBannerWrapper->OnADAdClicked": "Banner OnADAdClicked",
+    "[Ad,LevelPlay,Banner] LevelPlayBannerWrapper->OnADAdLoadFailed": "Banner OnADAdLoadFailed",
+    "[Ad,LevelPlay,Mrec] LevelPlayMrecWrapper->_OnAdLoaded": "Mrec _OnAdLoaded",
+    "[Ad,LevelPlay,Mrec,Aps] LevelPlayMrecAdService->_OnImpressionDataReady": "Mrec APS _OnImpressionDataReady",
+    "[Ad,LevelPlay,Mrec] LevelPlayMrecWrapper->_OnAdDisplayed": "Mrec _OnAdDisplayed",
+}
+
 def get_device_name(device_id):
     return DEVICE_NAMES.get(device_id) or IOS_DEVICE_NAMES.get(device_id) or device_id
 
@@ -1512,7 +1534,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(18)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(19)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4256,6 +4278,36 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
     global incomplete_impression_logs
     if is_paused: return
 
+    # --- 0. Process iOS LevelPlay callbacks ---
+    ios_callback_key = next((key for key in IOS_LEVELPLAY_CALLBACK_KEYS if key in log_entry), "")
+    if ios_callback_key:
+        display_name = IOS_LEVELPLAY_CALLBACK_KEYS.get(ios_callback_key, ios_callback_key)
+        after_keyword = log_entry.split(ios_callback_key, 1)[1].strip()
+        json_str = extract_json_object_from_text(after_keyword)
+        details = "Callback fired"
+        json_data_for_log = "{}"
+        if json_str:
+            try:
+                data = json.loads(json_str)
+                details = format_json_html(data)
+                json_data_for_log = json.dumps(data, ensure_ascii=False)
+            except:
+                details = f'<div class="text-xs font-mono break-all text-red-600">JSON Parse Error</div><div class="text-xs font-mono break-all">{html.escape(json_str)}</div>'
+        elif after_keyword:
+            details = f'<div class="text-xs font-mono break-all">{html.escape(after_keyword.lstrip(":").strip())}</div>'
+        with lock:
+            callback_ad_logs.append({
+                "device_id": device_id,
+                "device_name": get_device_name(device_id),
+                "type": "Callback",
+                "event_name": display_name,
+                "details": details,
+                "raw_log": log_entry.strip(),
+                "json_data": json_data_for_log
+            })
+            socketio.emit('update_callback_ad_table', list(callback_ad_logs))
+        return
+
     # --- 0. Process Gadsme callbacks ---
     if GADSME_SERVICE_KEYWORD in log_entry:
         try:
@@ -5049,10 +5101,12 @@ def ios_log_reader(device_id):
             process_load_ads_ext_log(log_obj["raw_log"], device_id)
             process_adrevenue_log(log_obj["raw_log"], device_id)
             _process_sdk_check_line(log_obj["raw_log"], device_id)
+            process_callback_and_ad_event_log(log_obj["raw_log"], device_id)
             event_name, params, json_string = find_and_parse_event(log_obj["raw_log"])
             if event_name:
                 process_event_validator_log(event_name, params, json_string, log_obj["raw_log"], device_id)
                 cache_specific_event_log(event_name, params, json_string, log_obj["raw_log"], device_id)
+                process_callback_and_ad_event_log(log_obj["raw_log"], device_id, event_name, params, json_string)
     except Exception as e:
         print(f"iOS log reader error {device_id}: {e}")
     finally:
