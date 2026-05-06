@@ -436,6 +436,10 @@ METRICA_REGULAR_EVENT_PATTERN = re.compile(
 
 # Patterns cũ của Log Checker
 OLD_EVENT_LOG_PATTERN = re.compile(r'\[\s*Tracking\s*\]\s*TrackingService->Track:\s*(\{"eventName":.*)')
+IOS_FIREBASE_EVENT_PATTERN = re.compile(
+    r'\[\s*Tracking\s*\]\s*TrackingService->_LogEvent:\s*(\{.*\})',
+    re.IGNORECASE
+)
 CALLBACK_LOG_PATTERN = re.compile(r"(_OnImpressionDataReadyEvent|_OnLevelPlayImpressionDataReadyEvent|LevelPlayInterstitialAdListener|LevelPlayBannerAdViewListener|LevelPlayRewardedAdListener|Receive Ironsource Impression Data LevelPlayImpressionData)")
 ADREVENUE_LOG_PATTERN = re.compile(r"AdRevenue Received:\s*AdRevenue\{(.*)\}")
 APPSFLYER_ADREVENUE_PATTERN = re.compile(r"\b(ADREVENUE)-\d+:\s*preparing data:\s*(\{.*\})", re.IGNORECASE)
@@ -1507,7 +1511,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(16)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(17)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1663,7 +1667,7 @@ HTML_TEMPLATE = """
                                     <button id="clearValidatorFilterBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium text-xs px-4 rounded-lg h-9">Clear Filter</button>
                                     <div class="flex items-center gap-3 text-[11px] text-gray-700 ml-1">
                                         <label class="inline-flex items-center gap-1.5"><input type="radio" name="validatorSourceFilter" value="all" checked> <span>All</span></label>
-                                        <label class="inline-flex items-center gap-1.5"><input type="radio" name="validatorSourceFilter" value="appmetrica"> <span>Appmetrica</span></label>
+                                        <label class="inline-flex items-center gap-1.5" data-ios-hidden-source="appmetrica"><input type="radio" name="validatorSourceFilter" value="appmetrica"> <span>Appmetrica</span></label>
                                         <label class="inline-flex items-center gap-1.5"><input type="radio" name="validatorSourceFilter" value="firebase"> <span>Firebase</span></label>
                                     </div>
                                 </div>
@@ -2146,6 +2150,14 @@ HTML_TEMPLATE = """
             const platform = activePlatform === 'ios' ? 'ios' : 'android';
             document.querySelectorAll('.sdk-check-panel').forEach(panel => {
                 panel.classList.toggle('hidden', panel.getAttribute('data-sdk-platform') !== platform);
+            });
+            document.querySelectorAll('[data-ios-hidden-source="appmetrica"]').forEach(el => {
+                el.classList.toggle('hidden', platform === 'ios');
+                const radio = el.querySelector('input[type="radio"]');
+                if (platform === 'ios' && radio?.checked) {
+                    const allRadio = document.querySelector('input[name="validatorSourceFilter"][value="all"]');
+                    if (allRadio) allRadio.checked = true;
+                }
             });
             const sdkBadge = document.getElementById('sdkCheckPlatformBadge');
             if (sdkBadge) sdkBadge.textContent = `${platformLabel(platform)} Table`;
@@ -4188,6 +4200,38 @@ def find_and_parse_event(log_entry):
         except Exception:
             pass
 
+    if 'TrackingService->_LogEvent:' in log_entry:
+        try:
+            match = IOS_FIREBASE_EVENT_PATTERN.search(log_entry)
+            json_str = match.group(1) if match else None
+            if not json_str:
+                after_keyword = log_entry.split('TrackingService->_LogEvent:', 1)[1]
+                json_str = extract_json_object_from_text(after_keyword)
+            if json_str:
+                data = json.loads(json_str)
+                event_name = (
+                    data.get('eventName')
+                    or data.get('EventName')
+                    or data.get('event_name')
+                )
+                params = data.get('e')
+                if params is None:
+                    params = data.get('params', {})
+                if isinstance(params, str):
+                    try:
+                        params = json.loads(params)
+                    except Exception:
+                        params = {}
+                if event_name and isinstance(params, dict):
+                    wrapped = {
+                        'eventName': event_name,
+                        'e': params,
+                        'source': 'firebase',
+                    }
+                    return event_name, params, json.dumps(wrapped, ensure_ascii=False)
+        except Exception:
+            pass
+
     match = METRICA_REGULAR_EVENT_PATTERN.search(log_entry)
     if match:
         try:
@@ -4931,6 +4975,10 @@ def ios_log_reader(device_id):
             log_obj = _normalize_ios_log_line(raw_line, device_id)
             process_load_ads_ext_log(log_obj["raw_log"], device_id)
             _process_sdk_check_line(log_obj["raw_log"], device_id)
+            event_name, params, json_string = find_and_parse_event(log_obj["raw_log"])
+            if event_name:
+                process_event_validator_log(event_name, params, json_string, log_obj["raw_log"], device_id)
+                cache_specific_event_log(event_name, params, json_string, log_obj["raw_log"], device_id)
     except Exception as e:
         print(f"iOS log reader error {device_id}: {e}")
     finally:
