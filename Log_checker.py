@@ -1020,6 +1020,10 @@ def _process_sdk_external_line(line, device_id):
                 appsflyer_sdk = match.group(1)
         if appsflyer_sdk:
             update_block("Appsflyer", sdk_version=appsflyer_sdk)
+    if "clientsdk:" in normalized_line and "unity" in normalized_line:
+        match = re.search(r'unity\s*([0-9]+(?:\.[0-9]+)+)\s*@\s*(?:android|adroid)\s*([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
+        if match:
+            update_block("Adjust", adapter_version=match.group(1), sdk_version=match.group(2))
     firebase_analytics_version = _extract_first_sdk_version(line, [
         r'Analytics\s+v\.?([0-9]+(?:\.[0-9]+)+)\s+started',
         r'FirebaseAnalytics[^0-9]*([0-9]+(?:\.[0-9]+)+)',
@@ -1534,7 +1538,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(19)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(20)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
