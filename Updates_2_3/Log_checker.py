@@ -429,6 +429,7 @@ UNITY_TRACKING_PATTERN = re.compile(r'\[\s*Tracking\s*\]\s*TrackingService->Trac
 # Pattern cho Load Ads Ext (AppMetrica)
 METRICA_TRACKING_PATTERN = re.compile(r'Event sent: ad_impression with value\s*(\{.*\})')
 LOAD_ADS_EXT_ADREVENUE_PATTERN = re.compile(r'AdRevenue Received:\s*AdRevenue\{(.*)\}', re.IGNORECASE)
+IOS_LOAD_ADS_EXT_ADREVENUE_PATTERN = re.compile(r'\[Tracking,AppMetrica\].*?AppMetricaAdRevenueTrackingHandler->Handle:\s*(\{.*\})', re.IGNORECASE)
 METRICA_REGULAR_EVENT_PATTERN = re.compile(
     r'Event received on service:\s*EVENT_TYPE_REGULAR\s+with name\s+([A-Za-z0-9_.$-]+)\s+with value\s*(\{.*\})'
 )
@@ -1506,7 +1507,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(15)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(16)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4094,6 +4095,36 @@ def process_load_ads_ext_log(line, device_id):
     if not recording_states["LoadAdsExt"]["is_recording"]:
         return
 
+    ios_match = IOS_LOAD_ADS_EXT_ADREVENUE_PATTERN.search(line)
+    if ios_match:
+        try:
+            data = json.loads(ios_match.group(1))
+            ad_revenue = data.get("adRevenue") if isinstance(data.get("adRevenue"), dict) else {}
+            payload = ad_revenue.get("Payload") if isinstance(ad_revenue.get("Payload"), dict) else {}
+
+            ad_network = ad_revenue.get("AdNetwork") or payload.get("ad_network")
+            fmt = payload.get("ad_format") or ad_revenue.get("AdFormat") or ad_revenue.get("AdType")
+            if fmt and str(fmt).strip().lower() == "mrec":
+                fmt = "MREC"
+
+            if ad_network and fmt:
+                d_name = get_device_name(device_id)
+                with lock:
+                    if (device_id, ad_network, fmt, "ios_metrica") not in unique_load_ads_ext:
+                        unique_load_ads_ext.add((device_id, ad_network, fmt, "ios_metrica"))
+                        load_ads_ext_events.append({
+                            "device_id": device_id,
+                            "device_name": d_name,
+                            "ad_network": ad_network,
+                            "ad_format": fmt,
+                            "raw_log": line.strip()
+                        })
+                        socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
+                        send_to_sheet(d_name, ad_network, fmt, line.strip(), "LoadAdsExt")
+            return
+        except:
+            pass
+
     match = LOAD_ADS_EXT_ADREVENUE_PATTERN.search(line)
     if match:
         try:
@@ -4898,7 +4929,7 @@ def ios_log_reader(device_id):
             if active_platform != "ios":
                 continue
             log_obj = _normalize_ios_log_line(raw_line, device_id)
-            # Task 4/5 scope: iOS logs are normalized, then fed only into SDK Check for now.
+            process_load_ads_ext_log(log_obj["raw_log"], device_id)
             _process_sdk_check_line(log_obj["raw_log"], device_id)
     except Exception as e:
         print(f"iOS log reader error {device_id}: {e}")
