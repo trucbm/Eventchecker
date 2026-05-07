@@ -936,6 +936,7 @@ def _extract_json_field_version(line, field_name):
 def _process_sdk_external_line(line, device_id):
     normalized_line = _normalize_sdk_search_text(line)
     compact_line = _normalize_sdk_search_compact(line)
+    platform = active_platform
     changed = False
 
     def update_block(network_name, sdk_version=None, adapter_version=None, adapter_missing=False):
@@ -953,19 +954,20 @@ def _process_sdk_external_line(line, device_id):
             block["adapter_version"] = ""
             changed = True
 
-    for item in sdk_check_search_list:
-        pattern_norm = item.get("search_pattern_normalized", "")
-        pattern_compact = item.get("search_pattern_compact", "")
-        if pattern_norm and (pattern_norm in normalized_line or (pattern_compact and pattern_compact in compact_line)):
-            version = item.get("version", "")
-            field = item.get("field", "adapter")
-            network_name = item.get("display_name") or item.get("network") or item.get("version_label") or item.get("search_pattern")
-            if field == "sdk":
-                update_block(network_name, sdk_version=version)
-            elif field == "both":
-                update_block(network_name, sdk_version=version, adapter_version=version)
-            else:
-                update_block(network_name, adapter_version=version)
+    if platform == "ios":
+        for item in sdk_check_search_list:
+            pattern_norm = item.get("search_pattern_normalized", "")
+            pattern_compact = item.get("search_pattern_compact", "")
+            if pattern_norm and (pattern_norm in normalized_line or (pattern_compact and pattern_compact in compact_line)):
+                version = item.get("version", "")
+                field = item.get("field", "adapter")
+                network_name = item.get("display_name") or item.get("network") or item.get("version_label") or item.get("search_pattern")
+                if field == "sdk":
+                    update_block(network_name, sdk_version=version)
+                elif field == "both":
+                    update_block(network_name, sdk_version=version, adapter_version=version)
+                else:
+                    update_block(network_name, adapter_version=version)
 
     if "advertysdk" in normalized_line:
         match = re.search(r'AdvertySDK\s+([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
@@ -992,7 +994,7 @@ def _process_sdk_external_line(line, device_id):
         match = re.search(r'FBAndroidSDK/([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
         if match:
             update_block("Facebook SDK", sdk_version=match.group(1))
-    if "fbiossdk/" in normalized_line:
+    if platform == "ios" and "fbiossdk/" in normalized_line:
         match = re.search(r'FBiOSSDK/([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
         if match:
             update_block("Facebook SDK", sdk_version=match.group(1))
@@ -1024,34 +1026,36 @@ def _process_sdk_external_line(line, device_id):
         match = re.search(r'unity\s*([0-9]+(?:\.[0-9]+)+)\s*@\s*(?:android|adroid)\s*([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
         if match:
             update_block("Adjust", adapter_version=match.group(1), sdk_version=match.group(2))
-    firebase_analytics_version = _extract_first_sdk_version(line, [
-        r'Analytics\s+v\.?([0-9]+(?:\.[0-9]+)+)\s+started',
-        r'FirebaseAnalytics[^0-9]*([0-9]+(?:\.[0-9]+)+)',
-    ])
-    if firebase_analytics_version:
-        update_block("Firebase Analytics", sdk_version=firebase_analytics_version)
-    firebase_messaging_version = _extract_first_sdk_version(line, [
-        r'([0-9]+(?:\.[0-9]+)+)\s*-\s*\[FirebaseMessaging\]',
-        r'FirebaseMessaging[^0-9]*([0-9]+(?:\.[0-9]+)+)',
-    ])
-    if firebase_messaging_version:
-        update_block("Firebase Cloud Messaging", sdk_version=firebase_messaging_version)
+    if platform == "ios":
+        firebase_analytics_version = _extract_first_sdk_version(line, [
+            r'Analytics\s+v\.?([0-9]+(?:\.[0-9]+)+)\s+started',
+            r'FirebaseAnalytics[^0-9]*([0-9]+(?:\.[0-9]+)+)',
+        ])
+        if firebase_analytics_version:
+            update_block("Firebase Analytics", sdk_version=firebase_analytics_version)
+        firebase_messaging_version = _extract_first_sdk_version(line, [
+            r'([0-9]+(?:\.[0-9]+)+)\s*-\s*\[FirebaseMessaging\]',
+            r'FirebaseMessaging[^0-9]*([0-9]+(?:\.[0-9]+)+)',
+        ])
+        if firebase_messaging_version:
+            update_block("Firebase Cloud Messaging", sdk_version=firebase_messaging_version)
     if "firebase crashlytics" in normalized_line and "initializing" in normalized_line:
         match = re.search(r'Firebase\s+Crashlytics\s+([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
         if match:
             update_block("Firebase Crashlytics", sdk_version=match.group(1))
-    firebase_crashlytics_version = _extract_first_sdk_version(line, [
-        r'\[Firebase/Crashlytics\]\s*Version\s*([0-9]+(?:\.[0-9]+)+)',
-        r'FirebaseCrashlytics[^0-9]*([0-9]+(?:\.[0-9]+)+)',
-    ])
-    if firebase_crashlytics_version:
-        update_block("Firebase Crashlytics", sdk_version=firebase_crashlytics_version)
-    firebase_performance_version = _extract_first_sdk_version(line, [
-        r'([0-9]+(?:\.[0-9]+)+)\s*-\s*\[FirebasePerformance\]',
-        r'FirebasePerformance[^0-9]*([0-9]+(?:\.[0-9]+)+)',
-    ])
-    if firebase_performance_version:
-        update_block("Firebase Performance Monitoring", sdk_version=firebase_performance_version)
+    if platform == "ios":
+        firebase_crashlytics_version = _extract_first_sdk_version(line, [
+            r'\[Firebase/Crashlytics\]\s*Version\s*([0-9]+(?:\.[0-9]+)+)',
+            r'FirebaseCrashlytics[^0-9]*([0-9]+(?:\.[0-9]+)+)',
+        ])
+        if firebase_crashlytics_version:
+            update_block("Firebase Crashlytics", sdk_version=firebase_crashlytics_version)
+        firebase_performance_version = _extract_first_sdk_version(line, [
+            r'([0-9]+(?:\.[0-9]+)+)\s*-\s*\[FirebasePerformance\]',
+            r'FirebasePerformance[^0-9]*([0-9]+(?:\.[0-9]+)+)',
+        ])
+        if firebase_performance_version:
+            update_block("Firebase Performance Monitoring", sdk_version=firebase_performance_version)
 
     return changed
 
@@ -1595,7 +1599,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(22)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(23)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
