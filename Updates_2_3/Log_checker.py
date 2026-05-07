@@ -1599,7 +1599,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(2)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(3)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1737,6 +1737,7 @@ HTML_TEMPLATE = """
                                         <div class="flex flex-wrap items-center gap-3">
                                             <button id="importProfileBtn" class="bg-slate-700 hover:bg-slate-800 text-white font-medium text-xs px-3 rounded-lg h-9 min-w-[116px]">Import Profile</button>
                                             <button id="reloadProfileBtn" class="bg-slate-200 hover:bg-slate-300 text-gray-800 font-medium text-xs px-3 rounded-lg h-9 min-w-[116px]">Reload Profile</button>
+                                            <button id="openProfileFolderBtn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs px-3 rounded-lg h-9 min-w-[72px]" title="Open profile folder">Open Folder</button>
                                         </div>
                                     </div>
                                 </div>
@@ -2269,19 +2270,27 @@ HTML_TEMPLATE = """
             if (sdkBadge) sdkBadge.textContent = `${platformLabel(platform)} Table`;
         }
 
-        function resetRuntimeUiForPlatformSwitch() {
+        function resetSdkCheckUiState(clearInput = false) {
             if (typeof sdkCheckRunning !== 'undefined') {
                 sdkCheckRunning = false;
-                const sdkBtn = document.getElementById('startSdkCheckBtn');
-                if (sdkBtn) sdkBtn.textContent = 'Start Checking';
             }
+            const sdkBtn = document.getElementById('startSdkCheckBtn');
+            if (sdkBtn) sdkBtn.textContent = 'Start Checking';
+            document.getElementById('sdkCheckTableBody')?.replaceChildren();
+            const iosBody = document.getElementById('sdkCheckIosTableBody');
+            if (iosBody) iosBody.innerHTML = '<tr><td class="py-2 px-4 text-sm text-gray-500 italic">iOS table ready. Device connection will be added in the next step.</td></tr>';
+            if (clearInput) {
+                const sdkInput = document.getElementById('sdkCheckInput');
+                if (sdkInput) sdkInput.value = '';
+            }
+        }
+
+        function resetRuntimeUiForPlatformSwitch() {
+            resetSdkCheckUiState(true);
             if (typeof setPackagePauseState === 'function') setPackagePauseState(false);
             if (typeof closePackageStreamModal === 'function') closePackageStreamModal();
             if (typeof setPackageRunningState === 'function') setPackageRunningState(false);
             if (typeof resetPackageLogUiState === 'function') resetPackageLogUiState();
-            document.getElementById('sdkCheckTableBody')?.replaceChildren();
-            const iosBody = document.getElementById('sdkCheckIosTableBody');
-            if (iosBody) iosBody.innerHTML = '<tr><td class="py-2 px-4 text-sm text-gray-500 italic">iOS table ready. Device connection will be added in the next step.</td></tr>';
             syncPlatformUi();
         }
 
@@ -2336,6 +2345,7 @@ HTML_TEMPLATE = """
         });
         clearAllBtn.addEventListener('click', () => {
             if (confirm('Are you sure you want to clear ALL logs?')) {
+                resetSdkCheckUiState(true);
                 socket.emit('clear_all_logs');
             }
         });
@@ -2665,6 +2675,14 @@ HTML_TEMPLATE = """
                 return;
             }
             renderProfileOptions(payload);
+        });
+
+        document.getElementById('openProfileFolderBtn')?.addEventListener('click', async () => {
+            const res = await fetch('/api/profiles/open-folder', { method: 'POST' });
+            const payload = await res.json();
+            if (!payload.ok) {
+                alert(payload.error || 'Failed to open profile folder');
+            }
         });
 
         document.getElementById('importProfileBtn')?.addEventListener('click', () => {
@@ -3913,6 +3931,21 @@ def import_profile():
         _set_active_profile(filename)
         _apply_adrevenue_filter_and_emit()
         return jsonify({'ok': True, **_profile_payload()})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@app.post('/api/profiles/open-folder')
+def open_profile_folder():
+    try:
+        os.makedirs(PROFILE_DIR, exist_ok=True)
+        if sys.platform == 'darwin':
+            subprocess.Popen(['open', PROFILE_DIR])
+        elif sys.platform.startswith('win'):
+            os.startfile(PROFILE_DIR)
+        else:
+            subprocess.Popen(['xdg-open', PROFILE_DIR])
+        return jsonify({'ok': True, 'profile_dir': PROFILE_DIR})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
 
