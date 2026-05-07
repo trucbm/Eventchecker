@@ -1595,7 +1595,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(21)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(22)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1984,7 +1984,7 @@ HTML_TEMPLATE = """
                  <div class="bg-white rounded-xl shadow-md p-5 mb-4">
                      <div class="grid grid-cols-1 lg:grid-cols-[0.85fr_1.7fr] gap-6 items-start">
                         <div class="max-w-md">
-                            <label for="packageIdInput" class="block text-[11px] font-medium text-gray-700 mb-1">Package ID:</label>
+                            <label for="packageIdInput" id="packageIdInputLabel" class="block text-[11px] font-medium text-gray-700 mb-1">Package ID:</label>
                             <input type="text" id="packageIdInput" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="com.example.app">
                             <div class="flex justify-center items-center gap-2 mt-3">
                                 <button id="startPackageLogBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs py-2 px-4 rounded-lg h-9">Start</button>
@@ -1996,37 +1996,37 @@ HTML_TEMPLATE = """
                             <div class="flex items-start gap-16 text-[11px] text-gray-700 pt-1">
                                 <div class="flex flex-col gap-1 min-w-[320px]">
                                     <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.nonogram">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.nonogram" data-android-value="com.indiez.nonogram" data-android-label="NG - com.indiez.nonogram" data-ios-value="PixelArt" data-ios-label="NG - PixelArt">
                                         <span>NG - com.indiez.nonogram</span>
                                     </label>
                                     <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.train.miner">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.train.miner" data-android-value="com.indiez.train.miner" data-android-label="TM - com.indiez.train.miner" data-ios-value="IdleTrainMiner" data-ios-label="TM - IdleTrainMiner">
                                         <span>TM - com.indiez.train.miner</span>
                                     </label>
                                     <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.idletycoon.horse.racing">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.idletycoon.horse.racing" data-android-value="com.indiez.idletycoon.horse.racing" data-android-label="HR - com.indiez.idletycoon.horse.racing">
                                         <span>HR - com.indiez.idletycoon.horse.racing</span>
                                     </label>
                                     <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.solitaire.food">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.solitaire.food" data-android-value="com.indiez.solitaire.food" data-android-label="SC - com.indiez.solitaire.food">
                                         <span>SC - com.indiez.solitaire.food</span>
                                     </label>
                                 </div>
                                 <div class="flex flex-col gap-1 min-w-[320px]">
                                     <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.dot.line.puzzle">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.dot.line.puzzle" data-android-value="com.nostel.dot.line.puzzle" data-android-label="KN - com.nostel.dot.line.puzzle" data-ios-value="CarParking" data-ios-label="CP - CarParking">
                                         <span>KN - com.nostel.dot.line.puzzle</span>
                                     </label>
                                     <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.parking.car">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.parking.car" data-android-value="com.nostel.parking.car" data-android-label="CP - com.nostel.parking.car" data-ios-value="SameColor" data-ios-label="KN - SameColor">
                                         <span>CP - com.nostel.parking.car</span>
                                     </label>
                                     <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.jigblock">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.jigblock" data-android-value="com.nostel.jigblock" data-android-label="JS - com.nostel.jigblock">
                                         <span>JS - com.nostel.jigblock</span>
                                     </label>
                                     <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="tap.monster.block.away">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="tap.monster.block.away" data-android-value="tap.monster.block.away" data-android-label="TP - tap.monster.block.away">
                                         <span>TP - tap.monster.block.away</span>
                                     </label>
                                 </div>
@@ -2246,6 +2246,20 @@ HTML_TEMPLATE = """
                     const allRadio = document.querySelector('input[name="validatorSourceFilter"][value="all"]');
                     if (allRadio) allRadio.checked = true;
                 }
+            });
+            const packageLabel = document.getElementById('packageIdInputLabel');
+            const packageInput = document.getElementById('packageIdInput');
+            if (packageLabel) packageLabel.textContent = platform === 'ios' ? 'Bundle Search:' : 'Package ID:';
+            if (packageInput) packageInput.placeholder = platform === 'ios' ? 'PixelArt' : 'com.example.app';
+            document.querySelectorAll('.package-id-checkbox').forEach(cb => {
+                const label = cb.closest('label');
+                const text = label?.querySelector('span');
+                const platformValue = platform === 'ios' ? cb.dataset.iosValue : cb.dataset.androidValue;
+                const quickLabel = platform === 'ios' ? cb.dataset.iosLabel : cb.dataset.androidLabel;
+                if (label) label.classList.toggle('hidden', !platformValue);
+                if (platformValue) cb.value = platformValue;
+                if (text && quickLabel) text.textContent = quickLabel;
+                if (!platformValue) cb.checked = false;
             });
             const sdkBadge = document.getElementById('sdkCheckPlatformBadge');
             if (sdkBadge) sdkBadge.textContent = `${platformLabel(platform)} Table`;
@@ -5166,6 +5180,7 @@ def ios_log_reader(device_id):
             if active_platform != "ios":
                 continue
             log_obj = _normalize_ios_log_line(raw_line, device_id)
+            process_ios_package_log_line(log_obj)
             process_load_ads_ext_log(log_obj["raw_log"], device_id)
             process_adrevenue_log(log_obj["raw_log"], device_id)
             _process_sdk_check_line(log_obj["raw_log"], device_id)
@@ -5256,6 +5271,82 @@ def device_manager():
             })
         time.sleep(3)
 
+def _append_package_log_row(device_id, raw_log, time_str="", time_display="", level="", tag="", message="", is_error=False):
+    with lock:
+        package_log_cache.append({
+            'device_id': device_id,
+            'device_name': get_device_name(device_id),
+            'log': raw_log.strip(),
+            'time': time_str,
+            'time_display': time_display or time_str,
+            'level': level,
+            'tag': tag,
+            'message': message,
+            'timestamp': time.time(),
+            'is_error': is_error
+        })
+        session_id = active_package_log_session_id
+    if session_id:
+        try:
+            package_log_db_queue.put_nowait((
+                session_id,
+                time.time(),
+                time_display or time_str,
+                device_id,
+                get_device_name(device_id),
+                level,
+                tag,
+                message,
+                raw_log.strip(),
+                1 if is_error else 0,
+            ))
+        except Exception:
+            pass
+
+def process_ios_package_log_line(log_obj):
+    if is_paused or active_platform != "ios":
+        return
+    with lock:
+        bundle_search = target_package_name
+    if not bundle_search:
+        return
+    raw_log = log_obj.get("raw_log", "")
+    if bundle_search.lower() not in raw_log.lower():
+        return
+
+    time_str = ""
+    time_display = ""
+    match = re.match(r'^([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})', raw_log.strip())
+    if match:
+        time_str = match.group(1)
+        time_display = time_str.split()[-1]
+    level = ""
+    level_match = re.search(r'<(Error|Fault|Warning|Notice|Debug|Info)>', raw_log, re.IGNORECASE)
+    if level_match:
+        level_name = level_match.group(1).lower()
+        level = {"error": "E", "fault": "F", "warning": "W", "notice": "I", "debug": "D", "info": "I"}.get(level_name, level_name[:1].upper())
+    is_error = level in {"E", "F"}
+    tag = log_obj.get("tag", "")
+    message = log_obj.get("message", raw_log).strip()
+    ios_process_match = re.match(
+        r'^[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\S+\s+'
+        r'([^\s(\[]+)(?:\([^)]*\))?\[\d+\]\s+<[^>]+>:\s*(.*)$',
+        raw_log.strip()
+    )
+    if ios_process_match:
+        tag = ios_process_match.group(1).strip()
+        message = ios_process_match.group(2).strip()
+    _append_package_log_row(
+        log_obj.get("device_id", ""),
+        raw_log,
+        time_str,
+        time_display,
+        level,
+        tag,
+        message,
+        is_error
+    )
+
 def package_log_consumer(device_id, logcat_process):
     try:
         for line in iter(logcat_process.stdout.readline, ''):
@@ -5277,36 +5368,7 @@ def package_log_consumer(device_id, logcat_process):
                     # Prefer shorter time display to save width: HH:MM:SS.mmm
                     if ' ' in time_str:
                         time_display = time_str.split(' ', 1)[1]
-                with lock:
-                    package_log_cache.append({
-                        'device_id': device_id,
-                        'device_name': get_device_name(device_id),
-                        'log': line.strip(),
-                        'time': time_str,
-                        'time_display': time_display or time_str,
-                        'level': level,
-                        'tag': tag,
-                        'message': message,
-                        'timestamp': time.time(),
-                        'is_error': is_error
-                    })
-                    session_id = active_package_log_session_id
-                if session_id:
-                    try:
-                        package_log_db_queue.put_nowait((
-                            session_id,
-                            time.time(),
-                            time_display or time_str,
-                            device_id,
-                            get_device_name(device_id),
-                            level,
-                            tag,
-                            message,
-                            line.strip(),
-                            1 if is_error else 0,
-                        ))
-                    except Exception:
-                        pass
+                _append_package_log_row(device_id, line, time_str, time_display, level, tag, message, is_error)
     except: pass
 
 def package_pid_monitor():
