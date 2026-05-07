@@ -103,6 +103,9 @@ DEFAULT_PARAMS_XLSX = _resolve_default_params_path()
 DEFAULT_PARAM_FILL = "FFFCE5CD"
 REMOTE_UPDATE_CONFIG_FILENAME = "remote_update_config_v220.json"
 DEFAULT_REMOTE_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json"
+REMOTE_UPDATE_STATE_FILENAME = "update_state_v220.json"
+REMOTE_UPDATE_UPDATES_DIRNAME = "updates_v220"
+CURRENT_APP_VERSION = "2.2.0(65)"
 
 
 def _runtime_app_dir():
@@ -181,6 +184,171 @@ def _normalize_remote_update_config():
             json.dump(cfg, f, indent=2)
     except Exception as e:
         print(f"WARNING: Failed to normalize updater config: {e}")
+
+
+def _load_bridge_update_config():
+    cfg_path = os.path.join(_user_data_dir(), REMOTE_UPDATE_CONFIG_FILENAME)
+    cfg = {}
+    if os.path.exists(cfg_path):
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception:
+            cfg = {}
+    cfg.setdefault("enabled", True)
+    cfg.setdefault("manifest_url", DEFAULT_REMOTE_MANIFEST_URL)
+    cfg.setdefault("timeout_sec", 10)
+    cfg.setdefault("min_interval_sec", 0)
+    return cfg
+
+
+def _bridge_update_state_path():
+    return os.path.join(_user_data_dir(), REMOTE_UPDATE_STATE_FILENAME)
+
+
+def _load_bridge_update_state():
+    path = _bridge_update_state_path()
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_bridge_update_state(state):
+    os.makedirs(_user_data_dir(), exist_ok=True)
+    with open(_bridge_update_state_path(), "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+
+
+def _bridge_updates_dir():
+    return os.path.join(_user_data_dir(), REMOTE_UPDATE_UPDATES_DIRNAME)
+
+
+def _download_update_bytes(url, timeout):
+    session = requests.Session()
+    response = session.get(url, allow_redirects=True, timeout=timeout)
+    if response.headers.get("content-type", "").startswith("text/html"):
+        confirm_match = re.search(r"confirm=([0-9A-Za-z_]+)", response.text)
+        if confirm_match:
+            confirm = confirm_match.group(1)
+            sep = "&" if "?" in url else "?"
+            response = session.get(f"{url}{sep}confirm={confirm}", allow_redirects=True, timeout=timeout)
+    response.raise_for_status()
+    return response.content
+
+
+def _display_version_from_manifest(version_text):
+    text = str(version_text or "").strip()
+    match = re.search(r'(\d+\.\d+\.\d+)-(\d+)$', text)
+    if match:
+        return f"{match.group(1)}({match.group(2)})"
+    return text
+
+
+def _bridge_check_for_updates():
+    _normalize_remote_update_config()
+    cfg = _load_bridge_update_config()
+    if not cfg.get("enabled"):
+        return {"ok": False, "status": "error", "error": "updates_disabled"}
+
+    manifest_url = str(cfg.get("manifest_url") or DEFAULT_REMOTE_MANIFEST_URL).strip()
+    timeout = float(cfg.get("timeout_sec", 10) or 10)
+    state = _load_bridge_update_state()
+
+    try:
+        manifest_bytes = _download_update_bytes(manifest_url, timeout)
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+    except Exception as e:
+        return {"ok": False, "status": "error", "error": f"manifest_download_failed: {e}"}
+
+    manifest_version = manifest.get("version", "")
+    manifest_display_version = _display_version_from_manifest(manifest_version)
+    manifest_files = manifest.get("files", [])
+    update_dir = _bridge_updates_dir()
+    tmp_update_dir = f"{update_dir}_tmp"
+    os.makedirs(tmp_update_dir, exist_ok=True)
+
+    existing_update_dir = state.get("update_dir") or update_dir
+    prepared_ok = (
+        state.get("version") == manifest_version
+        and existing_update_dir
+        and os.path.isdir(existing_update_dir)
+        and all(
+            os.path.exists(os.path.join(existing_update_dir, item.get("path", "")))
+            for item in manifest_files if item.get("path")
+        )
+    )
+
+    # If the target build is already downloaded but this process is still an older
+    # runtime, return `updated` so the UI restarts and loads the prepared update.
+    if prepared_ok:
+        status = "up_to_date" if manifest_display_version == CURRENT_APP_VERSION else "updated"
+        return {
+            "ok": True,
+            "status": status,
+            "version": manifest_version,
+            "update_dir": existing_update_dir,
+        }
+
+    ok = True
+    for item in manifest_files:
+        rel_path = item.get("path")
+        url = item.get("url")
+        if not rel_path or not url:
+            ok = False
+            break
+        target = os.path.join(tmp_update_dir, rel_path)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        try:
+            data = _download_update_bytes(url, timeout)
+            tmp_target = f"{target}.tmp"
+            with open(tmp_target, "wb") as f:
+                f.write(data)
+            os.replace(tmp_target, target)
+        except Exception:
+            ok = False
+            break
+
+    if not ok:
+        return {"ok": False, "status": "error", "error": "download_failed"}
+
+    try:
+        if os.path.exists(update_dir):
+            for root, dirs, files in os.walk(update_dir, topdown=False):
+                for name in files:
+                    os.remove(os.path.join(root, name))
+                for name in dirs:
+                    os.rmdir(os.path.join(root, name))
+        else:
+            os.makedirs(update_dir, exist_ok=True)
+
+        for root, dirs, files in os.walk(tmp_update_dir):
+            rel_root = os.path.relpath(root, tmp_update_dir)
+            dest_root = update_dir if rel_root == "." else os.path.join(update_dir, rel_root)
+            os.makedirs(dest_root, exist_ok=True)
+            for name in files:
+                os.replace(os.path.join(root, name), os.path.join(dest_root, name))
+    except Exception as e:
+        return {"ok": False, "status": "error", "error": f"replace_failed: {e}"}
+
+    state.update({
+        "last_check": time.time(),
+        "version": manifest_version,
+        "update_dir": update_dir,
+        "manifest_url": manifest_url,
+        "files": [item.get("path") for item in manifest_files if item.get("path")],
+    })
+    _save_bridge_update_state(state)
+
+    return {
+        "ok": True,
+        "status": "updated",
+        "version": manifest_version,
+        "update_dir": update_dir,
+    }
 
 def _resolve_adb():
     adb_env = os.getenv("ADB_PATH")
@@ -1136,7 +1304,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(64)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.2.0(65)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3339,11 +3507,7 @@ def import_profile():
 @app.post('/check_update')
 def check_update():
     try:
-        import remote_update
-    except Exception as e:
-        return jsonify({'ok': False, 'status': 'error', 'error': f'updater_unavailable: {e}'})
-    try:
-        result = remote_update.check_for_updates()
+        result = _bridge_check_for_updates()
         return jsonify(result)
     except Exception as e:
         return jsonify({'ok': False, 'status': 'error', 'error': str(e)})
