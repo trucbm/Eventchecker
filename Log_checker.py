@@ -5,6 +5,7 @@ import threading
 import time
 import requests
 import html
+import importlib.util
 from collections import deque
 from flask import Flask, render_template_string, request, jsonify, Response
 from flask_socketio import SocketIO
@@ -102,7 +103,12 @@ def _resolve_default_params_path():
 DEFAULT_PARAMS_XLSX = _resolve_default_params_path()
 DEFAULT_PARAM_FILL = "FFFCE5CD"
 REMOTE_UPDATE_CONFIG_FILENAME = "remote_update_config_v230.json"
-DEFAULT_REMOTE_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json"
+DEFAULT_REMOTE_MANIFEST_URL = "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json"
+DEFAULT_REMOTE_MANIFEST_URLS = [
+    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json",
+    "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json",
+    "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_3/remote_manifest.json",
+]
 
 
 def _runtime_app_dir():
@@ -175,12 +181,36 @@ def _normalize_remote_update_config():
                 cfg = {}
         cfg["enabled"] = True
         cfg["manifest_url"] = DEFAULT_REMOTE_MANIFEST_URL
+        cfg["manifest_urls"] = DEFAULT_REMOTE_MANIFEST_URLS
         cfg["timeout_sec"] = 10
         cfg["min_interval_sec"] = 0
         with open(cfg_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2)
     except Exception as e:
         print(f"WARNING: Failed to normalize updater config: {e}")
+
+
+def _load_remote_update_module():
+    candidates = []
+    update_dir = os.getenv("EVENTINSPECTOR_UPDATE_DIR")
+    if update_dir:
+        candidates.append(os.path.join(update_dir, "remote_update.py"))
+    candidates.append(os.path.join(SCRIPT_DIR, "remote_update.py"))
+
+    for idx, path in enumerate(candidates):
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location(f"eventinspector_remote_update_{idx}", path)
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                return module
+        except Exception:
+            continue
+
+    import remote_update
+    return remote_update
 
 def _resolve_adb():
     adb_env = os.getenv("ADB_PATH")
@@ -1599,7 +1629,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(4)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(5)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3952,7 +3982,7 @@ def open_profile_folder():
 @app.post('/check_update')
 def check_update():
     try:
-        import remote_update
+        remote_update = _load_remote_update_module()
     except Exception as e:
         return jsonify({'ok': False, 'status': 'error', 'error': f'updater_unavailable: {e}'})
     try:

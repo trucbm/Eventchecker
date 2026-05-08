@@ -1,9 +1,24 @@
 {
-  "version": "2026-05-08-2.3.0-4",
+  "version": "2026-05-08-2.3.0-5",
   "files": [
     {
       "path": "Log_checker.py",
-      "url": "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/Log_checker.py",
+      "url": "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/Log_checker.py",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/Log_checker.py",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/Log_checker.py",
+        "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_3/Log_checker.py"
+      ],
+      "sha256": ""
+    },
+    {
+      "path": "remote_update.py",
+      "url": "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/remote_update.py",
+      "urls": [
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/remote_update.py",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/remote_update.py",
+        "https://github.com/trucbm/Eventchecker/raw/main/remote_update.py"
+      ],
       "sha256": ""
     }
   ]

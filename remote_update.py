@@ -12,7 +12,17 @@ CHANNEL_ID = "v230"
 CONFIG_FILENAME = "remote_update_config_v230.json"
 STATE_FILENAME = "update_state_v230.json"
 UPDATES_DIRNAME = "updates_v230"
-DEFAULT_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json"
+DEFAULT_MANIFEST_URLS = [
+    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json",
+    "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json",
+    "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_3/remote_manifest.json",
+]
+DEFAULT_MANIFEST_URL = DEFAULT_MANIFEST_URLS[0]
+DEFAULT_FILE_URL_BASES = [
+    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main",
+    "https://raw.githubusercontent.com/trucbm/Eventchecker/main",
+    "https://github.com/trucbm/Eventchecker/raw/main",
+]
 
 
 def _user_data_dir():
@@ -40,6 +50,7 @@ def _load_config():
                 cfg = json.load(f)
                 cfg.setdefault("enabled", True)
                 cfg.setdefault("manifest_url", DEFAULT_MANIFEST_URL)
+                cfg.setdefault("manifest_urls", DEFAULT_MANIFEST_URLS)
                 cfg.setdefault("timeout_sec", 10)
                 # Always prefer checking remote on launch. Existing user configs
                 # may still contain stale throttling values from older builds.
@@ -48,6 +59,7 @@ def _load_config():
     return {
         "enabled": True,
         "manifest_url": DEFAULT_MANIFEST_URL,
+        "manifest_urls": DEFAULT_MANIFEST_URLS,
         "timeout_sec": 10,
         "min_interval_sec": 0,
     }
@@ -60,6 +72,7 @@ def _ensure_user_config_template():
     desired = {
         "enabled": True,
         "manifest_url": DEFAULT_MANIFEST_URL,
+        "manifest_urls": DEFAULT_MANIFEST_URLS,
         "timeout_sec": 10,
         "min_interval_sec": 0,
     }
@@ -120,6 +133,45 @@ def _download(url, timeout):
     return r.content
 
 
+def _unique_urls(urls):
+    seen = set()
+    out = []
+    for url in urls or []:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        out.append(url)
+    return out
+
+
+def _candidate_manifest_urls(cfg):
+    urls = []
+    urls.extend(cfg.get("manifest_urls") or [])
+    single = (cfg.get("manifest_url") or "").strip()
+    if single:
+        urls.append(single)
+    urls.extend(DEFAULT_MANIFEST_URLS)
+    return _unique_urls(urls)
+
+
+def _default_repo_file_urls(rel_path):
+    rel = (rel_path or "").lstrip("/")
+    return [f"{base}/{rel}" for base in DEFAULT_FILE_URL_BASES]
+
+
+def _download_first(urls, timeout):
+    last_error = None
+    for url in _unique_urls(urls):
+        try:
+            return _download(url, timeout), url
+        except Exception as exc:
+            last_error = exc
+            continue
+    if last_error:
+        raise last_error
+    raise ValueError("no_download_urls")
+
+
 def load_prepared_update_dir():
     _ensure_user_config_template()
     cfg = _load_config()
@@ -145,15 +197,15 @@ def check_for_updates():
     if not cfg.get("enabled"):
         return None
 
-    manifest_url = cfg.get("manifest_url", "").strip()
-    if not manifest_url:
+    manifest_urls = _candidate_manifest_urls(cfg)
+    if not manifest_urls:
         return None
 
     timeout = float(cfg.get("timeout_sec", 10))
     state = _load_state()
 
     try:
-        manifest_bytes = _download(manifest_url, timeout)
+        manifest_bytes, manifest_url = _download_first(manifest_urls, timeout)
         manifest = json.loads(manifest_bytes.decode("utf-8"))
     except Exception:
         return {"ok": False, "status": "error", "error": "manifest_download_failed", "update_dir": load_prepared_update_dir()}
@@ -186,15 +238,22 @@ def check_for_updates():
     for item in manifest_files:
         rel_path = item.get("path")
         url = item.get("url")
+        urls = list(item.get("urls") or [])
         sha256 = item.get("sha256")
         if not rel_path or not url:
-            ok = False
-            break
+            if not rel_path:
+                ok = False
+                break
 
         target = os.path.join(tmp_update_dir, rel_path)
         os.makedirs(os.path.dirname(target), exist_ok=True)
         try:
-            data = _download(url, timeout)
+            candidate_urls = []
+            if url:
+                candidate_urls.append(url)
+            candidate_urls.extend(urls)
+            candidate_urls.extend(_default_repo_file_urls(rel_path))
+            data, _used_url = _download_first(candidate_urls, timeout)
             tmp = f"{target}.tmp"
             with open(tmp, "wb") as f:
                 f.write(data)
