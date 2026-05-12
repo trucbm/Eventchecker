@@ -336,6 +336,7 @@ active_ios_log_readers = {}
 active_ios_log_processes = {}
 active_ios_log_started_at = {}
 active_ios_log_last_seen = {}
+active_ios_log_commands = {}
 connected_devices_info = []
 is_paused = False
 lock = threading.Lock()
@@ -554,16 +555,27 @@ def _ios_log_reader_status(device_id):
         return f"no logs {int(now - last_seen)}s"
     return "waiting logs"
 
+def _ios_log_reader_color_class(status):
+    status_text = (status or "").lower()
+    if "log ok" in status_text:
+        return "text-green-600"
+    if "waiting" in status_text or "starting" in status_text or "restarting" in status_text:
+        return "text-orange-500"
+    return "text-red-600"
+
 def _make_device_info(device_id, platform):
     if platform == "ios":
         name = get_ios_device_name(device_id)
         log_status = _ios_log_reader_status(device_id)
+        cmd_name = active_ios_log_commands.get(device_id, "")
+        status_suffix = f"{log_status}{f' via {cmd_name}' if cmd_name else ''}"
         return {
             "id": device_id,
             "name": name,
             "platform": "ios",
             "log_status": log_status,
-            "display_name": f"{name} ({_short_device_id(device_id)}) - {log_status}",
+            "status_class": _ios_log_reader_color_class(log_status),
+            "display_name": f"{name} ({_short_device_id(device_id)}) - {status_suffix}",
         }
     return {
         "id": device_id,
@@ -1653,7 +1665,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(14)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(15)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3429,7 +3441,7 @@ HTML_TEMPLATE = """
 
             if (status.connected_devices && status.connected_devices.length > 0) {
                  deviceListEl.innerHTML = '<ul class="list-disc list-inside text-left">' + 
-                    status.connected_devices.map(d => `<li class="text-green-600 font-semibold animate-pulse-green">${escapeHTML(d.display_name || d.name || d.id)}</li>`).join('') + 
+                    status.connected_devices.map(d => `<li class="${escapeHTML(d.status_class || 'text-green-600')} font-semibold">${escapeHTML(d.display_name || d.name || d.id)}</li>`).join('') + 
                     '</ul>';
             } else {
                  deviceListEl.innerHTML = `<p class="text-orange-500">${status.message || 'Waiting...'}</p>`;
@@ -5315,6 +5327,7 @@ def ios_log_reader(device_id):
             active_ios_log_processes[device_id] = proc
             active_ios_log_started_at[device_id] = time.time()
             active_ios_log_last_seen[device_id] = time.time()
+            active_ios_log_commands[device_id] = os.path.basename(cmd[0])
 
         for raw_line in iter(proc.stdout.readline, ''):
             if not raw_line:
@@ -5342,6 +5355,7 @@ def ios_log_reader(device_id):
             active_ios_log_readers.pop(device_id, None)
             active_ios_log_started_at.pop(device_id, None)
             active_ios_log_last_seen.pop(device_id, None)
+            active_ios_log_commands.pop(device_id, None)
         if proc and proc.poll() is None:
             try:
                 proc.terminate()
@@ -5359,6 +5373,7 @@ def _stop_ios_log_reader(device_id):
     active_ios_log_readers.pop(device_id, None)
     active_ios_log_started_at.pop(device_id, None)
     active_ios_log_last_seen.pop(device_id, None)
+    active_ios_log_commands.pop(device_id, None)
 
 def device_manager():
     global connected_devices_info
@@ -5405,6 +5420,7 @@ def device_manager():
                     active_ios_log_readers.clear()
                     active_ios_log_started_at.clear()
                     active_ios_log_last_seen.clear()
+                    active_ios_log_commands.clear()
 
                 output = subprocess.run([ADB_EXECUTABLE, 'devices'], capture_output=True, text=True, creationflags=creation_flags).stdout
                 ids = {l.split('\t')[0] for l in output.strip().split('\n')[1:] if '\tdevice' in l}
@@ -5678,6 +5694,7 @@ def _reset_runtime_for_platform_switch():
         active_ios_log_readers.clear()
         active_ios_log_started_at.clear()
         active_ios_log_last_seen.clear()
+        active_ios_log_commands.clear()
         connected_devices_info = []
         target_package_name = ""
         if active_package_log_session_id:
