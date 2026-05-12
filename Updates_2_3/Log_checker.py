@@ -533,14 +533,37 @@ def _short_device_id(device_id, length=8):
         return ""
     return f"{device_id[:length]}..."
 
+def _ios_log_reader_status(device_id):
+    now = time.time()
+    thread = active_ios_log_readers.get(device_id)
+    proc = active_ios_log_processes.get(device_id)
+    started_at = active_ios_log_started_at.get(device_id)
+    last_seen = active_ios_log_last_seen.get(device_id)
+
+    if not thread:
+        return "log reader: starting"
+    if thread and not thread.is_alive():
+        return "log reader: stopped"
+    if proc and proc.poll() is not None:
+        return f"log reader: exited {proc.poll()}"
+    if last_seen and now - last_seen <= 10:
+        return "log OK"
+    if started_at and now - started_at <= IOS_LOG_STALL_TIMEOUT_SECONDS:
+        return "waiting logs"
+    if last_seen:
+        return f"no logs {int(now - last_seen)}s"
+    return "waiting logs"
+
 def _make_device_info(device_id, platform):
     if platform == "ios":
         name = get_ios_device_name(device_id)
+        log_status = _ios_log_reader_status(device_id)
         return {
             "id": device_id,
             "name": name,
             "platform": "ios",
-            "display_name": f"{name} ({_short_device_id(device_id)})",
+            "log_status": log_status,
+            "display_name": f"{name} ({_short_device_id(device_id)}) - {log_status}",
         }
     return {
         "id": device_id,
@@ -1630,7 +1653,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(13)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(14)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
