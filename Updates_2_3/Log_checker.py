@@ -103,11 +103,11 @@ def _resolve_default_params_path():
 DEFAULT_PARAMS_XLSX = _resolve_default_params_path()
 DEFAULT_PARAM_FILL = "FFFCE5CD"
 REMOTE_UPDATE_CONFIG_FILENAME = "remote_update_config_v230.json"
-DEFAULT_REMOTE_MANIFEST_URL = "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json"
+DEFAULT_REMOTE_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json"
 DEFAULT_REMOTE_MANIFEST_URLS = [
-    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json",
     "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json",
     "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_3/remote_manifest.json",
+    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json",
 ]
 
 
@@ -1632,7 +1632,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(6)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(7)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>

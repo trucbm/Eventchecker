@@ -13,15 +13,15 @@ CONFIG_FILENAME = "remote_update_config_v230.json"
 STATE_FILENAME = "update_state_v230.json"
 UPDATES_DIRNAME = "updates_v230"
 DEFAULT_MANIFEST_URLS = [
-    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json",
     "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json",
     "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_3/remote_manifest.json",
+    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json",
 ]
 DEFAULT_MANIFEST_URL = DEFAULT_MANIFEST_URLS[0]
 DEFAULT_FILE_URL_BASES = [
-    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main",
     "https://raw.githubusercontent.com/trucbm/Eventchecker/main",
     "https://github.com/trucbm/Eventchecker/raw/main",
+    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main",
 ]
 
 
