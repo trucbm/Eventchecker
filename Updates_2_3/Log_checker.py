@@ -338,6 +338,7 @@ connected_devices_info = []
 is_paused = False
 lock = threading.Lock()
 incomplete_impression_logs = {} # Buffer cho logs bị ngắt dòng
+incomplete_ios_adrevenue_logs = {} # Buffer cho iOS AdRevenue logs bị ngắt dòng
 adb_error_counter = 0
 
 
@@ -459,7 +460,7 @@ UNITY_TRACKING_PATTERN = re.compile(r'\[\s*Tracking\s*\]\s*TrackingService->Trac
 # Pattern cho Load Ads Ext (AppMetrica)
 METRICA_TRACKING_PATTERN = re.compile(r'Event sent: ad_impression with value\s*(\{.*\})')
 LOAD_ADS_EXT_ADREVENUE_PATTERN = re.compile(r'AdRevenue Received:\s*AdRevenue\{(.*)\}', re.IGNORECASE)
-IOS_LOAD_ADS_EXT_ADREVENUE_PATTERN = re.compile(r'\[Tracking,AppMetrica\].*?AppMetricaAdRevenueTrackingHandler->Handle:\s*(\{.*\})', re.IGNORECASE)
+IOS_LOAD_ADS_EXT_ADREVENUE_PATTERN = re.compile(r'\[Tracking,AppMetrica\].*?AppMetricaTrackingHandler->_Handle:\s*(\{.*\})', re.IGNORECASE)
 METRICA_REGULAR_EVENT_PATTERN = re.compile(
     r'Event received on service:\s*EVENT_TYPE_REGULAR\s+with name\s+([A-Za-z0-9_.$-]+)\s+with value\s*(\{.*\})'
 )
@@ -1632,7 +1633,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(7)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(8)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4844,8 +4845,12 @@ def _normalize_ios_appmetrica_adrevenue(ad_revenue):
     }
 
 def _normalize_ios_appsflyer_adrevenue(data):
-    revenue = data.get("logRevenue") if isinstance(data.get("logRevenue"), dict) else {}
-    additional = data.get("additionalParams") if isinstance(data.get("additionalParams"), dict) else {}
+    revenue = data.get("adRevenueData") if isinstance(data.get("adRevenueData"), dict) else {}
+    if not revenue:
+        revenue = data.get("logRevenue") if isinstance(data.get("logRevenue"), dict) else {}
+    additional = data.get("additionalParameters") if isinstance(data.get("additionalParameters"), dict) else {}
+    if not additional:
+        additional = data.get("additionalParams") if isinstance(data.get("additionalParams"), dict) else {}
     payload = dict(additional)
     payload["custom_parameters"] = additional
     return {
@@ -4859,6 +4864,45 @@ def _normalize_ios_appsflyer_adrevenue(data):
             "payload": payload,
         }
     }
+
+IOS_ADREVENUE_KEYWORDS = {
+    "appmetrica": (
+        "AppMetricaTrackingHandler->_Handle:",
+        "AppMetricaAdRevenueTrackingHandler->Handle:",
+    ),
+    "appsflyer": (
+        "AppsFlyerTrackingHandler->Track:",
+        "AppsFlyerAdRevenueTrackingHandler->Handle:",
+    ),
+}
+
+def _ios_adrevenue_source_and_payload(line):
+    for source, keywords in IOS_ADREVENUE_KEYWORDS.items():
+        for keyword in keywords:
+            if keyword in line:
+                return source, keyword, line.split(keyword, 1)[1].strip()
+    return None, "", ""
+
+def _buffer_ios_adrevenue_payload(device_id, source, payload_part, raw_line):
+    buffer_key = f"{device_id}:{source}"
+    with lock:
+        current = incomplete_ios_adrevenue_logs.get(buffer_key)
+        if current:
+            current["payload"] += payload_part
+            current["raw_log"] += "\n" + raw_line.strip()
+        else:
+            current = {"payload": payload_part, "raw_log": raw_line.strip()}
+        if len(current["payload"]) > 50000:
+            incomplete_ios_adrevenue_logs.pop(buffer_key, None)
+            return None, ""
+
+        json_str = extract_json_object_from_text(current["payload"])
+        if json_str:
+            incomplete_ios_adrevenue_logs.pop(buffer_key, None)
+            return json_str, current["raw_log"]
+
+        incomplete_ios_adrevenue_logs[buffer_key] = current
+    return None, ""
 
 def process_adrevenue_log(line, device_id):
     handled = False
@@ -4910,27 +4954,22 @@ def process_adrevenue_log(line, device_id):
                 _record_adrevenue_log(device_id, "appsflyer", "AdRevenue - Appsflyer", appsflyer_data, line, json_str, event_prefix)
             handled = True
 
-    if (not handled) and "AppMetricaAdRevenueTrackingHandler->Handle:" in line:
+    ios_source, ios_keyword, ios_payload_part = _ios_adrevenue_source_and_payload(line)
+    if (not handled) and ios_source:
         try:
-            after_keyword = line.split("AppMetricaAdRevenueTrackingHandler->Handle:", 1)[1]
-            json_str = extract_json_object_from_text(after_keyword)
+            json_str, raw_log = _buffer_ios_adrevenue_payload(device_id, ios_source, ios_payload_part, line)
+            if not json_str:
+                return True
             data = json.loads(json_str) if json_str else {}
-            ad_revenue = data.get("adRevenue") if isinstance(data.get("adRevenue"), dict) else {}
-            normalized = _normalize_ios_appmetrica_adrevenue(ad_revenue) if ad_revenue else data
+            if ios_source == "appmetrica":
+                ad_revenue = data.get("adRevenue") if isinstance(data.get("adRevenue"), dict) else {}
+                normalized = _normalize_ios_appmetrica_adrevenue(ad_revenue) if ad_revenue else data
+                event_name = "AdRevenue - Appmetrica"
+            else:
+                normalized = _normalize_ios_appsflyer_adrevenue(data) if data else {}
+                event_name = "AdRevenue - Appsflyer"
             with lock:
-                _record_adrevenue_log(device_id, "appmetrica", "AdRevenue - Appmetrica", normalized, line, json_str)
-            handled = True
-        except:
-            pass
-
-    if (not handled) and "AppsFlyerAdRevenueTrackingHandler->Handle:" in line:
-        try:
-            after_keyword = line.split("AppsFlyerAdRevenueTrackingHandler->Handle:", 1)[1]
-            json_str = extract_json_object_from_text(after_keyword)
-            data = json.loads(json_str) if json_str else {}
-            normalized = _normalize_ios_appsflyer_adrevenue(data) if data else {}
-            with lock:
-                _record_adrevenue_log(device_id, "appsflyer", "AdRevenue - Appsflyer", normalized, line, json_str)
+                _record_adrevenue_log(device_id, ios_source, event_name, normalized, raw_log or line, json_str)
             handled = True
         except:
             pass
@@ -5575,7 +5614,7 @@ def _reset_runtime_for_platform_switch():
         specific_event_params_filters = []
         specific_event_results.clear(); event_log_cache.clear()
         adrevenue_logs.clear(); adrevenue_log_cache.clear()
-        callback_ad_logs.clear(); incomplete_impression_logs.clear()
+        callback_ad_logs.clear(); incomplete_impression_logs.clear(); incomplete_ios_adrevenue_logs.clear()
         package_log_cache.clear(); active_package_pids.clear()
         for proc in active_ios_log_processes.values():
             try:
@@ -5667,6 +5706,7 @@ def cl():
         # Clean SDK check
         sdk_check_results.clear()
         incomplete_impression_logs.clear()
+        incomplete_ios_adrevenue_logs.clear()
         
     socketio.emit('update_load_ads', [])
     socketio.emit('update_load_ads_ext', [])
