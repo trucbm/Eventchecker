@@ -1633,7 +1633,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(10)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(11)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5022,8 +5022,15 @@ def _apply_adrevenue_filter_and_emit():
                     seen_required.append(param)
 
             missing = []
+            skipped_ios = []
             for param in seen_required:
                 if any(isinstance(m, dict) and param in m for m in validate_maps):
+                    continue
+                if active_platform == "ios" and (
+                    (source == "appsflyer" and param == "custom_parameters") or
+                    (source == "appmetrica" and param == "autoCollected")
+                ):
+                    skipped_ios.append(param)
                     continue
                 missing.append(param)
 
@@ -5043,6 +5050,8 @@ def _apply_adrevenue_filter_and_emit():
                     summary_parts.append(format_param_issue_html("Missing", missing, "text-red-600", chunk_size=1))
                 else:
                     summary_parts.append("<div class='mb-2 text-xs font-medium text-green-600'>All required params found</div>")
+                if skipped_ios:
+                    summary_parts.append(format_param_issue_html("Skip in iOS", skipped_ios, "text-slate-500", chunk_size=1))
                 if strange:
                     summary_parts.append(format_param_issue_html("Strange", strange, "text-orange-600", chunk_size=1))
 
