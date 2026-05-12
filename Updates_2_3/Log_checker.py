@@ -334,12 +334,15 @@ active_platform = "android"
 active_log_readers = {}
 active_ios_log_readers = {}
 active_ios_log_processes = {}
+active_ios_log_started_at = {}
+active_ios_log_last_seen = {}
 connected_devices_info = []
 is_paused = False
 lock = threading.Lock()
 incomplete_impression_logs = {} # Buffer cho logs bị ngắt dòng
 incomplete_ios_adrevenue_logs = {} # Buffer cho iOS AdRevenue logs bị ngắt dòng
 adb_error_counter = 0
+IOS_LOG_STALL_TIMEOUT_SECONDS = 20
 
 
 def _get_package_db_connection():
@@ -574,37 +577,6 @@ def _normalize_ios_udid(value):
 
 def _list_ios_device_ids():
     ids = []
-    system_profiler = _resolve_ios_tool("system_profiler")
-    if system_profiler:
-        try:
-            output = subprocess.run(
-                [system_profiler, "SPUSBDataType"],
-                capture_output=True,
-                text=True,
-                timeout=8,
-                creationflags=creation_flags,
-            ).stdout
-            in_ios_block = False
-            for line in output.splitlines():
-                stripped = line.strip()
-                if stripped in {"iPhone:", "iPad:", "iPod:"}:
-                    in_ios_block = True
-                    continue
-                if in_ios_block and stripped.startswith("Serial Number:"):
-                    ids.append(_normalize_ios_udid(stripped.split(":", 1)[1].strip()))
-                    in_ios_block = False
-                elif in_ios_block and stripped.endswith(":") and stripped not in {"iPhone:", "iPad:", "iPod:"}:
-                    in_ios_block = False
-            seen = set()
-            unique_ids = []
-            for device_id in ids:
-                if device_id not in seen:
-                    seen.add(device_id)
-                    unique_ids.append(device_id)
-            return unique_ids
-        except Exception:
-            ids = []
-
     idevice_id = _resolve_ios_tool("idevice_id")
     if idevice_id:
         try:
@@ -635,6 +607,31 @@ def _list_ios_device_ids():
                     ids.append(_normalize_ios_udid(match.group(1)))
         except Exception:
             pass
+
+    if not ids:
+        system_profiler = _resolve_ios_tool("system_profiler")
+        if system_profiler:
+            try:
+                output = subprocess.run(
+                    [system_profiler, "SPUSBDataType"],
+                    capture_output=True,
+                    text=True,
+                    timeout=8,
+                    creationflags=creation_flags,
+                ).stdout
+                in_ios_block = False
+                for line in output.splitlines():
+                    stripped = line.strip()
+                    if stripped in {"iPhone:", "iPad:", "iPod:"}:
+                        in_ios_block = True
+                        continue
+                    if in_ios_block and stripped.startswith("Serial Number:"):
+                        ids.append(_normalize_ios_udid(stripped.split(":", 1)[1].strip()))
+                        in_ios_block = False
+                    elif in_ios_block and stripped.endswith(":") and stripped not in {"iPhone:", "iPad:", "iPod:"}:
+                        in_ios_block = False
+            except Exception:
+                pass
 
     if not ids:
         xcrun = _resolve_ios_tool("xcrun")
@@ -1633,7 +1630,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(12)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(13)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5293,10 +5290,14 @@ def ios_log_reader(device_id):
         )
         with lock:
             active_ios_log_processes[device_id] = proc
+            active_ios_log_started_at[device_id] = time.time()
+            active_ios_log_last_seen[device_id] = time.time()
 
         for raw_line in iter(proc.stdout.readline, ''):
             if not raw_line:
                 break
+            with lock:
+                active_ios_log_last_seen[device_id] = time.time()
             if active_platform != "ios":
                 continue
             log_obj = _normalize_ios_log_line(raw_line, device_id)
@@ -5316,11 +5317,25 @@ def ios_log_reader(device_id):
         with lock:
             active_ios_log_processes.pop(device_id, None)
             active_ios_log_readers.pop(device_id, None)
+            active_ios_log_started_at.pop(device_id, None)
+            active_ios_log_last_seen.pop(device_id, None)
         if proc and proc.poll() is None:
             try:
                 proc.terminate()
             except Exception:
                 pass
+
+def _stop_ios_log_reader(device_id):
+    proc = active_ios_log_processes.get(device_id)
+    if proc and proc.poll() is None:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+    active_ios_log_processes.pop(device_id, None)
+    active_ios_log_readers.pop(device_id, None)
+    active_ios_log_started_at.pop(device_id, None)
+    active_ios_log_last_seen.pop(device_id, None)
 
 def device_manager():
     global connected_devices_info
@@ -5330,20 +5345,25 @@ def device_manager():
             if platform == "ios":
                 ids = set(_list_ios_device_ids())
                 with lock:
+                    now = time.time()
+                    for did in list(active_ios_log_readers.keys()):
+                        proc = active_ios_log_processes.get(did)
+                        thread = active_ios_log_readers.get(did)
+                        started_at = active_ios_log_started_at.get(did, now)
+                        last_seen = active_ios_log_last_seen.get(did, started_at)
+                        is_dead = (thread and not thread.is_alive()) or (proc and proc.poll() is not None)
+                        is_stalled = did in ids and now - started_at > IOS_LOG_STALL_TIMEOUT_SECONDS and now - last_seen > IOS_LOG_STALL_TIMEOUT_SECONDS
+                        if is_dead or is_stalled:
+                            print(f"WARNING: Restarting iOS log reader for {did} ({'stalled' if is_stalled else 'dead'})")
+                            _stop_ios_log_reader(did)
+
                     for did in ids - set(active_ios_log_readers.keys()):
                         t = threading.Thread(target=ios_log_reader, args=(did,), daemon=True)
                         active_ios_log_readers[did] = t
                         t.start()
 
                     for did in set(active_ios_log_readers.keys()) - ids:
-                        proc = active_ios_log_processes.get(did)
-                        if proc:
-                            try:
-                                proc.terminate()
-                            except Exception:
-                                pass
-                        active_ios_log_processes.pop(did, None)
-                        active_ios_log_readers.pop(did, None)
+                        _stop_ios_log_reader(did)
 
                     connected_devices_info = [_make_device_info(i, 'ios') for i in ids]
                 if connected_devices_info:
@@ -5357,12 +5377,11 @@ def device_manager():
             else:
                 with lock:
                     for did, proc in list(active_ios_log_processes.items()):
-                        try:
-                            proc.terminate()
-                        except Exception:
-                            pass
+                        _stop_ios_log_reader(did)
                     active_ios_log_processes.clear()
                     active_ios_log_readers.clear()
+                    active_ios_log_started_at.clear()
+                    active_ios_log_last_seen.clear()
 
                 output = subprocess.run([ADB_EXECUTABLE, 'devices'], capture_output=True, text=True, creationflags=creation_flags).stdout
                 ids = {l.split('\t')[0] for l in output.strip().split('\n')[1:] if '\tdevice' in l}
@@ -5634,6 +5653,8 @@ def _reset_runtime_for_platform_switch():
                 pass
         active_ios_log_processes.clear()
         active_ios_log_readers.clear()
+        active_ios_log_started_at.clear()
+        active_ios_log_last_seen.clear()
         connected_devices_info = []
         target_package_name = ""
         if active_package_log_session_id:
