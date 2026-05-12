@@ -1633,7 +1633,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(11)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(12)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4901,6 +4901,15 @@ def _buffer_ios_adrevenue_payload(device_id, source, payload_part, raw_line):
         incomplete_ios_adrevenue_logs[buffer_key] = current
     return None, ""
 
+def _loads_adrevenue_json_payload(json_str):
+    for candidate in (json_str, _decode_ios_levelplay_json_text(json_str)):
+        try:
+            data = json.loads(candidate) if candidate else {}
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            pass
+    return {}
+
 def process_adrevenue_log(line, device_id):
     handled = False
 
@@ -4957,7 +4966,7 @@ def process_adrevenue_log(line, device_id):
             json_str, raw_log = _buffer_ios_adrevenue_payload(device_id, ios_source, ios_payload_part, line)
             if not json_str:
                 return True
-            data = json.loads(json_str) if json_str else {}
+            data = _loads_adrevenue_json_payload(json_str)
             if ios_source == "appmetrica":
                 ad_revenue = data.get("adRevenue") if isinstance(data.get("adRevenue"), dict) else {}
                 normalized = _normalize_ios_appmetrica_adrevenue(ad_revenue) if ad_revenue else data
@@ -4977,10 +4986,7 @@ def process_adrevenue_log(line, device_id):
             param_type = match.group(1).lower()
             json_str = match.group(2).strip()
             adjust_data = {}
-            try:
-                adjust_data = json.loads(json_str)
-            except:
-                adjust_data = {}
+            adjust_data = _loads_adrevenue_json_payload(json_str)
             with lock:
                 _record_adrevenue_log(device_id, "adjust", f"AdRevenue - Adjust {param_type}", adjust_data, line, json_str, param_type)
             handled = True
