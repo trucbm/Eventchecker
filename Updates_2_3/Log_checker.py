@@ -643,6 +643,17 @@ def _list_ios_device_ids():
         except Exception:
             pass
 
+    # If a syslog-capable transport tool exists, trust only its live device list.
+    # USB/Xcode inventories can retain stale physical entries that cannot stream logs.
+    if idevice_id or tidevice:
+        seen = set()
+        unique_ids = []
+        for device_id in ids:
+            if device_id not in seen:
+                seen.add(device_id)
+                unique_ids.append(device_id)
+        return unique_ids
+
     if not ids:
         system_profiler = _resolve_ios_tool("system_profiler")
         if system_profiler:
@@ -1665,7 +1676,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(15)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(16)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
