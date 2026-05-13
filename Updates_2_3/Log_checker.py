@@ -342,6 +342,7 @@ is_paused = False
 lock = threading.Lock()
 incomplete_impression_logs = {} # Buffer cho logs bị ngắt dòng
 incomplete_ios_adrevenue_logs = {} # Buffer cho iOS AdRevenue logs bị ngắt dòng
+incomplete_ios_load_ads_ext_logs = {} # Buffer riêng cho Load Ads đọc AppMetrica AdRevenue iOS
 adb_error_counter = 0
 IOS_LOG_STALL_TIMEOUT_SECONDS = 20
 
@@ -464,7 +465,10 @@ UNITY_TRACKING_PATTERN = re.compile(r'\[\s*Tracking\s*\]\s*TrackingService->Trac
 # Pattern cho Load Ads Ext (AppMetrica)
 METRICA_TRACKING_PATTERN = re.compile(r'Event sent: ad_impression with value\s*(\{.*\})')
 LOAD_ADS_EXT_ADREVENUE_PATTERN = re.compile(r'AdRevenue Received:\s*AdRevenue\{(.*)\}', re.IGNORECASE)
-IOS_LOAD_ADS_EXT_ADREVENUE_PATTERN = re.compile(r'\[Tracking,AppMetrica\].*?AppMetricaTrackingHandler->_Handle:\s*(\{.*\})', re.IGNORECASE)
+IOS_LOAD_ADS_EXT_ADREVENUE_KEYWORDS = (
+    "AppMetricaTrackingHandler->_Handle:",
+    "AppMetricaAdRevenueTrackingHandler->Handle:",
+)
 METRICA_REGULAR_EVENT_PATTERN = re.compile(
     r'Event received on service:\s*EVENT_TYPE_REGULAR\s+with name\s+([A-Za-z0-9_.$-]+)\s+with value\s*(\{.*\})'
 )
@@ -1688,7 +1692,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(18)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(19)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4335,10 +4339,17 @@ def process_load_ads_ext_log(line, device_id):
     if not recording_states["LoadAdsExt"]["is_recording"]:
         return
 
-    ios_match = IOS_LOAD_ADS_EXT_ADREVENUE_PATTERN.search(line)
-    if ios_match:
+    ios_payload_part = ""
+    for keyword in IOS_LOAD_ADS_EXT_ADREVENUE_KEYWORDS:
+        if keyword in line:
+            ios_payload_part = line.split(keyword, 1)[1].strip()
+            break
+    if ios_payload_part:
         try:
-            data = json.loads(ios_match.group(1))
+            json_str, raw_log = _buffer_ios_load_ads_ext_payload(device_id, ios_payload_part, line)
+            if not json_str:
+                return
+            data = _loads_adrevenue_json_payload(json_str)
             ad_revenue = data.get("adRevenue") if isinstance(data.get("adRevenue"), dict) else {}
             payload = ad_revenue.get("Payload") if isinstance(ad_revenue.get("Payload"), dict) else {}
 
@@ -4348,7 +4359,7 @@ def process_load_ads_ext_log(line, device_id):
                 fmt = "MREC"
 
             if ad_network and fmt:
-                d_name = get_device_name(device_id)
+                d_name = get_ios_device_name(device_id)
                 with lock:
                     if (device_id, ad_network, fmt, "ios_metrica") not in unique_load_ads_ext:
                         unique_load_ads_ext.add((device_id, ad_network, fmt, "ios_metrica"))
@@ -4357,10 +4368,10 @@ def process_load_ads_ext_log(line, device_id):
                             "device_name": d_name,
                             "ad_network": ad_network,
                             "ad_format": fmt,
-                            "raw_log": line.strip()
+                            "raw_log": raw_log or line.strip()
                         })
                         socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
-                        send_to_sheet(d_name, ad_network, fmt, line.strip(), "LoadAdsExt")
+                        send_to_sheet(d_name, ad_network, fmt, raw_log or line.strip(), "LoadAdsExt")
             return
         except:
             pass
@@ -4954,6 +4965,26 @@ def _buffer_ios_adrevenue_payload(device_id, source, payload_part, raw_line):
             return json_str, current["raw_log"]
 
         incomplete_ios_adrevenue_logs[buffer_key] = current
+    return None, ""
+
+def _buffer_ios_load_ads_ext_payload(device_id, payload_part, raw_line):
+    with lock:
+        current = incomplete_ios_load_ads_ext_logs.get(device_id)
+        if current:
+            current["payload"] += payload_part
+            current["raw_log"] += "\n" + raw_line.strip()
+        else:
+            current = {"payload": payload_part, "raw_log": raw_line.strip()}
+        if len(current["payload"]) > 50000:
+            incomplete_ios_load_ads_ext_logs.pop(device_id, None)
+            return None, ""
+
+        json_str = extract_json_object_from_text(current["payload"])
+        if json_str:
+            incomplete_ios_load_ads_ext_logs.pop(device_id, None)
+            return json_str, current["raw_log"]
+
+        incomplete_ios_load_ads_ext_logs[device_id] = current
     return None, ""
 
 def _loads_adrevenue_json_payload(json_str):
@@ -5707,7 +5738,7 @@ def _reset_runtime_for_platform_switch():
         specific_event_params_filters = []
         specific_event_results.clear(); event_log_cache.clear()
         adrevenue_logs.clear(); adrevenue_log_cache.clear()
-        callback_ad_logs.clear(); incomplete_impression_logs.clear(); incomplete_ios_adrevenue_logs.clear()
+        callback_ad_logs.clear(); incomplete_impression_logs.clear(); incomplete_ios_adrevenue_logs.clear(); incomplete_ios_load_ads_ext_logs.clear()
         package_log_cache.clear(); active_package_pids.clear()
         for proc in active_ios_log_processes.values():
             try:
@@ -5803,6 +5834,7 @@ def cl():
         sdk_check_results.clear()
         incomplete_impression_logs.clear()
         incomplete_ios_adrevenue_logs.clear()
+        incomplete_ios_load_ads_ext_logs.clear()
         
     socketio.emit('update_load_ads', [])
     socketio.emit('update_load_ads_ext', [])
