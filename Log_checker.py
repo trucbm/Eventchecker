@@ -567,15 +567,13 @@ def _make_device_info(device_id, platform):
     if platform == "ios":
         name = get_ios_device_name(device_id)
         log_status = _ios_log_reader_status(device_id)
-        cmd_name = active_ios_log_commands.get(device_id, "")
-        status_suffix = f"{log_status}{f' via {cmd_name}' if cmd_name else ''}"
         return {
             "id": device_id,
             "name": name,
             "platform": "ios",
             "log_status": log_status,
             "status_class": _ios_log_reader_color_class(log_status),
-            "display_name": f"{name} ({_short_device_id(device_id)}) - {status_suffix}",
+            "display_name": f"{name} ({_short_device_id(device_id)}) - {log_status}",
         }
     return {
         "id": device_id,
@@ -1690,7 +1688,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(17)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(18)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1705,9 +1703,9 @@ HTML_TEMPLATE = """
                         <button id="pauseBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-yellow-500 hover:bg-yellow-600 text-white">Pause</button>
                         <button id="clearAllBtn" class="text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm bg-red-500 hover:bg-red-600 text-white">Clear All</button>
                     </div>
-                    <div class="text-right p-2.5 rounded-lg bg-gray-50 border min-w-[250px]">
+                    <div class="text-right p-2.5 rounded-lg bg-gray-50 border min-w-[360px] max-w-[520px]">
                         <p class="text-sm font-semibold text-gray-700 mb-1 border-b pb-1">Connected Devices:</p>
-                        <div id="deviceList" class="text-sm text-gray-600">
+                        <div id="deviceList" class="text-sm text-gray-600 whitespace-nowrap overflow-hidden text-ellipsis">
                              <p class="text-orange-500">WAITING...</p>
                         </div>
                     </div>
