@@ -587,6 +587,9 @@ def _make_device_info(device_id, platform):
 def _resolve_ios_tool(name):
     candidates = [
         shutil.which(name),
+        os.path.join(os.path.expanduser("~/homebrew/bin"), name),
+        os.path.join(os.path.expanduser("~/.homebrew/bin"), name),
+        os.path.join(os.path.expanduser("~/Homebrew/bin"), name),
         os.path.join(os.path.expanduser("~/Library/Python/3.12/bin"), name),
         os.path.join(os.path.expanduser("~/Library/Python/3.11/bin"), name),
         os.path.join(os.path.expanduser("~/Library/Python/3.10/bin"), name),
@@ -612,6 +615,35 @@ def _normalize_ios_udid(value):
 
 def _list_ios_device_ids():
     ids = []
+    tidevice = _resolve_ios_tool("tidevice")
+    if tidevice:
+        try:
+            output = subprocess.run(
+                [tidevice, "list"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=creation_flags,
+            ).stdout
+            for line in output.splitlines():
+                if "ConnectionType.USB" not in line:
+                    continue
+                match = re.search(r'\b([0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}|[0-9A-Fa-f]{24}|[0-9A-Fa-f]{40})\b', line)
+                if match:
+                    ids.append(_normalize_ios_udid(match.group(1)))
+        except Exception:
+            pass
+
+        # `tidevice list` exposes the transport type, so it is the source of
+        # truth when we intentionally support wired USB devices only.
+        seen = set()
+        unique_ids = []
+        for device_id in ids:
+            if device_id not in seen:
+                seen.add(device_id)
+                unique_ids.append(device_id)
+        return unique_ids
+
     idevice_id = _resolve_ios_tool("idevice_id")
     if idevice_id:
         try:
@@ -626,26 +658,8 @@ def _list_ios_device_ids():
         except Exception:
             pass
 
-    tidevice = _resolve_ios_tool("tidevice")
-    if not ids and tidevice:
-        try:
-            output = subprocess.run(
-                [tidevice, "list"],
-                capture_output=True,
-                text=True,
-                timeout=8,
-                creationflags=creation_flags,
-            ).stdout
-            for line in output.splitlines():
-                match = re.search(r'\b([0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}|[0-9A-Fa-f]{24}|[0-9A-Fa-f]{40})\b', line)
-                if match:
-                    ids.append(_normalize_ios_udid(match.group(1)))
-        except Exception:
-            pass
-
-    # If a syslog-capable transport tool exists, trust only its live device list.
-    # USB/Xcode inventories can retain stale physical entries that cannot stream logs.
-    if idevice_id or tidevice:
+    # Without `tidevice`, `idevice_id` is still our best live-device fallback.
+    if idevice_id:
         seen = set()
         unique_ids = []
         for device_id in ids:
@@ -707,8 +721,8 @@ def _list_ios_device_ids():
 
 def _ios_device_status_message():
     if _resolve_ios_tool("idevice_id") or _resolve_ios_tool("tidevice") or _resolve_ios_tool("system_profiler"):
-        return "Waiting... (iOS: connect trusted device)"
-    return "Waiting... (iOS: install libimobiledevice/idevice_id or connect trusted device)"
+        return "Waiting... (iOS: connect trusted USB device)"
+    return "Waiting... (iOS: install libimobiledevice/idevice_id or connect trusted USB device)"
 
 def _resolve_ios_syslog_command(device_id):
     idevicesyslog = _resolve_ios_tool("idevicesyslog")
@@ -1676,7 +1690,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(16)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(17)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5325,6 +5339,7 @@ def ios_log_reader(device_id):
         if not cmd:
             print("WARNING: No iOS syslog command found. Install idevicesyslog or tidevice.")
             return
+        print(f"INFO: iOS syslog command for {device_id}: {' '.join(cmd)}")
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
