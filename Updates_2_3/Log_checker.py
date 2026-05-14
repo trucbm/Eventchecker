@@ -1692,7 +1692,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(19)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(20)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4943,6 +4943,10 @@ def _ios_adrevenue_source_and_payload(line):
     for source, keywords in IOS_ADREVENUE_KEYWORDS.items():
         for keyword in keywords:
             if keyword in line:
+                if source == "appsflyer" and keyword == "AppsFlyerTrackingHandler->Track:" and "[Tracking,AppsFlyer,Ad]" not in line:
+                    return None, "", ""
+                if source == "appmetrica" and keyword == "AppMetricaTrackingHandler->_Handle:" and "[Tracking,AppMetrica]" not in line:
+                    return None, "", ""
                 return source, keyword, line.split(keyword, 1)[1].strip()
     return None, "", ""
 
