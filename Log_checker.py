@@ -1692,7 +1692,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(20)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(21)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5050,8 +5050,10 @@ def process_adrevenue_log(line, device_id):
                 _record_adrevenue_log(device_id, "appsflyer", "AdRevenue - Appsflyer", appsflyer_data, line, json_str, event_prefix)
             handled = True
 
-    ios_source, ios_keyword, ios_payload_part = _ios_adrevenue_source_and_payload(line)
-    if (not handled) and ios_source:
+    ios_source, ios_keyword, ios_payload_part = (None, "", "")
+    if (not handled) and active_platform == "ios":
+        ios_source, ios_keyword, ios_payload_part = _ios_adrevenue_source_and_payload(line)
+    if (not handled) and active_platform == "ios" and ios_source:
         try:
             json_str, raw_log = _buffer_ios_adrevenue_payload(device_id, ios_source, ios_payload_part, line)
             if not json_str:
