@@ -1692,7 +1692,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(21)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(22)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5096,9 +5096,11 @@ def _apply_adrevenue_filter_and_emit():
 
             if source == "appsflyer":
                 ad_network = parsed_data.get("ad_network") if isinstance(parsed_data.get("ad_network"), dict) else {}
-                payload_data = ad_network.get("payload") if isinstance(ad_network.get("payload"), dict) else {}
-                validate_maps = [ad_network, payload_data]
-                details_target = ad_network if ad_network else parsed_data
+                root_data = ad_network if ad_network else parsed_data
+                payload_data = root_data.get("payload") if isinstance(root_data.get("payload"), dict) else {}
+                custom_params = payload_data.get("custom_parameters") if isinstance(payload_data.get("custom_parameters"), dict) else {}
+                validate_maps = [root_data, payload_data, custom_params]
+                details_target = root_data if root_data else parsed_data
             else:
                 payload_data = parsed_data.get("payload") if isinstance(parsed_data.get("payload"), dict) else {}
                 validate_maps = [parsed_data, payload_data]
