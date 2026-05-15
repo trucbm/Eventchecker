@@ -1692,7 +1692,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(22)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(23)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4340,10 +4340,11 @@ def process_load_ads_ext_log(line, device_id):
         return
 
     ios_payload_part = ""
-    for keyword in IOS_LOAD_ADS_EXT_ADREVENUE_KEYWORDS:
-        if keyword in line:
-            ios_payload_part = line.split(keyword, 1)[1].strip()
-            break
+    if active_platform == "ios":
+        for keyword in IOS_LOAD_ADS_EXT_ADREVENUE_KEYWORDS:
+            if keyword in line:
+                ios_payload_part = line.split(keyword, 1)[1].strip()
+                break
     if ios_payload_part:
         try:
             json_str, raw_log = _buffer_ios_load_ads_ext_payload(device_id, ios_payload_part, line)
