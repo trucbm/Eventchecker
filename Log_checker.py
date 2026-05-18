@@ -1698,7 +1698,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(27)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(28)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5081,7 +5081,7 @@ def process_adrevenue_log(line, device_id):
             pass
 
     if (not handled) and "Adjust" in line and "source" in line:
-        match = re.search(r'\bsource\s+([A-Za-z0-9_.-]+)', line, re.IGNORECASE)
+        match = re.search(r'(?:(?:\bsource\s+)|(?:"source"\s*:\s*"))(ironsource[A-Za-z0-9_.-]*)', line, re.IGNORECASE)
         if match:
             source_data = {"source": match.group(1)}
             with lock:
@@ -5089,7 +5089,7 @@ def process_adrevenue_log(line, device_id):
             handled = True
 
     if (not handled) and "Adjust" in line and ("Response:" in line or "Response string:" in line):
-        match = re.search(r'Response(?:\s+string)?\s*:\s*(\{.*\})', line, re.IGNORECASE)
+        match = re.search(r'Response(?:\s+string)?\s*:\s*(\{\s*"timestamp".*\})', line, re.IGNORECASE)
         if match:
             json_str = match.group(1).strip()
             response_data = _loads_adrevenue_json_payload(json_str)
