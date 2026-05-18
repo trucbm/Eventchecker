@@ -343,6 +343,7 @@ lock = threading.Lock()
 incomplete_impression_logs = {} # Buffer cho logs bị ngắt dòng
 incomplete_ios_adrevenue_logs = {} # Buffer cho iOS AdRevenue logs bị ngắt dòng
 incomplete_ios_load_ads_ext_logs = {} # Buffer riêng cho Load Ads đọc AppMetrica AdRevenue iOS
+incomplete_adjust_adrevenue_logs = {} # Buffer cho Adjust callback/partner params bị ngắt dòng
 adb_error_counter = 0
 IOS_LOG_STALL_TIMEOUT_SECONDS = 20
 
@@ -1698,7 +1699,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(30)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(31)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5014,6 +5015,39 @@ def _is_adjust_tag_log(line):
     return bool(re.search(r'\b[VDEIWF]\s+Adjust\s*:', line))
 
 
+def _buffer_adjust_adrevenue_param(device_id, param_type, payload_part, raw_line):
+    buffer_key = f"{device_id}:{param_type}"
+    with lock:
+        current = incomplete_adjust_adrevenue_logs.get(buffer_key)
+        if current:
+            current["payload"] += payload_part
+            current["raw_log"] += "\n" + raw_line.strip()
+        else:
+            current = {"payload": payload_part, "raw_log": raw_line.strip()}
+        if len(current["payload"]) > 50000:
+            incomplete_adjust_adrevenue_logs.pop(buffer_key, None)
+            return None, ""
+
+        json_str = extract_json_object_from_text(current["payload"])
+        if json_str:
+            incomplete_adjust_adrevenue_logs.pop(buffer_key, None)
+            return json_str, current["raw_log"]
+
+        incomplete_adjust_adrevenue_logs[buffer_key] = current
+    return None, ""
+
+
+def _resume_adjust_adrevenue_param_if_needed(device_id, line):
+    with lock:
+        pending_keys = [key for key in incomplete_adjust_adrevenue_logs if key.startswith(f"{device_id}:")]
+    for key in pending_keys:
+        param_type = key.split(":", 1)[1]
+        json_str, raw_log = _buffer_adjust_adrevenue_param(device_id, param_type, line.strip(), line)
+        if json_str:
+            return param_type, json_str, raw_log
+    return None, "", ""
+
+
 def process_adrevenue_log(line, device_id):
     handled = False
 
@@ -5086,17 +5120,26 @@ def process_adrevenue_log(line, device_id):
         except:
             pass
 
-    if (not handled) and _is_adjust_tag_log(line) and ("callback_params" in line or "partner_params" in line):
+    if (not handled) and _is_adjust_tag_log(line):
+        param_type, json_str, raw_log = _resume_adjust_adrevenue_param_if_needed(device_id, line)
+        if json_str:
+            adjust_data = _loads_adrevenue_json_payload(json_str)
+            with lock:
+                _record_adrevenue_log(device_id, "adjust", f"AdRevenue - Adjust {param_type}", adjust_data, raw_log or line, json_str, param_type)
+            handled = True
+
+    if (not handled) and _is_adjust_tag_log(line) and re.search(r'\b(callback_params|partner_params)\b', line, re.IGNORECASE):
         match = re.search(r'\b(callback_params|partner_params)\b', line, re.IGNORECASE)
         if match:
             param_type = match.group(1).lower()
             tail = line[match.end():]
-            json_str = extract_json_object_from_text(tail) or ""
-            if json_str:
-                adjust_data = _loads_adrevenue_json_payload(json_str)
-                with lock:
-                    _record_adrevenue_log(device_id, "adjust", f"AdRevenue - Adjust {param_type}", adjust_data, line, json_str, param_type)
-                handled = True
+            json_str, raw_log = _buffer_adjust_adrevenue_param(device_id, param_type, tail, line)
+            if not json_str:
+                return True
+            adjust_data = _loads_adrevenue_json_payload(json_str)
+            with lock:
+                _record_adrevenue_log(device_id, "adjust", f"AdRevenue - Adjust {param_type}", adjust_data, raw_log or line, json_str, param_type)
+            handled = True
 
     if (not handled) and _is_adjust_tag_log(line) and "source" in line:
         match = re.search(r'(?:(?:\bsource\s+)|(?:"source"\s*:\s*"))(ironsource[A-Za-z0-9_.-]*)', line, re.IGNORECASE)
@@ -5111,9 +5154,10 @@ def process_adrevenue_log(line, device_id):
         if match:
             json_str = match.group(1).strip()
             response_data = _loads_adrevenue_json_payload(json_str)
-            with lock:
-                _record_adrevenue_log(device_id, "adjust", "Adjust adrevenue", response_data, line, json_str, "response", skip_validation=True)
-            handled = True
+            if str(response_data.get("message", "")).lower() == "ad revenue tracked":
+                with lock:
+                    _record_adrevenue_log(device_id, "adjust", "Adjust adrevenue", response_data, line, json_str, "response", skip_validation=True)
+                handled = True
 
     if handled:
         _apply_adrevenue_filter_and_emit()
@@ -5786,7 +5830,7 @@ def _reset_runtime_for_platform_switch():
         specific_event_params_filters = []
         specific_event_results.clear(); event_log_cache.clear()
         adrevenue_logs.clear(); adrevenue_log_cache.clear()
-        callback_ad_logs.clear(); incomplete_impression_logs.clear(); incomplete_ios_adrevenue_logs.clear(); incomplete_ios_load_ads_ext_logs.clear()
+        callback_ad_logs.clear(); incomplete_impression_logs.clear(); incomplete_ios_adrevenue_logs.clear(); incomplete_ios_load_ads_ext_logs.clear(); incomplete_adjust_adrevenue_logs.clear()
         package_log_cache.clear(); active_package_pids.clear()
         for proc in active_ios_log_processes.values():
             try:
@@ -5883,6 +5927,7 @@ def cl():
         incomplete_impression_logs.clear()
         incomplete_ios_adrevenue_logs.clear()
         incomplete_ios_load_ads_ext_logs.clear()
+        incomplete_adjust_adrevenue_logs.clear()
         
     socketio.emit('update_load_ads', [])
     socketio.emit('update_load_ads_ext', [])
