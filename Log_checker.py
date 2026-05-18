@@ -1067,6 +1067,10 @@ def _process_sdk_external_line(line, device_id):
         version = _extract_json_field_version(line, "Version")
         if version:
             update_block("Gadsme", adapter_version=version)
+    if "gadsme sdk version" in normalized_line:
+        match = re.search(r'Gadsme\s+sdk\s+version\s*:\s*([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
+        if match:
+            update_block("Gadsme", adapter_version=match.group(1))
     if "audiomob" in normalized_line:
         match = re.search(r'Audiomob\s+v?([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
         if match:
@@ -1694,7 +1698,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(24)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(25)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
