@@ -1092,8 +1092,10 @@ def _process_sdk_external_line(line, device_id):
         match = re.search(r'AppMetrica.*?Version\s+([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
         if match:
             update_block("AppMetrica", sdk_version=match.group(1))
-    if "appsflyer" in normalized_line:
+    if "appsflyer" in normalized_line or "android_unity" in normalized_line:
         adapter_match = re.search(r'"pluginVersion"\s*:\s*"([0-9]+(?:\.[0-9]+)+)"', line, re.IGNORECASE)
+        if not adapter_match and "android_unity" in normalized_line:
+            adapter_match = re.search(r'"platform"\s*:\s*"android_unity"[^{}]*?"version"\s*:\s*"([0-9]+(?:\.[0-9]+)+)"', line, re.IGNORECASE)
         if adapter_match:
             update_block("Appsflyer", adapter_version=adapter_match.group(1))
         appsflyer_sdk = ""
@@ -1692,7 +1694,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(23)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(24)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
