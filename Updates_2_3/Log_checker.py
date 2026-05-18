@@ -1698,7 +1698,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(25)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(26)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4884,7 +4884,7 @@ def cache_specific_event_log(event_name, params, json_string, log_entry, device_
     with lock: event_log_cache.append({'log': log_entry, 'device_id': device_id, 'json_data': json_string})
     _apply_specific_filter_and_emit()
 
-def _record_adrevenue_log(device_id, source, event_name, parsed_data, raw_log, raw_details=None, raw_event_prefix=None):
+def _record_adrevenue_log(device_id, source, event_name, parsed_data, raw_log, raw_details=None, raw_event_prefix=None, skip_validation=False):
     payload = parsed_data if isinstance(parsed_data, dict) else {}
     item = {
         "device_id": device_id,
@@ -4897,6 +4897,7 @@ def _record_adrevenue_log(device_id, source, event_name, parsed_data, raw_log, r
         "raw_log": raw_log.strip(),
         "json_data": json.dumps(payload, ensure_ascii=False) if payload else "{}",
         "parsed_data": payload,
+        "skip_validation": skip_validation,
     }
     if raw_event_prefix:
         item["raw_event_prefix"] = raw_event_prefix
@@ -5079,6 +5080,23 @@ def process_adrevenue_log(line, device_id):
         except:
             pass
 
+    if (not handled) and active_platform == "ios" and "Adjust" in line and "source" in line:
+        match = re.search(r'\bsource\s+([A-Za-z0-9_.-]+)', line, re.IGNORECASE)
+        if match:
+            source_data = {"source": match.group(1)}
+            with lock:
+                _record_adrevenue_log(device_id, "adjust", "Adjust adrevenue", source_data, line, json.dumps(source_data, ensure_ascii=False), "source", skip_validation=True)
+            handled = True
+
+    if (not handled) and active_platform == "ios" and "Adjust" in line and "Response:" in line:
+        match = re.search(r'Response:\s*(\{.*\})', line, re.IGNORECASE)
+        if match:
+            json_str = match.group(1).strip()
+            response_data = _loads_adrevenue_json_payload(json_str)
+            with lock:
+                _record_adrevenue_log(device_id, "adjust", "Adjust adrevenue", response_data, line, json_str, "response", skip_validation=True)
+            handled = True
+
     if (not handled) and "Adjust" in line and ("callback_params" in line or "partner_params" in line):
         match = re.search(r'\b(callback_params|partner_params)\b\s*(\{.*\})', line, re.IGNORECASE)
         if match:
@@ -5112,6 +5130,14 @@ def _apply_adrevenue_filter_and_emit():
                 payload_data = parsed_data.get("payload") if isinstance(parsed_data.get("payload"), dict) else {}
                 validate_maps = [parsed_data, payload_data]
                 details_target = parsed_data if parsed_data else item.get("raw_details", "")
+
+            if item.get("skip_validation"):
+                rendered.append({
+                    **item,
+                    "status": "INFO",
+                    "details": format_json_html(details_target) if isinstance(details_target, dict) else (details_target or item.get("details", "")),
+                })
+                continue
 
             required_all = list(adrevenue_default_params)
             normalized_source = _normalize_adrevenue_sheet_key(source)
