@@ -1698,7 +1698,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(29)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(30)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5086,6 +5086,18 @@ def process_adrevenue_log(line, device_id):
         except:
             pass
 
+    if (not handled) and _is_adjust_tag_log(line) and ("callback_params" in line or "partner_params" in line):
+        match = re.search(r'\b(callback_params|partner_params)\b', line, re.IGNORECASE)
+        if match:
+            param_type = match.group(1).lower()
+            tail = line[match.end():]
+            json_str = extract_json_object_from_text(tail) or ""
+            if json_str:
+                adjust_data = _loads_adrevenue_json_payload(json_str)
+                with lock:
+                    _record_adrevenue_log(device_id, "adjust", f"AdRevenue - Adjust {param_type}", adjust_data, line, json_str, param_type)
+                handled = True
+
     if (not handled) and _is_adjust_tag_log(line) and "source" in line:
         match = re.search(r'(?:(?:\bsource\s+)|(?:"source"\s*:\s*"))(ironsource[A-Za-z0-9_.-]*)', line, re.IGNORECASE)
         if match:
@@ -5101,17 +5113,6 @@ def process_adrevenue_log(line, device_id):
             response_data = _loads_adrevenue_json_payload(json_str)
             with lock:
                 _record_adrevenue_log(device_id, "adjust", "Adjust adrevenue", response_data, line, json_str, "response", skip_validation=True)
-            handled = True
-
-    if (not handled) and "Adjust" in line and ("callback_params" in line or "partner_params" in line):
-        match = re.search(r'\b(callback_params|partner_params)\b\s*(\{.*\})', line, re.IGNORECASE)
-        if match:
-            param_type = match.group(1).lower()
-            json_str = match.group(2).strip()
-            adjust_data = {}
-            adjust_data = _loads_adrevenue_json_payload(json_str)
-            with lock:
-                _record_adrevenue_log(device_id, "adjust", f"AdRevenue - Adjust {param_type}", adjust_data, line, json_str, param_type)
             handled = True
 
     if handled:
