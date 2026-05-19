@@ -302,8 +302,9 @@ specific_event_name_filters = []
 specific_event_params_filters = []
 
 # 5. Dữ liệu cho Tab Package Logcat
-package_log_cache = deque(maxlen=15000)
+package_log_cache = deque(maxlen=30000)
 PACKAGE_LOG_UI_MAX_ROWS = 8000
+PACKAGE_LOG_UI_MAX_ROWS_IOS = 15000
 target_package_name = ""
 active_package_pids = {}
 active_logcat_processes = {}
@@ -1699,7 +1700,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(34)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(35)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5812,7 +5813,8 @@ def package_log_emitter():
             if not is_paused and target_package_name:
                 now = time.time()
                 while package_log_cache and now - package_log_cache[0]['timestamp'] > 1000: package_log_cache.popleft()
-                ui_rows = list(package_log_cache)[-PACKAGE_LOG_UI_MAX_ROWS:]
+                ui_limit = PACKAGE_LOG_UI_MAX_ROWS_IOS if active_platform == "ios" else PACKAGE_LOG_UI_MAX_ROWS
+                ui_rows = list(package_log_cache)[-ui_limit:]
                 socketio.emit('package_log_cache', ui_rows)
 
 # --- SOCKET HANDLERS ---
