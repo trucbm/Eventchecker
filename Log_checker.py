@@ -1699,7 +1699,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(33)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(34)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5167,13 +5167,13 @@ def process_adrevenue_log(line, device_id):
             message = str(response_data.get("message", "")).lower()
             is_adjust_revenue_response = (
                 bool(response_data.get("timestamp")) and (
-                    (active_platform == "android" and message.startswith("revenue tracked")) or
+                    (message.startswith("revenue tracked")) or
                     (active_platform == "ios" and message == "ad revenue tracked")
                 )
             )
             if is_adjust_revenue_response:
                 with lock:
-                    event_name = "Adjust IAP" if active_platform == "android" and message.startswith("revenue tracked") else "Adjust adrevenue"
+                    event_name = "Adjust IAP" if message.startswith("revenue tracked") else "Adjust adrevenue"
                     _record_adrevenue_log(device_id, "adjust", event_name, response_data, line, json_str, "response", skip_validation=True)
                 handled = True
 
