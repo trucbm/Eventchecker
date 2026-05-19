@@ -1699,7 +1699,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(32)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(33)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5098,6 +5098,16 @@ def process_adrevenue_log(line, device_id):
                 _record_adrevenue_log(device_id, "appsflyer", "AdRevenue - Appsflyer", appsflyer_data, line, json_str, event_prefix)
             handled = True
 
+    if (not handled) and "[Tracking,Adjust,Iap]" in line and "AdjustTrackingHandler->Track:" in line:
+        payload_part = line.split("AdjustTrackingHandler->Track:", 1)[1].strip()
+        json_str = extract_json_object_from_text(payload_part) or ""
+        if json_str:
+            iap_data = _loads_adrevenue_json_payload(json_str)
+            event_name = "Adjust Subscription" if isinstance(iap_data.get("subscription"), dict) else "Adjust IAP"
+            with lock:
+                _record_adrevenue_log(device_id, "adjust", event_name, iap_data, line, json_str, "iap", skip_validation=True)
+            handled = True
+
     ios_source, ios_keyword, ios_payload_part = (None, "", "")
     if (not handled) and active_platform == "ios":
         ios_source, ios_keyword, ios_payload_part = _ios_adrevenue_source_and_payload(line)
@@ -5163,7 +5173,8 @@ def process_adrevenue_log(line, device_id):
             )
             if is_adjust_revenue_response:
                 with lock:
-                    _record_adrevenue_log(device_id, "adjust", "Adjust adrevenue", response_data, line, json_str, "response", skip_validation=True)
+                    event_name = "Adjust IAP" if active_platform == "android" and message.startswith("revenue tracked") else "Adjust adrevenue"
+                    _record_adrevenue_log(device_id, "adjust", event_name, response_data, line, json_str, "response", skip_validation=True)
                 handled = True
 
     if handled:
