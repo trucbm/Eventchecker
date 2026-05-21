@@ -304,7 +304,7 @@ specific_event_params_filters = []
 # 5. Dữ liệu cho Tab Package Logcat
 package_log_cache = deque(maxlen=30000)
 PACKAGE_LOG_UI_MAX_ROWS = 8000
-PACKAGE_LOG_UI_MAX_ROWS_IOS = 15000
+PACKAGE_LOG_UI_MAX_ROWS_IOS = 6000
 target_package_name = ""
 active_package_pids = {}
 active_logcat_processes = {}
@@ -346,7 +346,7 @@ incomplete_ios_adrevenue_logs = {} # Buffer cho iOS AdRevenue logs bị ngắt d
 incomplete_ios_load_ads_ext_logs = {} # Buffer riêng cho Load Ads đọc AppMetrica AdRevenue iOS
 incomplete_adjust_adrevenue_logs = {} # Buffer cho Adjust callback/partner params bị ngắt dòng
 adb_error_counter = 0
-IOS_LOG_STALL_TIMEOUT_SECONDS = 20
+IOS_LOG_STALL_TIMEOUT_SECONDS = 60
 
 
 def _get_package_db_connection():
@@ -729,12 +729,16 @@ def _ios_device_status_message():
     return "Waiting... (iOS: install libimobiledevice/idevice_id or connect trusted USB device)"
 
 def _resolve_ios_syslog_command(device_id):
-    idevicesyslog = _resolve_ios_tool("idevicesyslog")
-    if idevicesyslog:
-        return [idevicesyslog, "-u", device_id]
+    # Prefer tidevice for iOS syslog because device discovery already uses
+    # tidevice's USB-only list as the source of truth. This avoids mixing a
+    # USB device list with a different syslog backend that may attach to stale
+    # or network devices.
     tidevice = _resolve_ios_tool("tidevice")
     if tidevice:
         return [tidevice, "-u", device_id, "syslog"]
+    idevicesyslog = _resolve_ios_tool("idevicesyslog")
+    if idevicesyslog:
+        return [idevicesyslog, "-u", device_id]
     return None
 
 def _normalize_ios_log_line(raw_line, device_id):
@@ -1700,7 +1704,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(36)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(37)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2949,6 +2953,7 @@ HTML_TEMPLATE = """
         let lastPackageFilterSignature = '';
         let lastPackageRenderedCount = 0;
         let lastPackageFirstRowKey = '';
+        let lastPackageLastRowKey = '';
         let packageHistorySessions = [];
         let packageUiPaused = false;
         let pausedPackageSnapshot = [];
@@ -3012,10 +3017,24 @@ HTML_TEMPLATE = """
             const state = getPackageFilterState();
             const sourceLogs = getPackageSourceLogs(state);
             const signature = JSON.stringify(state);
+            const sameFilter = !packageUiPaused && !forceFull && signature === lastPackageFilterSignature;
+            let appendedOnly = false;
+
+            if (sameFilter && sourceLogs.length > 0 && lastPackageLastRowKey) {
+                const lastIdx = sourceLogs.findIndex(l => getPackageRowKey(l) === lastPackageLastRowKey);
+                if (lastIdx >= 0 && lastIdx < sourceLogs.length - 1) {
+                    const appendedLogs = filterPackageLogs(sourceLogs.slice(lastIdx + 1), state);
+                    if (appendedLogs.length > 0) {
+                        const startIdx = tbody.querySelectorAll('tr.package-log-row').length;
+                        tbody.insertAdjacentHTML('beforeend', appendedLogs.map((l, idx) => packageRowHtml(l, startIdx + idx)).join(''));
+                    }
+                    appendedOnly = true;
+                }
+            }
+
             const canAppendOnly =
-                !packageUiPaused &&
-                !forceFull &&
-                signature === lastPackageFilterSignature &&
+                !appendedOnly &&
+                sameFilter &&
                 sourceLogs.length >= lastPackageRenderedCount &&
                 (lastPackageRenderedCount === 0 ||
                     (sourceLogs[0] && getPackageRowKey(sourceLogs[0]) === lastPackageFirstRowKey));
@@ -3026,14 +3045,24 @@ HTML_TEMPLATE = """
                     const startIdx = tbody.querySelectorAll('tr.package-log-row').length;
                     tbody.insertAdjacentHTML('beforeend', appendedLogs.map((l, idx) => packageRowHtml(l, startIdx + idx)).join(''));
                 }
-            } else {
+                appendedOnly = true;
+            }
+
+            if (!appendedOnly) {
                 const filtered = filterPackageLogs(sourceLogs, state);
                 tbody.innerHTML = filtered.map((l, idx) => packageRowHtml(l, idx)).join('');
+            }
+
+            const maxDomRows = activePlatform === 'ios' ? 6000 : 8000;
+            const rows = tbody.querySelectorAll('tr.package-log-row');
+            if (rows.length > maxDomRows) {
+                for (let i = 0; i < rows.length - maxDomRows; i++) rows[i].remove();
             }
 
             lastPackageFilterSignature = signature;
             lastPackageRenderedCount = sourceLogs.length;
             lastPackageFirstRowKey = sourceLogs[0] ? getPackageRowKey(sourceLogs[0]) : '';
+            lastPackageLastRowKey = sourceLogs.length ? getPackageRowKey(sourceLogs[sourceLogs.length - 1]) : '';
             if(document.getElementById('autoScroll').checked) document.getElementById('packageLogContainer').scrollTop = document.getElementById('packageLogContainer').scrollHeight;
         }
 
@@ -5533,8 +5562,12 @@ def _stop_ios_log_reader(device_id):
     if proc and proc.poll() is None:
         try:
             proc.terminate()
+            proc.wait(timeout=1)
         except Exception:
-            pass
+            try:
+                proc.kill()
+            except Exception:
+                pass
     active_ios_log_processes.pop(device_id, None)
     active_ios_log_readers.pop(device_id, None)
     active_ios_log_started_at.pop(device_id, None)
