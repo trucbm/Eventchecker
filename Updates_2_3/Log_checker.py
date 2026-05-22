@@ -304,7 +304,7 @@ specific_event_params_filters = []
 # 5. Dữ liệu cho Tab Package Logcat
 package_log_cache = deque(maxlen=30000)
 PACKAGE_LOG_UI_MAX_ROWS = 8000
-PACKAGE_LOG_UI_MAX_ROWS_IOS = 6000
+PACKAGE_LOG_UI_MAX_ROWS_IOS = 12000
 target_package_name = ""
 active_package_pids = {}
 active_logcat_processes = {}
@@ -1704,7 +1704,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(37)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(38)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3029,6 +3029,17 @@ HTML_TEMPLATE = """
                         tbody.insertAdjacentHTML('beforeend', appendedLogs.map((l, idx) => packageRowHtml(l, startIdx + idx)).join(''));
                     }
                     appendedOnly = true;
+                } else if (lastIdx < 0 && tbody.querySelector('tr.package-log-row')) {
+                    // The backend window moved faster than the browser could render.
+                    // Keep the current rows visible, append a small recent chunk, then
+                    // trim from the top instead of blanking and rebuilding the table.
+                    const fallbackLimit = activePlatform === 'ios' ? 1200 : 500;
+                    const appendedLogs = filterPackageLogs(sourceLogs.slice(-fallbackLimit), state);
+                    if (appendedLogs.length > 0) {
+                        const startIdx = tbody.querySelectorAll('tr.package-log-row').length;
+                        tbody.insertAdjacentHTML('beforeend', appendedLogs.map((l, idx) => packageRowHtml(l, startIdx + idx)).join(''));
+                    }
+                    appendedOnly = true;
                 }
             }
 
@@ -3053,7 +3064,7 @@ HTML_TEMPLATE = """
                 tbody.innerHTML = filtered.map((l, idx) => packageRowHtml(l, idx)).join('');
             }
 
-            const maxDomRows = activePlatform === 'ios' ? 6000 : 8000;
+            const maxDomRows = activePlatform === 'ios' ? 12000 : 8000;
             const rows = tbody.querySelectorAll('tr.package-log-row');
             if (rows.length > maxDomRows) {
                 for (let i = 0; i < rows.length - maxDomRows; i++) rows[i].remove();
