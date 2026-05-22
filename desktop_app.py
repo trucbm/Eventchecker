@@ -19,6 +19,23 @@ except Exception:
 
 HOST = "127.0.0.1"
 PORT = 5001
+BUNDLED_UPDATE_BUILD = 46
+
+
+def _extract_build_number_from_file(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            data = f.read(200000)
+    except Exception:
+        return None
+    import re
+    matches = re.findall(r"v2\.3\.0\((\d+)\)", data)
+    if not matches:
+        return None
+    try:
+        return max(int(item) for item in matches)
+    except Exception:
+        return None
 
 def _setup_logging():
     base = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
@@ -65,6 +82,15 @@ def main():
         try:
             update_dir = remote_update.load_prepared_update_dir()
             if update_dir:
+                updated_build = _extract_build_number_from_file(os.path.join(update_dir, "Log_checker.py"))
+                if updated_build is not None and updated_build < BUNDLED_UPDATE_BUILD:
+                    logging.info(
+                        "Ignoring stale prepared update %s because bundled build is %s",
+                        updated_build,
+                        BUNDLED_UPDATE_BUILD,
+                    )
+                    update_dir = None
+            if update_dir:
                 os.environ["EVENTINSPECTOR_UPDATE_DIR"] = update_dir
                 if update_dir not in sys.path:
                     sys.path.insert(0, update_dir)
@@ -72,7 +98,24 @@ def main():
         except Exception:
             logging.exception("Prepared update load failed:\n%s", traceback.format_exc())
 
-    from Log_checker import run_server
+    def _load_run_server():
+        update_dir = os.environ.get("EVENTINSPECTOR_UPDATE_DIR")
+        updated_log_checker = os.path.join(update_dir, "Log_checker.py") if update_dir else ""
+        if updated_log_checker and os.path.exists(updated_log_checker):
+            try:
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("eventinspector_updated_log_checker", updated_log_checker)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                logging.info("Loaded Log_checker from update file: %s", updated_log_checker)
+                return module.run_server
+            except Exception:
+                logging.exception("Updated Log_checker load failed, falling back to bundled module:\n%s", traceback.format_exc())
+        from Log_checker import run_server as bundled_run_server
+        logging.info("Loaded bundled Log_checker module")
+        return bundled_run_server
+
+    run_server = _load_run_server()
 
     def _server_entry():
         try:
