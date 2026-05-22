@@ -1704,7 +1704,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(39)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(40)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2335,14 +2335,18 @@ HTML_TEMPLATE = """
         }
 
         function showPlatformModal() {
-            platformModal?.classList.remove('hidden');
-            platformModal?.classList.add('flex');
+            if (!platformModal) return;
+            platformModal.classList.remove('hidden');
+            platformModal.classList.add('flex');
         }
+        window.showPlatformModal = showPlatformModal;
 
         function hidePlatformModal() {
-            platformModal?.classList.add('hidden');
-            platformModal?.classList.remove('flex');
+            if (!platformModal) return;
+            platformModal.classList.add('hidden');
+            platformModal.classList.remove('flex');
         }
+        window.hidePlatformModal = hidePlatformModal;
 
         function syncPlatformUi() {
             const platform = activePlatform === 'ios' ? 'ios' : 'android';
@@ -2414,7 +2418,21 @@ HTML_TEMPLATE = """
             });
         });
 
-        platformBtn?.addEventListener('click', showPlatformModal);
+        platformBtn?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            showPlatformModal();
+        });
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest?.('#platformBtn');
+            if (!btn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            showPlatformModal();
+        }, true);
+        platformModal?.addEventListener('click', (e) => {
+            if (e.target === platformModal) hidePlatformModal();
+        });
         if (activePlatform) setActivePlatform(activePlatform, false);
         else showPlatformModal();
 
