@@ -1704,7 +1704,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(38)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(39)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3391,30 +3391,103 @@ HTML_TEMPLATE = """
             logDetailModal.classList.remove('hidden');
         }
 
-        function extractJsonFromText(text) {
-            if (!text) return null;
+        function normalizeLogJsonCandidate(candidate) {
+            return (candidate || '').replace(/\\134/g, () => '\\');
+        }
+
+        function tryParseLogJsonCandidate(candidate) {
+            if (!candidate) return null;
+            const variants = [candidate, normalizeLogJsonCandidate(candidate)];
+            for (const variant of variants) {
+                try {
+                    return { text: variant, data: JSON.parse(variant) };
+                } catch (e) {}
+            }
+            return null;
+        }
+
+        function hydrateNestedJsonStrings(value, depth = 0) {
+            if (depth > 4) return value;
+            if (Array.isArray(value)) return value.map(v => hydrateNestedJsonStrings(v, depth + 1));
+            if (value && typeof value === 'object') {
+                const cloned = {};
+                Object.keys(value).forEach(k => { cloned[k] = hydrateNestedJsonStrings(value[k], depth + 1); });
+                return cloned;
+            }
+            if (typeof value === 'string') {
+                const trimmed = value.trim();
+                if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                    const parsed = tryParseLogJsonCandidate(trimmed);
+                    if (parsed) return hydrateNestedJsonStrings(parsed.data, depth + 1);
+                }
+            }
+            return value;
+        }
+
+        function findBalancedJsonCandidates(text) {
+            const candidates = [];
             const starts = [];
             for (let i = 0; i < text.length; i++) {
                 const ch = text[i];
-                if (ch === '{' || ch === '[') starts.push(i);
+                if (ch === '{') starts.push(i);
+            }
+            for (let i = 0; i < text.length; i++) {
+                const ch = text[i];
+                if (ch === '[') starts.push(i);
             }
             for (const start of starts) {
-                let openBraces = 0;
-                let openBrackets = 0;
-                for (let i = start; i < text.length; i++) {
+                const first = text[start];
+                const stack = [first === '{' ? '}' : ']'];
+                let inString = false;
+                let escaped = false;
+                for (let i = start + 1; i < text.length; i++) {
                     const ch = text[i];
-                    if (ch === '{') openBraces++;
-                    if (ch === '}') openBraces--;
-                    if (ch === '[') openBrackets++;
-                    if (ch === ']') openBrackets--;
-                    if (openBraces === 0 && openBrackets === 0 && i > start) {
-                        const candidate = text.slice(start, i + 1);
-                        try {
-                            JSON.parse(candidate);
-                            return candidate;
-                        } catch (e) {}
-                        break;
+                    if (inString) {
+                        if (escaped) {
+                            escaped = false;
+                        } else if (ch === '\\') {
+                            escaped = true;
+                        } else if (ch === '"') {
+                            inString = false;
+                        }
+                        continue;
                     }
+                    if (ch === '"') {
+                        inString = true;
+                        continue;
+                    }
+                    if (ch === '{') stack.push('}');
+                    else if (ch === '[') stack.push(']');
+                    else if (ch === '}' || ch === ']') {
+                        if (stack.length === 0 || stack[stack.length - 1] !== ch) break;
+                        stack.pop();
+                        if (stack.length === 0) {
+                            candidates.push(text.slice(start, i + 1));
+                            break;
+                        }
+                    }
+                }
+            }
+            return candidates;
+        }
+
+        function extractJsonFromText(text) {
+            if (!text) return null;
+            const candidates = findBalancedJsonCandidates(text);
+            for (const candidate of candidates) {
+                const parsed = tryParseLogJsonCandidate(candidate);
+                if (parsed) return JSON.stringify(hydrateNestedJsonStrings(parsed.data));
+            }
+            const payloadKeys = ['payload', 'callback_params', 'partner_params', 'CallbackParameters', 'PartnerParameters', 'additionalParameters', 'custom_parameters'];
+            for (const key of payloadKeys) {
+                const idx = text.toLowerCase().indexOf(key.toLowerCase());
+                if (idx < 0) continue;
+                const braceIdx = text.indexOf('{', idx);
+                if (braceIdx < 0) continue;
+                const nestedCandidates = findBalancedJsonCandidates(text.slice(braceIdx));
+                for (const candidate of nestedCandidates) {
+                    const parsed = tryParseLogJsonCandidate(candidate);
+                    if (parsed) return JSON.stringify(hydrateNestedJsonStrings(parsed.data));
                 }
             }
             return null;
@@ -3672,10 +3745,6 @@ HTML_TEMPLATE = """
             if (e.target === packageHistoryModal) {
                 clearPackageHistorySelection();
                 packageHistoryModal.classList.add('hidden');
-                return;
-            }
-            if (!e.target.closest('#packageHistoryTableBody tr.package-history-row') && !e.target.closest('#logDetailModal')) {
-                clearPackageHistorySelection();
             }
         });
 
