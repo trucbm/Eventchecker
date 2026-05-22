@@ -1636,6 +1636,8 @@ HTML_TEMPLATE = """
     <title>Event Inspector V2.0.0(52)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
+    <script>if (!window.io) document.write('<script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></scr' + 'ipt>');</script>
+    <script>if (!window.io) document.write('<script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.4/dist/socket.io.min.js"></scr' + 'ipt>');</script>
     <style>
         body { font-family: 'Inter', sans-serif; }
         .log-cell { max-width: 500px; word-wrap: break-word; font-family: monospace; font-size: 0.75rem; color: #6b7280; }
@@ -1704,14 +1706,14 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(41)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(42)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
                     <div class="flex items-center gap-2">
                     <button id="restartAppBtn" class="bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Check Update</button>
                     <button id="manualRestartBtn" class="bg-slate-500 hover:bg-slate-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Restart</button>
-                    <button id="platformBtn" class="bg-white hover:bg-gray-50 text-slate-700 border border-slate-300 text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Platform: Android</button>
+                    <button id="platformBtn" onclick="window.showPlatformModal && window.showPlatformModal(); return false;" class="bg-white hover:bg-gray-50 text-slate-700 border border-slate-300 text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Platform: Android</button>
                 </div>
                 </div>
                 <div class="flex items-center gap-4">
@@ -2309,7 +2311,18 @@ HTML_TEMPLATE = """
 
     <!-- SCRIPTS -->
     <script>
-        const socket = io();
+        const socket = (typeof io === 'function') ? io() : {
+            on: function () {},
+            emit: function (eventName, payload) {
+                if (eventName === 'set_platform' && window.fetch) {
+                    fetch('/api/platform', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload || {})
+                    }).catch(function () {});
+                }
+            }
+        };
         let currentTab = 'LoadAdsExt';
         let selectedDevice = 'all';
 
@@ -4133,6 +4146,16 @@ def index():
         current_profile_name=active_profile_name
     )
 
+
+@app.post('/api/platform')
+def api_set_platform():
+    global active_platform
+    data = request.get_json(silent=True) or {}
+    platform = data.get('platform', 'android')
+    active_platform = 'ios' if platform == 'ios' else 'android'
+    if data.get('reset'):
+        _reset_runtime_for_platform_switch()
+    return jsonify({'ok': True, 'platform': active_platform})
 
 @app.get('/api/profiles')
 def get_profiles():
