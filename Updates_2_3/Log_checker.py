@@ -1635,7 +1635,7 @@ HTML_TEMPLATE = """
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
     <title>Event Inspector V2.0.0(52)</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
         body { font-family: 'Inter', sans-serif; }
         .log-cell { max-width: 500px; word-wrap: break-word; font-family: monospace; font-size: 0.75rem; color: #6b7280; }
@@ -1704,7 +1704,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(43)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(44)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2309,7 +2309,57 @@ HTML_TEMPLATE = """
 
     <!-- SCRIPTS -->
     <script>
-        const socket = io();
+        function createSocketProxy() {
+            let realSocket = null;
+            const handlers = [];
+            const queuedEmits = [];
+
+            function tryConnect() {
+                if (realSocket || typeof io !== 'function') return !!realSocket;
+                try {
+                    realSocket = io();
+                    handlers.forEach(([eventName, handler]) => realSocket.on(eventName, handler));
+                    while (queuedEmits.length) {
+                        const args = queuedEmits.shift();
+                        realSocket.emit.apply(realSocket, args);
+                    }
+                    return true;
+                } catch (e) {
+                    console.error('Socket.IO init failed', e);
+                    return false;
+                }
+            }
+
+            const proxy = {
+                on(eventName, handler) {
+                    handlers.push([eventName, handler]);
+                    if (realSocket) realSocket.on(eventName, handler);
+                    else tryConnect();
+                },
+                emit(...args) {
+                    if (tryConnect() && realSocket) {
+                        realSocket.emit.apply(realSocket, args);
+                        return;
+                    }
+                    queuedEmits.push(args);
+                    if (args[0] === 'set_platform' && window.fetch) {
+                        fetch('/api/platform', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(args[1] || {})
+                        }).catch(() => {});
+                    }
+                }
+            };
+
+            const retryTimer = setInterval(() => {
+                if (tryConnect()) clearInterval(retryTimer);
+            }, 250);
+            setTimeout(() => clearInterval(retryTimer), 15000);
+            return proxy;
+        }
+
+        const socket = createSocketProxy();
         let currentTab = 'LoadAdsExt';
         let selectedDevice = 'all';
 
@@ -4096,6 +4146,17 @@ def index():
         default_event_names=sorted(event_specific_params.keys()),
         current_profile_name=active_profile_name
     )
+
+
+@app.post('/api/platform')
+def api_set_platform():
+    global active_platform
+    data = request.get_json(silent=True) or {}
+    platform = data.get('platform', 'android')
+    active_platform = 'ios' if platform == 'ios' else 'android'
+    if data.get('reset'):
+        _reset_runtime_for_platform_switch()
+    return jsonify({'ok': True, 'platform': active_platform})
 
 
 @app.get('/api/profiles')
