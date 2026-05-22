@@ -1704,7 +1704,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(40)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(41)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2328,7 +2328,18 @@ HTML_TEMPLATE = """
         const restartAppBtn = document.getElementById('restartAppBtn');
         const platformBtn = document.getElementById('platformBtn');
         const platformModal = document.getElementById('platformModal');
-        let activePlatform = localStorage.getItem('eventInspectorPlatform') || '';
+
+        function readStoredPlatform() {
+            try { return localStorage.getItem('eventInspectorPlatform') || ''; }
+            catch (e) { return ''; }
+        }
+
+        function writeStoredPlatform(platform) {
+            try { localStorage.setItem('eventInspectorPlatform', platform); }
+            catch (e) {}
+        }
+
+        let activePlatform = readStoredPlatform();
 
         function platformLabel(platform) {
             return platform === 'ios' ? 'iOS' : 'Android';
@@ -2405,10 +2416,11 @@ HTML_TEMPLATE = """
 
         function setActivePlatform(platform, persist = true) {
             activePlatform = platform === 'ios' ? 'ios' : 'android';
-            if (persist) localStorage.setItem('eventInspectorPlatform', activePlatform);
+            if (persist) writeStoredPlatform(activePlatform);
             if (platformBtn) platformBtn.textContent = `Platform: ${platformLabel(activePlatform)}`;
             syncPlatformUi();
-            socket.emit('set_platform', { platform: activePlatform, reset: !!persist });
+            try { socket.emit('set_platform', { platform: activePlatform, reset: !!persist }); }
+            catch (e) { console.error('set_platform failed', e); }
         }
 
         document.querySelectorAll('[data-platform-choice]').forEach(btn => {
@@ -2424,7 +2436,8 @@ HTML_TEMPLATE = """
             showPlatformModal();
         });
         document.addEventListener('click', (e) => {
-            const btn = e.target.closest?.('#platformBtn');
+            const target = e.target;
+            const btn = target && target.closest ? target.closest('#platformBtn') : null;
             if (!btn) return;
             e.preventDefault();
             e.stopPropagation();
@@ -2433,8 +2446,13 @@ HTML_TEMPLATE = """
         platformModal?.addEventListener('click', (e) => {
             if (e.target === platformModal) hidePlatformModal();
         });
-        if (activePlatform) setActivePlatform(activePlatform, false);
-        else showPlatformModal();
+        try {
+            if (activePlatform) setActivePlatform(activePlatform, false);
+            else showPlatformModal();
+        } catch (e) {
+            console.error('Platform init failed', e);
+            showPlatformModal();
+        }
 
         // --- Tab Logic ---
         function switchTab(tabName) {
