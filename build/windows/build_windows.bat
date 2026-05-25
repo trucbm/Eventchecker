@@ -42,7 +42,7 @@ pyinstaller --noconfirm --clean --windowed --icon assets\\app.ico --name "EventI
   --hidden-import "PySide6.QtWebEngineWidgets" ^
   --hidden-import "shiboken6" ^
   --add-data "Default event + Default Params.xlsx;." ^
-  --add-data "remote_update_config.json;." ^
+  --add-data "remote_update_config_v230.json;." ^
   desktop_app.py
 
 REM Build installer (requires Inno Setup installed and ISCC on PATH)

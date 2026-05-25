@@ -1,0 +1,12 @@
+.DS_Store
+__pycache__/
+**/__pycache__/
+*.pyc
+
+.venv/
+build/EventInspector/
+dist/EventInspector/
+dist/EventInspector.app/
+
+package_log_history/
+profiles/

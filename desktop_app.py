@@ -19,7 +19,16 @@ except Exception:
 
 HOST = "127.0.0.1"
 PORT = 5001
-BUNDLED_UPDATE_BUILD = 46
+DEFAULT_BUNDLED_UPDATE_BUILD = 47
+
+
+def _user_data_dir():
+    if os.name == "nt":
+        base = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "EventInspector")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~/Library/Application Support"), "EventInspector")
+    return os.path.join(os.path.expanduser("~"), ".eventinspector")
 
 
 def _extract_build_number_from_file(path):
@@ -37,9 +46,28 @@ def _extract_build_number_from_file(path):
     except Exception:
         return None
 
+
+def _bundled_log_checker_path():
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(os.path.join(meipass, "Log_checker.py"))
+    candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "Log_checker.py"))
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return ""
+
+
+def _get_bundled_update_build():
+    bundled_path = _bundled_log_checker_path()
+    build = _extract_build_number_from_file(bundled_path) if bundled_path else None
+    if build is not None:
+        return build
+    return DEFAULT_BUNDLED_UPDATE_BUILD
+
 def _setup_logging():
-    base = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
-    log_dir = os.path.join(base, "EventInspector")
+    log_dir = _user_data_dir()
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, "app.log")
     logging.basicConfig(
@@ -62,8 +90,34 @@ def _wait_for_server(host, port, timeout=15):
     return False
 
 
+def _is_port_available(host, port):
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind((host, port))
+        return True
+    except OSError:
+        return False
+
+
+def _pick_server_port(host, preferred_port):
+    if _is_port_available(host, preferred_port):
+        return preferred_port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((host, 0))
+        _, port = sock.getsockname()
+    logging.warning(
+        "Preferred port %s is busy; using fallback port %s instead",
+        preferred_port,
+        port,
+    )
+    return port
+
+
 def main():
     log_path = _setup_logging()
+    port = _pick_server_port(HOST, PORT)
+    bundled_build = _get_bundled_update_build()
+    os.environ["EVENTINSPECTOR_BUNDLED_BUILD"] = str(bundled_build)
 
     # Provide restart command for in-app restart
     restart_cmd = sys.executable
@@ -80,14 +134,21 @@ def main():
     # Load any already-downloaded update, but do not check remote on launch.
     if remote_update:
         try:
-            update_dir = remote_update.load_prepared_update_dir()
+            prepared_update = remote_update.get_prepared_update_info()
+            update_dir = prepared_update.get("update_dir") if prepared_update else None
             if update_dir:
-                updated_build = _extract_build_number_from_file(os.path.join(update_dir, "Log_checker.py"))
-                if updated_build is not None and updated_build < BUNDLED_UPDATE_BUILD:
+                updated_build = prepared_update.get("build")
+                requested_from_bundle_build = prepared_update.get("requested_from_bundle_build")
+                if (
+                    updated_build is not None
+                    and updated_build < bundled_build
+                    and requested_from_bundle_build != bundled_build
+                ):
                     logging.info(
-                        "Ignoring stale prepared update %s because bundled build is %s",
+                        "Ignoring stale prepared update %s because bundled build is %s and requested build is %s",
                         updated_build,
-                        BUNDLED_UPDATE_BUILD,
+                        bundled_build,
+                        requested_from_bundle_build,
                     )
                     update_dir = None
             if update_dir:
@@ -119,18 +180,21 @@ def main():
 
     def _server_entry():
         try:
-            run_server(host=HOST, port=PORT)
+            run_server(host=HOST, port=port)
         except Exception:
             logging.exception("Server crashed:\n%s", traceback.format_exc())
 
     server_thread = threading.Thread(target=_server_entry, daemon=True)
     server_thread.start()
 
-    _wait_for_server(HOST, PORT, timeout=15)
+    if not _wait_for_server(HOST, port, timeout=15):
+        message = f"Local server failed to start on {HOST}:{port}. See log: {log_path}"
+        logging.error(message)
+        raise RuntimeError(message)
 
     webview.create_window(
         "Event Inspector",
-        f"http://{HOST}:{PORT}",
+        f"http://{HOST}:{port}",
         width=1400,
         height=900,
         maximized=True

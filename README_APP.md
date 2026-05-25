@@ -13,7 +13,6 @@ python desktop_app.py
 pip install pyinstaller
 pyinstaller --noconfirm --clean --windowed --icon assets/app.ico --name "EventInspector" \
   --hidden-import "engineio.async_drivers.threading" \
-  --hidden-import "socketio.async_drivers.threading" \
   desktop_app.py
 ```
 Kết quả ở `dist/EventInspector/EventInspector.exe`.

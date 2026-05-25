@@ -118,6 +118,23 @@ def _sha256_file(path):
     return h.hexdigest()
 
 
+def _extract_build_number(text):
+    match = re.search(r"2\.3\.0-(\d+)$", str(text or "").strip())
+    if match:
+        try:
+            return int(match.group(1))
+        except Exception:
+            return None
+    return None
+
+
+def _requested_from_bundle_build():
+    try:
+        return int(str(os.getenv("EVENTINSPECTOR_BUNDLED_BUILD") or "").strip())
+    except Exception:
+        return None
+
+
 def _download(url, timeout):
     # Handle Google Drive confirm page for large files
     session = requests.Session()
@@ -190,6 +207,20 @@ def load_prepared_update_dir():
     return update_dir
 
 
+def get_prepared_update_info():
+    update_dir = load_prepared_update_dir()
+    if not update_dir:
+        return {}
+    state = _load_state()
+    return {
+        "update_dir": update_dir,
+        "version": state.get("version"),
+        "files": state.get("files") or [],
+        "requested_from_bundle_build": state.get("requested_from_bundle_build"),
+        "build": _extract_build_number(state.get("version")),
+    }
+
+
 def check_for_updates():
     _ensure_user_config_template()
     cfg = _load_config()
@@ -231,6 +262,9 @@ def check_for_updates():
             "manifest_url": manifest_url,
             "files": [item.get("path") for item in manifest_files if item.get("path")],
         })
+        requested_from_bundle_build = _requested_from_bundle_build()
+        if requested_from_bundle_build is not None:
+            state["requested_from_bundle_build"] = requested_from_bundle_build
         _save_state(state)
         return {"ok": True, "status": "up_to_date", "version": manifest_version, "update_dir": existing_update_dir}
 
@@ -300,6 +334,9 @@ def check_for_updates():
             "manifest_url": manifest_url,
             "files": [item.get("path") for item in manifest_files if item.get("path")],
         })
+        requested_from_bundle_build = _requested_from_bundle_build()
+        if requested_from_bundle_build is not None:
+            state["requested_from_bundle_build"] = requested_from_bundle_build
         _save_state(state)
         return {"ok": True, "status": "updated", "version": manifest.get("version"), "update_dir": update_dir}
 

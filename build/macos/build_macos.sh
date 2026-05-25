@@ -41,7 +41,6 @@ fi
 pip install pyinstaller
 pyinstaller --noconfirm --clean --windowed \
   --hidden-import "engineio.async_drivers.threading" \
-  --hidden-import "socketio.async_drivers.threading" \
   --add-data "Default event + Default Params.xlsx:." \
   --icon assets/app.icns --name "EventInspector" desktop_app.py
 
