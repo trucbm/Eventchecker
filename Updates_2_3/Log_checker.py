@@ -1185,6 +1185,58 @@ def format_json_html(data):
         return str(data)
 
 
+def format_adjust_config_html(data):
+    try:
+        if isinstance(data, str):
+            data = json.loads(data)
+        if not isinstance(data, dict):
+            return format_json_html(data)
+
+        special_keys = {
+            "IsSendingInBackgroundEnabled",
+            "IsCostDataInAttributionEnabled",
+            "IsAdServicesEnabled",
+            "IsIdfaReadingEnabled",
+        }
+
+        def render_value(value):
+            if isinstance(value, dict):
+                return render_dict(value, 0)
+            if isinstance(value, list):
+                return html.escape(json.dumps(value, ensure_ascii=False))
+            if isinstance(value, str):
+                return f'"{html.escape(value)}"'
+            return html.escape(json.dumps(value, ensure_ascii=False))
+
+        def render_dict(obj, indent_level):
+            indent = "&nbsp;" * (indent_level * 4)
+            inner_indent = "&nbsp;" * ((indent_level + 1) * 4)
+            lines = [f"{indent}{{"]
+            entries = list(obj.items())
+            for idx, (key, value) in enumerate(entries):
+                comma = "," if idx < len(entries) - 1 else ""
+                line_class = ""
+                if key in special_keys:
+                    line_class = "text-green-600 font-semibold" if value is True else "text-red-600 font-semibold"
+
+                if isinstance(value, dict):
+                    value_html = render_dict(value, indent_level + 1)
+                    lines.append(
+                        f'{inner_indent}<span class="{line_class}">"{html.escape(str(key))}": {value_html}{comma}</span>'
+                    )
+                else:
+                    lines.append(
+                        f'{inner_indent}<span class="{line_class}">"{html.escape(str(key))}": {render_value(value)}{comma}</span>'
+                    )
+            lines.append(f"{indent}}}")
+            return "<br>".join(lines)
+
+        rendered = render_dict(data, 0)
+        return f'<pre class="text-xs bg-gray-50 p-2 rounded border border-gray-200 overflow-x-auto font-mono text-gray-700">{rendered}</pre>'
+    except Exception:
+        return format_json_html(data)
+
+
 def format_param_issue_html(title, items, color_class, chunk_size=4):
     if not items:
         return ""
@@ -1704,7 +1756,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(47)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(48)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2264,6 +2316,10 @@ HTML_TEMPLATE = """
                             <label class="inline-flex items-center gap-2">
                                 <input type="radio" name="tagQuickFilter" value="appmetrica" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
                                 <span>Appmetrica</span>
+                            </label>
+                            <label class="inline-flex items-center gap-2">
+                                <input type="radio" name="tagQuickFilter" value="adjust" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                <span>Adjust</span>
                             </label>
                         </div>
                     </div>
@@ -2988,7 +3044,13 @@ HTML_TEMPLATE = """
                 }
                 const messageHaystack = `${l.message || ''}`.toLowerCase();
                 const tagHaystack = `${l.tag || ''}`.toLowerCase();
-                if (state.quickTag && !tagHaystack.includes(state.quickTag)) return false;
+                if (state.quickTag) {
+                    const quickNeedle = state.quickTag.toLowerCase();
+                    const quickMatched = quickNeedle === 'adjust'
+                        ? (tagHaystack.includes(quickNeedle) || messageHaystack.includes(quickNeedle))
+                        : tagHaystack.includes(quickNeedle);
+                    if (!quickMatched) return false;
+                }
                 if (state.tagFilter && !tagHaystack.includes(state.tagFilter)) return false;
                 if (state.filterText && !messageHaystack.includes(state.filterText)) return false;
                 if (state.filterText2 && !messageHaystack.includes(state.filterText2)) return false;
@@ -5053,7 +5115,10 @@ def _loads_adrevenue_json_payload(json_str):
 def _is_adjust_tag_log(line):
     if active_platform == "ios":
         return "AdjustSdk)" in line or "PixelArt(Adjust" in line
-    return bool(re.search(r'\b[VDEIWF]\s+Adjust\s*:', line))
+    return bool(
+        re.search(r'\b[VDEIWF]\s+Adjust\s*:', line) or
+        re.search(r'(?:^|\s)Adjust(?:\s|$)', line)
+    )
 
 
 def _buffer_adjust_adrevenue_param(device_id, param_type, payload_part, raw_line):
@@ -5139,6 +5204,25 @@ def process_adrevenue_log(line, device_id):
                 _record_adrevenue_log(device_id, "appsflyer", "AdRevenue - Appsflyer", appsflyer_data, line, json_str, event_prefix)
             handled = True
 
+    if (not handled) and active_platform != "ios" and "AdjustService->Initialize:" in line:
+        json_str = extract_json_object_from_text(line)
+        if json_str:
+            adjust_config_data = _loads_adrevenue_json_payload(json_str)
+            config_data = adjust_config_data.get("config") if isinstance(adjust_config_data.get("config"), dict) else adjust_config_data
+            if isinstance(config_data, dict) and config_data:
+                with lock:
+                    _record_adrevenue_log(
+                        device_id,
+                        "adjust",
+                        "Adjust Config",
+                        config_data,
+                        line,
+                        json_str,
+                        "config",
+                        skip_validation=True,
+                    )
+                handled = True
+
     if (not handled) and "[Tracking,Adjust,Iap]" in line and "AdjustTrackingHandler->Track:" in line:
         payload_part = line.split("AdjustTrackingHandler->Track:", 1)[1].strip()
         json_str = extract_json_object_from_text(payload_part) or ""
@@ -5177,6 +5261,25 @@ def process_adrevenue_log(line, device_id):
             adjust_data = _loads_adrevenue_json_payload(json_str)
             with lock:
                 _record_adrevenue_log(device_id, "adjust", f"AdRevenue - Adjust {param_type}", adjust_data, raw_log or line, json_str, param_type)
+            handled = True
+
+    if (not handled) and _is_adjust_tag_log(line):
+        lvl_match = re.search(r'\blvl_(signature|signed_data)\b\s+(.+)$', line)
+        if lvl_match:
+            field_name = f"lvl_{lvl_match.group(1)}"
+            field_value = lvl_match.group(2).strip()
+            lvl_data = {field_name: field_value}
+            with lock:
+                _record_adrevenue_log(
+                    device_id,
+                    "adjust",
+                    "Adjust LVL",
+                    lvl_data,
+                    line,
+                    json.dumps(lvl_data, ensure_ascii=False),
+                    field_name,
+                    skip_validation=True,
+                )
             handled = True
 
     if (not handled) and _is_adjust_tag_log(line) and re.search(r'\b(callback_params|partner_params)\b', line, re.IGNORECASE):
@@ -5242,6 +5345,23 @@ def _apply_adrevenue_filter_and_emit():
                 details_target = parsed_data if parsed_data else item.get("raw_details", "")
 
             if item.get("skip_validation"):
+                if item.get("event_name") == "Adjust Config":
+                    sending_background = parsed_data.get("IsSendingInBackgroundEnabled")
+                    cost_data_attr = parsed_data.get("IsCostDataInAttributionEnabled")
+                    ad_services = parsed_data.get("IsAdServicesEnabled")
+                    idfa_reading = parsed_data.get("IsIdfaReadingEnabled")
+                    is_adjust_config_ok = (
+                        sending_background is True and
+                        cost_data_attr is True and
+                        ad_services is True and
+                        idfa_reading is True
+                    )
+                    rendered.append({
+                        **item,
+                        "status": "PASSED" if is_adjust_config_ok else "FAILED",
+                        "details": format_adjust_config_html(details_target) if isinstance(details_target, dict) else (details_target or item.get("details", "")),
+                    })
+                    continue
                 rendered.append({
                     **item,
                     "status": "INFO",
