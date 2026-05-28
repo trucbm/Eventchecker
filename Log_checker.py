@@ -2242,16 +2242,16 @@ HTML_TEMPLATE = """
                         <button id="clearPackageHistoryFiltersBtn" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200 font-semibold text-xs py-2 px-4 rounded-lg h-9">Clear Filter</button>
                     </div>
                     <div>
+                        <label for="packageHistoryFilterInput3" class="block text-[11px] font-medium text-gray-700 mb-1">Tag Filter:</label>
+                        <input type="text" id="packageHistoryFilterInput3" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search saved log tag...">
+                    </div>
+                    <div>
                         <label for="packageHistoryFilterInput" class="block text-[11px] font-medium text-gray-700 mb-1">Filter 1:</label>
                         <input type="text" id="packageHistoryFilterInput" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search saved log text 1...">
                     </div>
                     <div>
                         <label for="packageHistoryFilterInput2" class="block text-[11px] font-medium text-gray-700 mb-1">Filter 2:</label>
                         <input type="text" id="packageHistoryFilterInput2" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search saved log text 2...">
-                    </div>
-                    <div>
-                        <label for="packageHistoryFilterInput3" class="block text-[11px] font-medium text-gray-700 mb-1">Filter 3:</label>
-                        <input type="text" id="packageHistoryFilterInput3" class="w-full p-2 text-[11px] border rounded-md shadow-sm" placeholder="Search saved log text 3...">
                     </div>
                 </div>
                 <p id="packageHistoryMeta" class="text-[11px] text-gray-500">No session selected.</p>
@@ -3223,7 +3223,7 @@ HTML_TEMPLATE = """
             const select = document.getElementById('packageHistorySessionSelect');
             const keyword1 = document.getElementById('packageHistoryFilterInput')?.value || '';
             const keyword2 = document.getElementById('packageHistoryFilterInput2')?.value || '';
-            const keyword3 = document.getElementById('packageHistoryFilterInput3')?.value || '';
+            const tagKeyword = document.getElementById('packageHistoryFilterInput3')?.value || '';
             if (!select || !select.value) {
                 packageHistoryLoadedRows = [];
                 packageHistoryOffset = 0;
@@ -3237,7 +3237,7 @@ HTML_TEMPLATE = """
                 session_id: select.value,
                 q1: keyword1,
                 q2: keyword2,
-                q3: keyword3,
+                q3: tagKeyword,
                 offset: String(offset),
                 limit: String(PACKAGE_HISTORY_PAGE_SIZE),
             });
@@ -3259,7 +3259,11 @@ HTML_TEMPLATE = """
                     packageHistoryHasMore = !!data.has_more;
                     updatePackageHistoryLoadMoreButton();
                     if (meta && current) {
-                        const filters = [keyword1, keyword2, keyword3].filter(Boolean).join(' | ');
+                        const filters = [
+                            keyword1 ? `text1:${keyword1}` : '',
+                            keyword2 ? `text2:${keyword2}` : '',
+                            tagKeyword ? `tag:${tagKeyword}` : '',
+                        ].filter(Boolean).join(' | ');
                         meta.textContent = `Selected: ${current.package_id} | Started: ${current.started_label} | Status: ${current.status} | Showing: ${packageHistoryLoadedRows.length} / ${data.total_rows}${filters ? ` | Filter: ${filters}` : ''}`;
                     }
                     renderPackageHistoryRows(data.rows || [], append);
@@ -3279,7 +3283,7 @@ HTML_TEMPLATE = """
             const select = document.getElementById('packageHistorySessionSelect');
             const keyword1 = document.getElementById('packageHistoryFilterInput')?.value || '';
             const keyword2 = document.getElementById('packageHistoryFilterInput2')?.value || '';
-            const keyword3 = document.getElementById('packageHistoryFilterInput3')?.value || '';
+            const tagKeyword = document.getElementById('packageHistoryFilterInput3')?.value || '';
             if (!select || !select.value) {
                 alert('Please select a recorded session first.');
                 return;
@@ -3291,7 +3295,7 @@ HTML_TEMPLATE = """
                     session_id: Number(select.value),
                     q1: filteredOnly ? keyword1 : '',
                     q2: filteredOnly ? keyword2 : '',
-                    q3: filteredOnly ? keyword3 : '',
+                    q3: filteredOnly ? tagKeyword : '',
                     filtered_only: filteredOnly,
                 }),
             })
@@ -4217,7 +4221,7 @@ def package_log_rows_api():
     session_id = request.args.get('session_id', type=int)
     keyword1 = (request.args.get('q1') or request.args.get('q') or '').strip().lower()
     keyword2 = (request.args.get('q2') or '').strip().lower()
-    keyword3 = (request.args.get('q3') or '').strip().lower()
+    tag_keyword = (request.args.get('q3') or '').strip().lower()
     offset = max(request.args.get('offset', default=0, type=int) or 0, 0)
     limit = request.args.get('limit', default=2000, type=int) or 2000
     limit = max(1, min(limit, 5000))
@@ -4241,6 +4245,11 @@ def package_log_rows_api():
               )
             """
 
+        def tag_search_clause():
+            return """
+              AND lower(coalesce(tag, '')) LIKE ?
+            """
+
         if keyword1:
             base_where += search_clause()
             like1 = f"%{keyword1}%"
@@ -4249,10 +4258,9 @@ def package_log_rows_api():
             base_where += search_clause()
             like2 = f"%{keyword2}%"
             params.extend([like2, like2, like2, like2])
-        if keyword3:
-            base_where += search_clause()
-            like3 = f"%{keyword3}%"
-            params.extend([like3, like3, like3, like3])
+        if tag_keyword:
+            base_where += tag_search_clause()
+            params.append(f"%{tag_keyword}%")
 
         total_rows = conn.execute(f"SELECT COUNT(*) AS c {base_where}", params).fetchone()["c"] or 0
         sql = f"""
@@ -4313,7 +4321,7 @@ def package_log_export_api():
 
     keyword1 = str(payload.get('q1') or '').strip().lower()
     keyword2 = str(payload.get('q2') or '').strip().lower()
-    keyword3 = str(payload.get('q3') or '').strip().lower()
+    tag_keyword = str(payload.get('q3') or '').strip().lower()
     filtered_only = bool(payload.get('filtered_only', True))
     conn = _get_package_db_connection()
     try:
@@ -4341,6 +4349,11 @@ def package_log_export_api():
               )
             """
 
+        def tag_search_clause():
+            return """
+              AND lower(coalesce(tag, '')) LIKE ?
+            """
+
         if keyword1:
             like1 = f"%{keyword1}%"
             sql += search_clause()
@@ -4349,10 +4362,9 @@ def package_log_export_api():
             like2 = f"%{keyword2}%"
             sql += search_clause()
             params.extend([like2, like2, like2, like2])
-        if keyword3:
-            like3 = f"%{keyword3}%"
-            sql += search_clause()
-            params.extend([like3, like3, like3, like3])
+        if tag_keyword:
+            sql += tag_search_clause()
+            params.append(f"%{tag_keyword}%")
 
         sql += " ORDER BY id ASC"
         rows = conn.execute(sql, params).fetchall()
@@ -4362,7 +4374,7 @@ def package_log_export_api():
         started_at = session["started_at"] or time.time()
         started_label = time.strftime("%Y%m%d_%H%M%S", time.localtime(started_at))
         package_stub = re.sub(r'[^A-Za-z0-9._-]+', '_', session["package_id"] or f"session_{session_id}")
-        suffix = "filtered" if filtered_only and (keyword1 or keyword2 or keyword3) else "full"
+        suffix = "filtered" if filtered_only and (keyword1 or keyword2 or tag_keyword) else "full"
         filename = f"package_log_{session_id}_{package_stub}_{started_label}_{suffix}.log"
         path = os.path.join(export_dir, filename)
 
