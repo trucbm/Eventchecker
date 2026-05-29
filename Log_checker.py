@@ -1752,7 +1752,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(57)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(58)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2425,6 +2425,23 @@ HTML_TEMPLATE = """
             });
             const sdkBadge = document.getElementById('sdkCheckPlatformBadge');
             if (sdkBadge) sdkBadge.textContent = `${platformLabel(platform)} Table`;
+
+            const packageTagInput = document.getElementById('packageTagFilterInput');
+            if (packageTagInput) {
+                const isIos = platform === 'ios';
+                packageTagInput.disabled = isIos;
+                packageTagInput.placeholder = isIos ? 'Tag filter unavailable on iOS' : 'Tag...';
+                packageTagInput.classList.toggle('bg-gray-100', isIos);
+                packageTagInput.classList.toggle('text-gray-400', isIos);
+                if (isIos) packageTagInput.value = '';
+            }
+            document.querySelectorAll('input[name="tagQuickFilter"]').forEach(radio => {
+                const isIos = platform === 'ios';
+                radio.disabled = isIos;
+                const label = radio.closest('label');
+                if (label) label.classList.toggle('opacity-50', isIos);
+                if (isIos && radio.value === '') radio.checked = true;
+            });
         }
 
         function resetSdkCheckUiState(clearInput = false) {
