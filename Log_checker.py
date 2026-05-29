@@ -1756,7 +1756,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(49)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(50)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1805,7 +1805,7 @@ HTML_TEMPLATE = """
                     
                     <button id="tabBtnValidator" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Validator')">Default Events/Params</button>
                     <button id="tabBtnSpecific" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Specific')">Specific Validator</button>
-                    <button id="tabBtnAdRevenue" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('AdRevenue')">AdRevenue</button>
+                    <button id="tabBtnAdRevenue" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('AdRevenue')">Revenue</button>
                     <button id="tabBtnCallbackAd" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('CallbackAd')">CallBack & Ads</button>
                     <button id="tabBtnSdkCheck" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('SdkCheck')">SDK Check</button>
                     <button id="tabBtnPackage" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Package')">Package Logcat</button>
@@ -1994,7 +1994,7 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- TAB 5: AdRevenue -->
+            <!-- TAB 5: Revenue -->
             <div id="tabContentAdRevenue" class="hidden">
                 <div class="bg-white rounded-xl shadow-md p-4 mb-4">
                      <div class="grid grid-cols-1 md:grid-cols-[minmax(260px,380px)_minmax(0,1fr)] gap-4 items-start">
@@ -5214,6 +5214,24 @@ def process_adrevenue_log(line, device_id):
                 appsflyer_data = {}
             with lock:
                 _record_adrevenue_log(device_id, "appsflyer", "AdRevenue - Appsflyer", appsflyer_data, line, json_str, event_prefix)
+            handled = True
+
+    if (not handled) and active_platform != "ios" and "AdjustTrackingHandler->_LogPurchaseVerificationResult:" in line:
+        payload_part = line.split("AdjustTrackingHandler->_LogPurchaseVerificationResult:", 1)[1].strip()
+        json_str = extract_json_object_from_text(payload_part) or ""
+        if json_str:
+            verification_data = _loads_adrevenue_json_payload(json_str)
+            with lock:
+                _record_adrevenue_log(
+                    device_id,
+                    "adjust",
+                    "Adjust Purchase Verification",
+                    verification_data,
+                    line,
+                    json_str,
+                    "purchase_verification",
+                    skip_validation=True,
+                )
             handled = True
 
     if (not handled) and active_platform != "ios" and "AdjustService->Initialize:" in line:
