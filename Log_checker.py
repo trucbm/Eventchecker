@@ -1752,7 +1752,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(55)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(56)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5209,7 +5209,7 @@ def process_adrevenue_log(line, device_id):
                 _record_adrevenue_log(device_id, "appsflyer", "AdRevenue - Appsflyer", appsflyer_data, line, json_str, event_prefix)
             handled = True
 
-    if (not handled) and active_platform != "ios" and "AdjustTrackingHandler->_LogPurchaseVerificationResult:" in line:
+    if (not handled) and "AdjustTrackingHandler->_LogPurchaseVerificationResult:" in line:
         payload_part = line.split("AdjustTrackingHandler->_LogPurchaseVerificationResult:", 1)[1].strip()
         json_str = extract_json_object_from_text(payload_part) or ""
         if json_str:

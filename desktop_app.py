@@ -19,7 +19,7 @@ except Exception:
 
 HOST = "127.0.0.1"
 PORT = 5001
-DEFAULT_BUNDLED_UPDATE_BUILD = 55
+DEFAULT_BUNDLED_UPDATE_BUILD = 56
 
 
 def _user_data_dir():
