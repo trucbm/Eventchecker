@@ -1749,7 +1749,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(53)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(54)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5592,22 +5592,24 @@ def _process_sdk_check_line(line, device_id):
                 target_network = current_network
                 if target_network:
                     block = _sdk_check_block_for_device(device_id, target_network)
-                    if sdk_match:
-                        sdk_version = sdk_match.group(1).strip()
-                        if block.get("sdk_version") != sdk_version:
-                            block["sdk_version"] = sdk_version
-                            changed = True
-                    if adapter_match:
-                        adapter_version = adapter_match.group(1).strip()
-                        if block.get("adapter_version") != adapter_version or block.get("adapter_missing"):
-                            block["adapter_version"] = adapter_version
-                            block["adapter_missing"] = False
-                            changed = True
-                    elif adapter_missing_match:
-                        if not block.get("adapter_missing") or block.get("adapter_version"):
-                            block["adapter_missing"] = True
-                            block["adapter_version"] = ""
-                            changed = True
+                    block_expected_key = block.get("expected_key") or _match_sdk_expected_key(target_network) or _normalize_sdk_network_name(target_network)
+                    if block_expected_key != "firebasecrashlytics":
+                        if sdk_match:
+                            sdk_version = sdk_match.group(1).strip()
+                            if block.get("sdk_version") != sdk_version:
+                                block["sdk_version"] = sdk_version
+                                changed = True
+                        if adapter_match:
+                            adapter_version = adapter_match.group(1).strip()
+                            if block.get("adapter_version") != adapter_version or block.get("adapter_missing"):
+                                block["adapter_version"] = adapter_version
+                                block["adapter_missing"] = False
+                                changed = True
+                        elif adapter_missing_match:
+                            if not block.get("adapter_missing") or block.get("adapter_version"):
+                                block["adapter_missing"] = True
+                                block["adapter_version"] = ""
+                                changed = True
 
         if _process_sdk_external_line(line, device_id):
             changed = True
