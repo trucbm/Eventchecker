@@ -1056,6 +1056,9 @@ def _process_sdk_external_line(line, device_id):
                 version = item.get("version", "")
                 field = item.get("field", "adapter")
                 network_name = item.get("display_name") or item.get("network") or item.get("version_label") or item.get("search_pattern")
+                expected_key = _match_sdk_expected_key(network_name) or _normalize_sdk_network_name(network_name)
+                if expected_key == "firebasecrashlytics":
+                    continue
                 if field == "sdk":
                     update_block(network_name, sdk_version=version)
                 elif field == "both":
@@ -1749,7 +1752,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(54)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(55)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
