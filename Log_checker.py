@@ -1756,7 +1756,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(50)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(51)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3046,10 +3046,7 @@ HTML_TEMPLATE = """
                 const tagHaystack = `${l.tag || ''}`.toLowerCase();
                 if (state.quickTag) {
                     const quickNeedle = state.quickTag.toLowerCase();
-                    const quickMatched = quickNeedle === 'adjust'
-                        ? (tagHaystack.includes(quickNeedle) || messageHaystack.includes(quickNeedle))
-                        : tagHaystack.includes(quickNeedle);
-                    if (!quickMatched) return false;
+                    if (!tagHaystack.includes(quickNeedle)) return false;
                 }
                 if (state.tagFilter && !tagHaystack.includes(state.tagFilter)) return false;
                 if (state.filterText && !messageHaystack.includes(state.filterText)) return false;
