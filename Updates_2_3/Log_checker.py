@@ -1752,7 +1752,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(58)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(59)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4547,8 +4547,28 @@ def find_and_parse_event(log_entry):
             if not json_str:
                 match = OLD_EVENT_LOG_PATTERN.search(log_entry)
                 json_str = match.group(1) if match else None
-            if json_str:
-                data = json.loads(json_str)
+            if json_str or after_keyword:
+                data = None
+                candidates = []
+                if json_str:
+                    candidates.extend([json_str, _decode_ios_levelplay_json_text(json_str)])
+                raw_tail = (after_keyword or "").strip()
+                if raw_tail:
+                    candidates.extend([raw_tail, _decode_ios_levelplay_json_text(raw_tail)])
+                seen = set()
+                unique_candidates = []
+                for candidate in candidates:
+                    if candidate and candidate not in seen:
+                        seen.add(candidate)
+                        unique_candidates.append(candidate)
+                for candidate in unique_candidates:
+                    try:
+                        data = json.loads(candidate)
+                        break
+                    except Exception:
+                        data = None
+                if not isinstance(data, dict):
+                    raise ValueError("invalid_trackingservice_track_json")
                 event_name = (
                     data.get('eventName')
                     or data.get('EventName')
@@ -4579,8 +4599,28 @@ def find_and_parse_event(log_entry):
             if not json_str:
                 after_keyword = log_entry.split('TrackingService->_LogEvent:', 1)[1]
                 json_str = extract_json_object_from_text(after_keyword)
-            if json_str:
-                data = json.loads(json_str)
+            if json_str or ('TrackingService->_LogEvent:' in log_entry):
+                data = None
+                candidates = []
+                if json_str:
+                    candidates.extend([json_str, _decode_ios_levelplay_json_text(json_str)])
+                raw_tail = log_entry.split('TrackingService->_LogEvent:', 1)[1].strip()
+                if raw_tail:
+                    candidates.extend([raw_tail, _decode_ios_levelplay_json_text(raw_tail)])
+                seen = set()
+                unique_candidates = []
+                for candidate in candidates:
+                    if candidate and candidate not in seen:
+                        seen.add(candidate)
+                        unique_candidates.append(candidate)
+                for candidate in unique_candidates:
+                    try:
+                        data = json.loads(candidate)
+                        break
+                    except Exception:
+                        data = None
+                if not isinstance(data, dict):
+                    raise ValueError("invalid_trackingservice_logevent_json")
                 event_name = (
                     data.get('eventName')
                     or data.get('EventName')
