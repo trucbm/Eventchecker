@@ -1752,7 +1752,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(59)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(60)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2166,8 +2166,8 @@ HTML_TEMPLATE = """
                                         <span>HR - com.indiez.idletycoon.horse.racing</span>
                                     </label>
                                     <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.solitaire.food" data-android-value="com.indiez.solitaire.food" data-android-label="SC - com.indiez.solitaire.food">
-                                        <span>SC - com.indiez.solitaire.food</span>
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.solitaire.word.card.puzzle" data-android-value="com.indiez.solitaire.word.card.puzzle" data-android-label="SW - com.indiez.solitaire.word.card.puzzle">
+                                        <span>SW - com.indiez.solitaire.word.card.puzzle</span>
                                     </label>
                                 </div>
                                 <div class="flex flex-col gap-1 min-w-[320px]">
