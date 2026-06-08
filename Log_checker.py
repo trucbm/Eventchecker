@@ -1145,11 +1145,21 @@ def _process_sdk_external_line(line, device_id):
         ])
         if firebase_messaging_version:
             update_block("Firebase Cloud Messaging", sdk_version=firebase_messaging_version)
-    firebase_crashlytics_version = _extract_first_sdk_version(line, [
-        r'\[Firebase/Crashlytics\]\s*Version\s*([0-9]+(?:\.[0-9]+)+)',
-    ])
-    if firebase_crashlytics_version and "[firebase/crashlytics]" in normalized_line:
-        update_block("Firebase Crashlytics", sdk_version=firebase_crashlytics_version)
+    firebase_crashlytics_version = ""
+    if platform == "ios":
+        firebase_crashlytics_version = _extract_first_sdk_version(line, [
+            r'\[Firebase/Crashlytics\]\s*Version\s*([0-9]+(?:\.[0-9]+)+)',
+        ])
+        if firebase_crashlytics_version and "[firebase/crashlytics]" in normalized_line:
+            update_block("Firebase Crashlytics", sdk_version=firebase_crashlytics_version)
+    else:
+        firebase_crashlytics_match = re.search(
+            r'Initializing Firebase Crashlytics\s+([0-9]+(?:\.[0-9]+)+)',
+            line,
+            re.IGNORECASE,
+        )
+        if firebase_crashlytics_match and "initializing firebase crashlytics" in normalized_line:
+            update_block("Firebase Crashlytics", sdk_version=firebase_crashlytics_match.group(1))
     if platform == "ios":
         firebase_performance_version = _extract_first_sdk_version(line, [
             r'([0-9]+(?:\.[0-9]+)+)\s*-\s*\[FirebasePerformance\]',
@@ -1752,7 +1762,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(60)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(61)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
