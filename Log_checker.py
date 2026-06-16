@@ -5116,6 +5116,10 @@ IOS_ADREVENUE_KEYWORDS = {
     "appmetrica": (
         "AppMetricaTrackingHandler->_Handle:",
         "AppMetricaAdRevenueTrackingHandler->Handle:",
+        "Appmetrica TrackAdRevenueEventForOther:",
+        "AppMetrica TrackAdRevenueEventForOther:",
+        "Appmetrica TrackAdRevenueEvent:",
+        "AppMetrica TrackAdRevenueEvent:",
     ),
     "appsflyer": (
         "AppsFlyerTrackingHandler->Track:",
@@ -5334,7 +5338,12 @@ def process_adrevenue_log(line, device_id):
             data = _loads_adrevenue_json_payload(json_str)
             if ios_source == "appmetrica":
                 ad_revenue = data.get("adRevenue") if isinstance(data.get("adRevenue"), dict) else {}
-                normalized = _normalize_ios_appmetrica_adrevenue(ad_revenue) if ad_revenue else data
+                if ad_revenue:
+                    normalized = _normalize_ios_appmetrica_adrevenue(ad_revenue)
+                elif isinstance(data, dict) and any(key in data for key in ("AdRevenueValue", "Currency", "AdNetwork", "Payload")):
+                    normalized = _normalize_ios_appmetrica_adrevenue(data)
+                else:
+                    normalized = data
                 event_name = "AdRevenue - Appmetrica"
             else:
                 normalized = _normalize_ios_appsflyer_adrevenue(data) if data else {}
