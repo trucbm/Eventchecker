@@ -16,6 +16,9 @@ import sys
 import shutil
 import logging
 import sqlite3
+import socket
+import platform
+import uuid
 try:
     import webview
 except Exception:
@@ -109,6 +112,14 @@ DEFAULT_REMOTE_MANIFEST_URLS = [
     "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_3/remote_manifest.json",
     "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json",
 ]
+APP_AUDIT_CONFIG_FILENAME = "app_audit_config.json"
+DEFAULT_AUDIT_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzKzf7KAJvy3gu1vfaQ7wHR0tk2mzR_UapoVIfjjjO-aFG2NHKmJQKYLvfsBwgi7heY/exec"
+DEFAULT_AUDIT_SHEET_NAME = "AppOpenAudit"
+DEFAULT_AUDIT_TIMEOUT_SEC = 5
+DEFAULT_PUBLIC_IP_URLS = [
+    "https://api.ipify.org?format=json",
+    "https://ifconfig.me/all.json",
+]
 
 
 def _runtime_app_dir():
@@ -142,6 +153,144 @@ def _user_data_dir():
     if sys.platform == "darwin":
         return os.path.join(os.path.expanduser("~/Library/Application Support"), "EventInspector")
     return os.path.join(os.path.expanduser("~"), ".eventinspector")
+
+
+def _app_audit_config_path():
+    return os.path.join(_user_data_dir(), APP_AUDIT_CONFIG_FILENAME)
+
+
+def _machine_id_path():
+    return os.path.join(_user_data_dir(), "machine_id.txt")
+
+
+def _ensure_machine_id():
+    path = _machine_id_path()
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                value = f.read().strip()
+            if value:
+                return value
+        except Exception:
+            pass
+    value = str(uuid.uuid4())
+    os.makedirs(_user_data_dir(), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(value)
+    return value
+
+
+def _ensure_app_audit_config_template():
+    os.makedirs(_user_data_dir(), exist_ok=True)
+    path = _app_audit_config_path()
+    data = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+    data.setdefault("enabled", True)
+    data.setdefault("webhook_url", DEFAULT_AUDIT_WEBHOOK_URL)
+    data.setdefault("sheet_name", DEFAULT_AUDIT_SHEET_NAME)
+    data.setdefault("timeout_sec", DEFAULT_AUDIT_TIMEOUT_SEC)
+    data.setdefault("public_ip_urls", DEFAULT_PUBLIC_IP_URLS)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    return path
+
+
+def _load_app_audit_config():
+    _ensure_app_audit_config_template()
+    data = {}
+    try:
+        with open(_app_audit_config_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    env_webhook = (os.getenv("EVENTINSPECTOR_AUDIT_WEBHOOK_URL") or "").strip()
+    env_sheet_name = (os.getenv("EVENTINSPECTOR_AUDIT_SHEET_NAME") or "").strip()
+    data["enabled"] = bool(data.get("enabled", True))
+    data["webhook_url"] = env_webhook or str(data.get("webhook_url") or DEFAULT_AUDIT_WEBHOOK_URL).strip()
+    data["sheet_name"] = env_sheet_name or str(data.get("sheet_name") or DEFAULT_AUDIT_SHEET_NAME).strip()
+    try:
+        data["timeout_sec"] = float(data.get("timeout_sec", DEFAULT_AUDIT_TIMEOUT_SEC))
+    except Exception:
+        data["timeout_sec"] = DEFAULT_AUDIT_TIMEOUT_SEC
+    urls = data.get("public_ip_urls") or DEFAULT_PUBLIC_IP_URLS
+    data["public_ip_urls"] = [str(url).strip() for url in urls if str(url).strip()]
+    if not data["public_ip_urls"]:
+        data["public_ip_urls"] = list(DEFAULT_PUBLIC_IP_URLS)
+    return data
+
+
+def _detect_public_ip(urls, timeout_sec):
+    session = requests.Session()
+    last_error = ""
+    for url in urls:
+        try:
+            response = session.get(url, timeout=timeout_sec)
+            response.raise_for_status()
+            content_type = response.headers.get("content-type", "").lower()
+            if "json" in content_type:
+                payload = response.json()
+                for key in ("ip", "IP", "address"):
+                    value = payload.get(key)
+                    if value:
+                        return str(value).strip(), ""
+            text = response.text.strip()
+            if text:
+                return text, ""
+        except Exception as exc:
+            last_error = str(exc)
+            continue
+    return "", last_error or "ip_lookup_failed"
+
+
+def _current_app_build():
+    try:
+        with open(__file__, "r", encoding="utf-8", errors="ignore") as f:
+            data = f.read(300000)
+        matches = re.findall(r"v\d+\.\d+\.\d+\((\d+)\)", data)
+        if matches:
+            return max(int(item) for item in matches)
+    except Exception:
+        pass
+    return None
+
+
+def _record_app_open_audit_once():
+    try:
+        cfg = _load_app_audit_config()
+        if not cfg.get("enabled", True):
+            logging.info("App-open audit disabled by config")
+            return
+        webhook_url = str(cfg.get("webhook_url") or "").strip()
+        now = time.time()
+        public_ip, public_ip_error = _detect_public_ip(
+            cfg.get("public_ip_urls") or DEFAULT_PUBLIC_IP_URLS,
+            cfg.get("timeout_sec", DEFAULT_AUDIT_TIMEOUT_SEC),
+        )
+        payload = {
+            "action": "app_open_audit",
+            "sheet_name": cfg.get("sheet_name") or DEFAULT_AUDIT_SHEET_NAME,
+            "opened_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now)),
+            "opened_at_unix": int(now),
+            "public_ip": public_ip or "unavailable",
+            "public_ip_error": public_ip_error,
+            "hostname": socket.gethostname(),
+            "machine_id": _ensure_machine_id(),
+            "os_name": platform.system(),
+            "os_version": platform.platform(),
+            "app_build": _current_app_build(),
+        }
+        if not webhook_url:
+            logging.info("App-open audit payload prepared locally without webhook: %s", json.dumps(payload, ensure_ascii=False))
+            return
+        requests.post(webhook_url, json=payload, timeout=cfg.get("timeout_sec", DEFAULT_AUDIT_TIMEOUT_SEC))
+        logging.info("App-open audit sent successfully: %s", json.dumps(payload, ensure_ascii=False))
+    except Exception:
+        logging.exception("App-open audit failed")
 
 
 def _package_history_dir():
@@ -1762,7 +1911,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.3.0(61)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(5)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5116,6 +5265,10 @@ IOS_ADREVENUE_KEYWORDS = {
     "appmetrica": (
         "AppMetricaTrackingHandler->_Handle:",
         "AppMetricaAdRevenueTrackingHandler->Handle:",
+        "Appmetrica TrackAdRevenueEventForOther:",
+        "AppMetrica TrackAdRevenueEventForOther:",
+        "Appmetrica TrackAdRevenueEvent:",
+        "AppMetrica TrackAdRevenueEvent:",
     ),
     "appsflyer": (
         "AppsFlyerTrackingHandler->Track:",
@@ -5334,7 +5487,12 @@ def process_adrevenue_log(line, device_id):
             data = _loads_adrevenue_json_payload(json_str)
             if ios_source == "appmetrica":
                 ad_revenue = data.get("adRevenue") if isinstance(data.get("adRevenue"), dict) else {}
-                normalized = _normalize_ios_appmetrica_adrevenue(ad_revenue) if ad_revenue else data
+                if ad_revenue:
+                    normalized = _normalize_ios_appmetrica_adrevenue(ad_revenue)
+                elif isinstance(data, dict) and any(key in data for key in ("AdRevenueValue", "Currency", "AdNetwork", "Payload")):
+                    normalized = _normalize_ios_appmetrica_adrevenue(data)
+                else:
+                    normalized = data
                 event_name = "AdRevenue - Appmetrica"
             else:
                 normalized = _normalize_ios_appsflyer_adrevenue(data) if data else {}
@@ -6341,6 +6499,7 @@ def connect():
 # --- MAIN ---
 def run_server(host="0.0.0.0", port=5001):
     _normalize_remote_update_config()
+    threading.Thread(target=_record_app_open_audit_once, daemon=True).start()
     _set_active_profile()
     _init_package_log_db()
     threading.Thread(target=device_manager, daemon=True).start()

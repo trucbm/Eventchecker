@@ -37,7 +37,7 @@ def _user_data_dir():
 def _config_paths():
     user_dir = _user_data_dir()
     return [
-        os.getenv("EVENTINSPECTOR_UPDATE_CONFIG_V210"),
+        os.getenv("EVENTINSPECTOR_UPDATE_CONFIG_V230"),
         os.path.join(user_dir, CONFIG_FILENAME),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME),
     ]
@@ -119,7 +119,7 @@ def _sha256_file(path):
 
 
 def _extract_build_number(text):
-    match = re.search(r"2\.3\.0-(\d+)$", str(text or "").strip())
+    match = re.search(r"\d+\.\d+\.\d+-(\d+)$", str(text or "").strip())
     if match:
         try:
             return int(match.group(1))
