@@ -207,6 +207,27 @@ def load_prepared_update_dir():
     return update_dir
 
 
+def _existing_update_matches_manifest(update_dir, manifest_files):
+    if not update_dir or not os.path.isdir(update_dir):
+        return False
+    for item in manifest_files or []:
+        rel_path = item.get("path")
+        if not rel_path:
+            continue
+        target = os.path.join(update_dir, rel_path)
+        if not os.path.exists(target):
+            return False
+        expected_sha = str(item.get("sha256") or "").strip().lower()
+        if expected_sha:
+            try:
+                actual_sha = _sha256_file(target).lower()
+            except Exception:
+                return False
+            if actual_sha != expected_sha:
+                return False
+    return True
+
+
 def get_prepared_update_info():
     update_dir = load_prepared_update_dir()
     if not update_dir:
@@ -249,12 +270,7 @@ def check_for_updates():
     manifest_version = manifest.get("version")
     existing_update_dir = state.get("update_dir") or update_dir
     manifest_files = manifest.get("files", [])
-    if (
-        state_version == manifest_version
-        and existing_update_dir
-        and os.path.isdir(existing_update_dir)
-        and all(os.path.exists(os.path.join(existing_update_dir, item.get("path", ""))) for item in manifest_files if item.get("path"))
-    ):
+    if state_version == manifest_version and _existing_update_matches_manifest(existing_update_dir, manifest_files):
         state.update({
             "last_check": time.time(),
             "version": manifest_version,
