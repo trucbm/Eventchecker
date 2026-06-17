@@ -189,6 +189,36 @@ def _download_first(urls, timeout):
     raise ValueError("no_download_urls")
 
 
+def _download_verified(urls, timeout, expected_sha256=""):
+    last_error = None
+    normalized_sha = str(expected_sha256 or "").strip().lower()
+    for url in _unique_urls(urls):
+        tmp_path = None
+        try:
+            data = _download(url, timeout)
+            if normalized_sha:
+                import tempfile
+                fd, tmp_path = tempfile.mkstemp(prefix="eventinspector_update_", suffix=".tmp")
+                os.close(fd)
+                with open(tmp_path, "wb") as f:
+                    f.write(data)
+                actual_sha = _sha256_file(tmp_path).lower()
+                if actual_sha != normalized_sha:
+                    raise ValueError(f"sha256_mismatch:{actual_sha}")
+            return data, url
+        except Exception as exc:
+            last_error = exc
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+    if last_error:
+        raise last_error
+    raise ValueError("no_verified_download_urls")
+
+
 def load_prepared_update_dir():
     _ensure_user_config_template()
     cfg = _load_config()
@@ -303,15 +333,10 @@ def check_for_updates():
                 candidate_urls.append(url)
             candidate_urls.extend(urls)
             candidate_urls.extend(_default_repo_file_urls(rel_path))
-            data, _used_url = _download_first(candidate_urls, timeout)
+            data, _used_url = _download_verified(candidate_urls, timeout, sha256)
             tmp = f"{target}.tmp"
             with open(tmp, "wb") as f:
                 f.write(data)
-            if sha256:
-                if _sha256_file(tmp).lower() != sha256.lower():
-                    os.remove(tmp)
-                    ok = False
-                    break
             os.replace(tmp, target)
         except Exception:
             ok = False
