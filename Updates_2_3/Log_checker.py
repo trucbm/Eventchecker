@@ -1911,12 +1911,13 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(6)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(7)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
                     <div class="flex items-center gap-2">
                     <button id="restartAppBtn" class="bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Check Update</button>
+                    <button id="clearUpdateCacheBtn" class="bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Clear Cache</button>
                     <button id="manualRestartBtn" class="bg-slate-500 hover:bg-slate-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Restart</button>
                     <button id="platformBtn" class="bg-white hover:bg-gray-50 text-slate-700 border border-slate-300 text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Platform: Android</button>
                 </div>
@@ -2709,6 +2710,31 @@ HTML_TEMPLATE = """
                 .finally(() => {
                     restartAppBtn.disabled = false;
                     restartAppBtn.textContent = originalText;
+                });
+        });
+
+        const clearUpdateCacheBtn = document.getElementById('clearUpdateCacheBtn');
+        clearUpdateCacheBtn?.addEventListener('click', () => {
+            if (clearUpdateCacheBtn.disabled) return;
+            if (!confirm('Clear update cache now? Use this only when a machine is stuck on an old version.')) return;
+            const originalText = clearUpdateCacheBtn.textContent;
+            clearUpdateCacheBtn.disabled = true;
+            clearUpdateCacheBtn.textContent = 'Clearing...';
+            fetch('/clear_update_cache', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        alert('Update cache cleared. Press Check Update again.');
+                    } else {
+                        alert('Clear cache failed: ' + (data.error || 'unknown_error'));
+                    }
+                })
+                .catch(err => {
+                    alert('Clear cache failed: ' + err);
+                })
+                .finally(() => {
+                    clearUpdateCacheBtn.disabled = false;
+                    clearUpdateCacheBtn.textContent = originalText;
                 });
         });
 
@@ -4332,13 +4358,23 @@ def check_update():
     except Exception as e:
         return jsonify({'ok': False, 'status': 'error', 'error': f'updater_unavailable: {e}'})
     try:
-        try:
-            result = remote_update.check_for_updates(force_refresh=True)
-        except TypeError:
-            result = remote_update.check_for_updates()
+        result = remote_update.check_for_updates()
         return jsonify(result)
     except Exception as e:
         return jsonify({'ok': False, 'status': 'error', 'error': str(e)})
+
+
+@app.post('/clear_update_cache')
+def clear_update_cache():
+    try:
+        remote_update = _load_remote_update_module()
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'updater_unavailable: {e}'})
+    try:
+        remote_update.clear_update_cache(include_all_channels=True)
+        return jsonify({'ok': True})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
 
 
 @app.post('/restart_app')
