@@ -1911,7 +1911,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(7)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(8)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4682,6 +4682,8 @@ def process_load_ads_ext_log(line, device_id):
                 return
             data = _loads_adrevenue_json_payload(json_str)
             ad_revenue = data.get("adRevenue") if isinstance(data.get("adRevenue"), dict) else {}
+            if not ad_revenue and isinstance(data, dict) and any(key in data for key in ("AdRevenueValue", "Currency", "AdNetwork", "Payload")):
+                ad_revenue = data
             payload = ad_revenue.get("Payload") if isinstance(ad_revenue.get("Payload"), dict) else {}
 
             ad_network = ad_revenue.get("AdNetwork") or payload.get("ad_network")
