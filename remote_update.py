@@ -4,6 +4,7 @@ import re
 import hashlib
 import time
 import sys
+import shutil
 
 import requests
 
@@ -23,6 +24,7 @@ DEFAULT_FILE_URL_BASES = [
     "https://github.com/trucbm/Eventchecker/raw/main",
     "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main",
 ]
+KNOWN_CHANNELS = ("v230", "v240")
 
 
 def _user_data_dir():
@@ -91,6 +93,40 @@ def _ensure_user_config_template():
 
 def _state_path():
     return os.path.join(_user_data_dir(), STATE_FILENAME)
+
+
+def _channel_paths(channel_id):
+    user_dir = _user_data_dir()
+    return {
+        "config": os.path.join(user_dir, f"remote_update_config_{channel_id}.json"),
+        "state": os.path.join(user_dir, f"update_state_{channel_id}.json"),
+        "updates": os.path.join(user_dir, f"updates_{channel_id}"),
+        "updates_tmp": os.path.join(user_dir, f"updates_{channel_id}_tmp"),
+    }
+
+
+def _remove_path(path):
+    if not path or not os.path.exists(path):
+        return
+    if os.path.isdir(path):
+        shutil.rmtree(path, ignore_errors=True)
+        return
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except Exception:
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
+
+
+def clear_update_cache(include_all_channels=False):
+    channel_ids = KNOWN_CHANNELS if include_all_channels else (CHANNEL_ID,)
+    for channel_id in channel_ids:
+        for path in _channel_paths(channel_id).values():
+            _remove_path(path)
 
 
 def _load_state():
@@ -272,7 +308,10 @@ def get_prepared_update_info():
     }
 
 
-def check_for_updates():
+def check_for_updates(force_refresh=False):
+    if force_refresh:
+        clear_update_cache(include_all_channels=True)
+
     _ensure_user_config_template()
     cfg = _load_config()
 
