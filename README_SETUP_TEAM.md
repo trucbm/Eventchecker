@@ -160,6 +160,8 @@ Khuyen nghi workflow:
 - Khong code truc tiep tren `main`
 - Moi task tao 1 branch rieng
 - Xong thi push branch va merge lai
+- Moi may dev deu duoc code local, build local, chay thu local
+- Chi push len Git khi da test local thay on
 
 Buoc lam viec moi ngay:
 
@@ -184,6 +186,47 @@ Neu team chua dung PR nghiem tuc, van nen giu toi thieu quy tac:
 - Moi nguoi 1 branch
 - Merge xong moi quay lai `main`
 - Luon `git pull origin main` truoc khi tao branch moi
+
+
+## 7A. Flow lam viec chuan cua team
+
+Day la flow khuyen nghi cho moi may dev, bao gom may dang dung Codex:
+
+1. Keo code moi nhat tu GitHub
+2. Tao branch rieng de sua
+3. Sua source code local tren may do
+4. Chay app local de test nhanh
+5. Neu can, build local de test packaging
+6. Neu thay on, moi commit va push len GitHub
+7. Sau do moi merge vao nhanh chung
+
+Flow ngan gon:
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b feature/<ten-task>
+
+# sua code local
+# chay local
+python desktop_app.py
+
+# neu can build local
+# macOS: bash build/macos/build_macos.sh
+# Windows: build\windows\build_portable.bat
+
+# test xong, neu OK moi push
+git add <file-can-thiet>
+git commit -m "Mo ta thay doi"
+git push origin feature/<ten-task>
+```
+
+Nguyen tac quan trong:
+
+- Local build va local test truoc
+- Khong push code chua test
+- Khong commit file build, cache, state local
+- Neu la thay doi cho updater/client, phai cap nhat payload va manifest
 
 
 ## 8. Quy tac file nen va khong nen commit
@@ -245,6 +288,27 @@ Output:
 Doc them:
 
 - `build/windows/README_INSTALLER_WINDOWS.md`
+
+
+## 9A. Khi nao can build local
+
+Moi may dev co the build local tren chinh may do.
+
+Can build local khi:
+
+- muon test ban app dong goi
+- muon test startup cua `.app`, `.dmg`, `.exe`
+- muon kiem tra logic updater trong ban packaged
+
+Khong can build local moi lan neu:
+
+- chi sua logic Python/HTML va co the test bang `python desktop_app.py`
+
+Quy tac thuc te:
+
+- Sua nho: chay local truoc
+- Sua lien quan package/update/restart: nen build local de test them
+- Chi push khi local test da on
 
 
 ## 10. Remote update / payload update
@@ -403,4 +467,3 @@ De lam viec on dinh voi 2-3 nguoi:
 - merge qua PR
 - giu `main` sach va chay duoc
 - ghi ro trong commit message la sua source local hay publish update payload
-
