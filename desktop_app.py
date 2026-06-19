@@ -38,7 +38,7 @@ def _extract_build_number_from_file(path):
     except Exception:
         return None
     import re
-    matches = re.findall(r"v2\.3\.0\((\d+)\)", data)
+    matches = re.findall(r"v\d+\.\d+\.\d+\((\d+)\)", data)
     if not matches:
         return None
     try:
@@ -65,6 +65,42 @@ def _get_bundled_update_build():
     if build is not None:
         return build
     return DEFAULT_BUNDLED_UPDATE_BUILD
+
+
+def _candidate_update_dirs():
+    user_dir = _user_data_dir()
+    candidates = []
+    seen = set()
+
+    def add_candidate(update_dir, build=None, source="unknown"):
+        if not update_dir or update_dir in seen or not os.path.isdir(update_dir):
+            return
+        log_checker_path = os.path.join(update_dir, "Log_checker.py")
+        if not os.path.exists(log_checker_path):
+            return
+        actual_build = build if build is not None else _extract_build_number_from_file(log_checker_path)
+        candidates.append({
+            "update_dir": update_dir,
+            "build": actual_build,
+            "source": source,
+        })
+        seen.add(update_dir)
+
+    if remote_update:
+        try:
+            prepared = remote_update.get_prepared_update_info() or {}
+            add_candidate(prepared.get("update_dir"), prepared.get("build"), "channel_state")
+        except Exception:
+            logging.exception("Failed to inspect channel prepared update")
+
+    for dirname, source in (
+        ("updates_v230", "scan_v230"),
+        ("updates_v240", "scan_v240"),
+    ):
+        add_candidate(os.path.join(user_dir, dirname), None, source)
+
+    candidates.sort(key=lambda item: (item.get("build") is not None, item.get("build") or -1), reverse=True)
+    return candidates
 
 def _setup_logging():
     log_dir = _user_data_dir()
@@ -132,32 +168,35 @@ def main():
     os.environ['EVENTINSPECTOR_RESTART_ARGS'] = restart_args
 
     # Load any already-downloaded update, but do not check remote on launch.
-    if remote_update:
-        try:
-            prepared_update = remote_update.get_prepared_update_info()
-            update_dir = prepared_update.get("update_dir") if prepared_update else None
-            if update_dir:
-                updated_build = prepared_update.get("build")
-                requested_from_bundle_build = prepared_update.get("requested_from_bundle_build")
-                if (
-                    updated_build is not None
-                    and updated_build < bundled_build
-                    and requested_from_bundle_build != bundled_build
-                ):
-                    logging.info(
-                        "Ignoring stale prepared update %s because bundled build is %s and requested build is %s",
-                        updated_build,
-                        bundled_build,
-                        requested_from_bundle_build,
-                    )
-                    update_dir = None
-            if update_dir:
-                os.environ["EVENTINSPECTOR_UPDATE_DIR"] = update_dir
-                if update_dir not in sys.path:
-                    sys.path.insert(0, update_dir)
-                logging.info("Loaded prepared update from: %s", update_dir)
-        except Exception:
-            logging.exception("Prepared update load failed:\n%s", traceback.format_exc())
+    try:
+        selected_update = None
+        for candidate in _candidate_update_dirs():
+            candidate_build = candidate.get("build")
+            if candidate_build is None:
+                continue
+            if candidate_build < bundled_build:
+                logging.info(
+                    "Ignoring stale update candidate from %s: build %s < bundled %s",
+                    candidate.get("source"),
+                    candidate_build,
+                    bundled_build,
+                )
+                continue
+            selected_update = candidate
+            break
+        if selected_update:
+            update_dir = selected_update["update_dir"]
+            os.environ["EVENTINSPECTOR_UPDATE_DIR"] = update_dir
+            if update_dir not in sys.path:
+                sys.path.insert(0, update_dir)
+            logging.info(
+                "Loaded prepared update from: %s (source=%s, build=%s)",
+                update_dir,
+                selected_update.get("source"),
+                selected_update.get("build"),
+            )
+    except Exception:
+        logging.exception("Prepared update load failed:\n%s", traceback.format_exc())
 
     def _load_run_server():
         update_dir = os.environ.get("EVENTINSPECTOR_UPDATE_DIR")

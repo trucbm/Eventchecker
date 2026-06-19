@@ -470,6 +470,10 @@ LOAD_ADS_EXT_ADREVENUE_PATTERN = re.compile(r'AdRevenue Received:\s*AdRevenue\{(
 IOS_LOAD_ADS_EXT_ADREVENUE_KEYWORDS = (
     "AppMetricaTrackingHandler->_Handle:",
     "AppMetricaAdRevenueTrackingHandler->Handle:",
+    "Appmetrica TrackAdRevenueEventForOther:",
+    "AppMetrica TrackAdRevenueEventForOther:",
+    "Appmetrica TrackAdRevenueEvent:",
+    "AppMetrica TrackAdRevenueEvent:",
 )
 METRICA_REGULAR_EVENT_PATTERN = re.compile(
     r'Event received on service:\s*EVENT_TYPE_REGULAR\s+with name\s+([A-Za-z0-9_.$-]+)\s+with value\s*(\{.*\})'
@@ -4533,6 +4537,8 @@ def process_load_ads_ext_log(line, device_id):
                 return
             data = _loads_adrevenue_json_payload(json_str)
             ad_revenue = data.get("adRevenue") if isinstance(data.get("adRevenue"), dict) else {}
+            if not ad_revenue and isinstance(data, dict) and any(key in data for key in ("AdRevenueValue", "Currency", "AdNetwork", "Payload")):
+                ad_revenue = data
             payload = ad_revenue.get("Payload") if isinstance(ad_revenue.get("Payload"), dict) else {}
 
             ad_network = ad_revenue.get("AdNetwork") or payload.get("ad_network")
