@@ -207,6 +207,54 @@ Codex can uu tien:
 - khong commit file local-only
 
 
+## 7B. Neu co 2 may cung dang lam
+
+Neu co nhieu may cung dev, Codex phai lam theo quy tac:
+
+1. Moi may = 1 branch rieng
+2. Push thuong xuyen, khong giu code local qua lau
+3. Truoc khi tiep tuc lam, phai `git fetch` hoac `git pull`
+4. Truoc khi merge, phai dua `origin/main` vao branch hien tai
+
+Lenh mau:
+
+```bash
+git fetch origin
+git checkout main
+git pull origin main
+git checkout <branch-cua-minh>
+git merge origin/main
+```
+
+Neu Codex gap conflict:
+
+- khong tu y force push
+- khong reset manh
+- bao lai tinh trang conflict
+- chi resolve khi conflict ro rang va nho
+
+
+## 7C. Thao tac Git co the giao cho Codex
+
+Codex co the tu dong lam:
+
+- `git status`
+- `git checkout`
+- `git fetch`
+- `git pull`
+- `git add`
+- `git commit`
+- `git push`
+- merge `origin/main` vao branch hien tai
+
+Can nguoi xac nhan:
+
+- merge vao `main`
+- force push
+- reset / revert co rui ro
+- xoa branch
+
+
 ## 8. Khi nao phai sua payload update
 
 Neu thay doi chi de dev local:

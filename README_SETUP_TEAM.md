@@ -229,6 +229,104 @@ Nguyen tac quan trong:
 - Neu la thay doi cho updater/client, phai cap nhat payload va manifest
 
 
+## 7B. Neu 2 may cung dang code thi dong bo the nao
+
+Neu may A va may B cung dang sua app, muc tieu la:
+
+- khong miss code cua nhau
+- khong de 1 may giu code local qua lau
+- khong push de len `main`
+
+Quy tac:
+
+1. Moi may lam tren branch rieng
+2. Push thuong xuyen len GitHub
+3. Truoc khi tiep tuc lam, phai `fetch` / `pull` code moi nhat
+4. Truoc khi merge vao nhanh chung, phai cap nhat `main` vao branch hien tai
+
+Flow de nghi:
+
+May A:
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b feature/may-a-task
+```
+
+May B:
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b feature/may-b-task
+```
+
+Trong qua trinh lam:
+
+```bash
+git add <file-can-thiet>
+git commit -m "WIP: phan viec da xong"
+git push origin <branch-cua-minh>
+```
+
+Truoc khi merge:
+
+```bash
+git fetch origin
+git checkout <branch-cua-minh>
+git merge origin/main
+```
+
+Hoac:
+
+```bash
+git fetch origin
+git checkout <branch-cua-minh>
+git rebase origin/main
+```
+
+Nguyen tac de khong miss code:
+
+- Khong sua truc tiep tren `main`
+- Khong giu code local qua lau ma khong push
+- Push commit nho, deu
+- Truoc khi tiep tuc lam task cu, luon `fetch` code moi nhat
+- Neu 2 may cung sua 1 file lon nhu `Log_checker.py`, nen bao nhau truoc
+
+
+## 7C. Thao tac Git nao co the giao cho Codex
+
+Codex co the lam an toan:
+
+- `git status`
+- `git checkout`
+- `git branch`
+- `git fetch`
+- `git pull`
+- `git add`
+- `git commit`
+- `git push`
+- `git merge origin/main` vao branch hien tai
+- giai thich conflict co ban
+
+Nhung viec nen co nguoi xac nhan truoc:
+
+- merge thang vao `main`
+- force push
+- `git reset --hard`
+- xoa branch
+- revert commit co anh huong den nguoi khac
+- resolve conflict phuc tap
+
+Rule de giao Git cho Codex:
+
+- test local OK roi moi commit/push
+- khong commit file build/cache/state local
+- neu gap conflict, Codex nen dung lai va bao
+- khong push thang `main` neu chua duoc yeu cau ro rang
+
+
 ## 8. Quy tac file nen va khong nen commit
 
 Nen commit:
