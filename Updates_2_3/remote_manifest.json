@@ -1,5 +1,5 @@
 {
-  "version": "2026-06-17-2.4.0-16",
+  "version": "2026-07-02-2.4.0-17",
   "files": [
     {
       "path": "Log_checker.py",
@@ -9,7 +9,7 @@
         "https://github.com/trucbm/Eventchecker/raw/2.4.0/Updates_2_4/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.4.0/Updates_2_4/Log_checker.py"
       ],
-      "sha256": "a217e627a33ed79b20208a7c184d70d885da669908e91f42c5ea566eaea536e1"
+      "sha256": "e609918c134fdeca0326acf92398f3660dfe6eb1a348247c246d046da85cc710"
     },
     {
       "path": "remote_update.py",

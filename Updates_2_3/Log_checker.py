@@ -1915,7 +1915,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(9)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(10)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2344,8 +2344,8 @@ HTML_TEMPLATE = """
                                         <span>CP - com.nostel.parking.car</span>
                                     </label>
                                     <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.jigblock" data-android-value="com.nostel.jigblock" data-android-label="JS - com.nostel.jigblock">
-                                        <span>JS - com.nostel.jigblock</span>
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.afk.idle.cat.food.restaurent" data-android-value="com.afk.idle.cat.food.restaurent" data-android-label="CR - com.afk.idle.cat.food.restaurent">
+                                        <span>CR - com.afk.idle.cat.food.restaurent</span>
                                     </label>
                                     <label class="inline-flex items-center gap-2">
                                         <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="tap.monster.block.away" data-android-value="tap.monster.block.away" data-android-label="TP - tap.monster.block.away">
