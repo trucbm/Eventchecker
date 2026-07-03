@@ -780,11 +780,15 @@ def _update_installation_id_runtime(device_id, package_id="", installation_id=""
     changed = False
     with lock:
         state = dict(installation_id_state.get(device_id) or {})
-        if state.get("package_id", "") != package_id:
+        package_changed = state.get("package_id", "") != package_id
+        if package_changed:
             state["package_id"] = package_id
             changed = True
         if state.get("game_code", "") != game_code:
             state["game_code"] = game_code
+            changed = True
+        if package_changed and state.get("installation_id", ""):
+            state["installation_id"] = ""
             changed = True
         if installation_id and state.get("installation_id", "") != installation_id:
             state["installation_id"] = installation_id
@@ -2072,8 +2076,13 @@ HTML_TEMPLATE = """
                     <button id="manualRestartBtn" class="bg-slate-500 hover:bg-slate-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Restart</button>
                     <button id="platformBtn" class="bg-white hover:bg-gray-50 text-slate-700 border border-slate-300 text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Platform: Android</button>
                     <div id="installationIdPanel" class="min-w-[300px] max-w-[420px] bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 shadow-sm">
-                        <div id="installationIdGame" class="text-xs font-semibold text-slate-700 truncate">-</div>
-                        <div id="installationIdValue" class="text-[11px] text-slate-500 font-mono break-all leading-4 mt-1">Installation ID: -</div>
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0 flex-1">
+                                <div id="installationIdGame" class="text-xs font-semibold text-slate-700 truncate">-</div>
+                                <div id="installationIdValue" class="text-[11px] text-slate-500 font-mono break-all leading-4 mt-1">Installation ID: -</div>
+                            </div>
+                            <button id="copyInstallationIdBtn" type="button" class="shrink-0 text-[11px] font-semibold px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 text-slate-700">Copy</button>
+                        </div>
                     </div>
                 </div>
                 </div>
@@ -2697,6 +2706,7 @@ HTML_TEMPLATE = """
         const platformModal = document.getElementById('platformModal');
         const installationIdGameEl = document.getElementById('installationIdGame');
         const installationIdValueEl = document.getElementById('installationIdValue');
+        const copyInstallationIdBtn = document.getElementById('copyInstallationIdBtn');
         let activePlatform = localStorage.getItem('eventInspectorPlatform') || '';
         let installationIdState = {
             device_id: '',
@@ -2800,7 +2810,27 @@ HTML_TEMPLATE = """
             const installationId = installationIdState.installation_id || '';
             installationIdGameEl.textContent = packageId ? `${gameCode || 'Unknown'} | ${packageId}` : '-';
             installationIdValueEl.textContent = installationId ? `Installation ID: ${installationId}` : 'Installation ID: -';
+            if (copyInstallationIdBtn) {
+                copyInstallationIdBtn.disabled = !installationId;
+                copyInstallationIdBtn.classList.toggle('opacity-50', !installationId);
+                copyInstallationIdBtn.classList.toggle('cursor-not-allowed', !installationId);
+            }
         }
+
+        copyInstallationIdBtn?.addEventListener('click', async () => {
+            const installationId = installationIdState.installation_id || '';
+            if (!installationId) return;
+            const originalText = copyInstallationIdBtn.textContent;
+            try {
+                await navigator.clipboard.writeText(installationId);
+                copyInstallationIdBtn.textContent = 'Copied';
+            } catch (err) {
+                alert('Copy failed: ' + err);
+            }
+            setTimeout(() => {
+                copyInstallationIdBtn.textContent = originalText;
+            }, 1200);
+        });
 
         function setActivePlatform(platform, persist = true) {
             activePlatform = platform === 'ios' ? 'ios' : 'android';
