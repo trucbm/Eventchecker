@@ -414,6 +414,17 @@ IOS_DEVICE_NAMES = {
     "2327f3aecd8ddc636571c6a8572f87f4fdbcfac0": "7 Plus black",
 }
 
+ANDROID_PACKAGE_GAME_CODES = {
+    "com.indiez.nonogram": "NG",
+    "com.indiez.train.miner": "TM",
+    "com.indiez.idletycoon.horse.racing": "HR",
+    "com.indiez.solitaire.word.card.puzzle": "SW",
+    "com.nostel.dot.line.puzzle": "KN",
+    "com.nostel.parking.car": "CP",
+    "com.afk.idle.cat.food.restaurent": "CR",
+    "tap.monster.block.away": "TP",
+}
+
 # --- DỮ LIỆU TOÀN CỤC ---
 
 # Giới hạn cache để UI không giữ quá nhiều log trong RAM.
@@ -488,6 +499,7 @@ active_ios_log_started_at = {}
 active_ios_log_last_seen = {}
 active_ios_log_commands = {}
 connected_devices_info = []
+installation_id_state = {}
 is_paused = False
 lock = threading.Lock()
 incomplete_impression_logs = {} # Buffer cho logs bị ngắt dòng
@@ -692,6 +704,141 @@ def _short_device_id(device_id, length=8):
     if not device_id:
         return ""
     return f"{device_id[:length]}..."
+
+
+def _game_code_for_package(package_id):
+    package_id = (package_id or "").strip()
+    return ANDROID_PACKAGE_GAME_CODES.get(package_id) or "Unknown"
+
+
+def _get_android_foreground_package(device_id):
+    commands = [
+        [ADB_EXECUTABLE, "-s", device_id, "shell", "dumpsys", "window", "windows"],
+        [ADB_EXECUTABLE, "-s", device_id, "shell", "dumpsys", "activity", "activities"],
+    ]
+    patterns = [
+        r"mCurrentFocus=.*? ([A-Za-z0-9_\.]+)/[A-Za-z0-9_\.]+",
+        r"mFocusedApp=.*? ([A-Za-z0-9_\.]+)/[A-Za-z0-9_\.]+",
+        r"topResumedActivity:.*? ([A-Za-z0-9_\.]+)/[A-Za-z0-9_\.]+",
+        r"ResumedActivity:.*? ([A-Za-z0-9_\.]+)/[A-Za-z0-9_\.]+",
+        r"mResumedActivity:.*? ([A-Za-z0-9_\.]+)/[A-Za-z0-9_\.]+",
+    ]
+    for cmd in commands:
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                creationflags=creation_flags,
+                timeout=5,
+            )
+            output = result.stdout or ""
+        except Exception:
+            continue
+        for pattern in patterns:
+            match = re.search(pattern, output)
+            if match:
+                return match.group(1).strip()
+    return ""
+
+
+def _build_installation_id_payload(device_id):
+    state = installation_id_state.get(device_id) or {}
+    package_id = state.get("package_id", "")
+    return {
+        "device_id": device_id,
+        "device_name": get_device_name(device_id),
+        "platform": active_platform,
+        "package_id": package_id,
+        "game_code": state.get("game_code") or _game_code_for_package(package_id),
+        "installation_id": state.get("installation_id", ""),
+    }
+
+
+def _emit_installation_id_state(device_id=None):
+    with lock:
+        if device_id:
+            payload = _build_installation_id_payload(device_id)
+        else:
+            target_device_id = ""
+            if installation_id_state:
+                target_device_id = max(
+                    installation_id_state.items(),
+                    key=lambda item: item[1].get("updated_at", 0),
+                )[0]
+            elif connected_devices_info:
+                target_device_id = connected_devices_info[0].get("id", "")
+            payload = _build_installation_id_payload(target_device_id)
+    socketio.emit("installation_id_status", payload)
+
+
+def _update_installation_id_runtime(device_id, package_id="", installation_id="", force_emit=False):
+    package_id = (package_id or "").strip()
+    game_code = _game_code_for_package(package_id)
+    changed = False
+    with lock:
+        state = dict(installation_id_state.get(device_id) or {})
+        if state.get("package_id", "") != package_id:
+            state["package_id"] = package_id
+            changed = True
+        if state.get("game_code", "") != game_code:
+            state["game_code"] = game_code
+            changed = True
+        if installation_id and state.get("installation_id", "") != installation_id:
+            state["installation_id"] = installation_id
+            changed = True
+        if changed or force_emit:
+            state["updated_at"] = time.time()
+            installation_id_state[device_id] = state
+    if changed or force_emit:
+        _emit_installation_id_state(device_id)
+
+
+def process_installation_id_log(line, device_id):
+    if active_platform != "android":
+        return
+    installation_id = ""
+    marker = "FirebaseInstallationIdPostInitHandler->_DebugInstallationId:"
+    if marker in line:
+        _, _, json_part = line.partition(marker)
+        json_part = json_part.strip()
+        if json_part:
+            try:
+                payload = json.loads(json_part)
+            except Exception:
+                payload = {}
+            id_task = payload.get("idTask") or {}
+            installation_id = str(id_task.get("idTask.Result") or "").strip()
+    if not installation_id:
+        plain_match = re.search(r"\bInstallations id\s+([A-Za-z0-9_-]+)", line)
+        if plain_match:
+            installation_id = plain_match.group(1).strip()
+    if not installation_id:
+        return
+    package_id = _get_android_foreground_package(device_id)
+    _update_installation_id_runtime(device_id, package_id=package_id, installation_id=installation_id, force_emit=True)
+
+
+def android_installation_id_monitor():
+    while True:
+        time.sleep(2)
+        if active_platform != "android":
+            continue
+        with lock:
+            devices_snapshot = list(connected_devices_info)
+        for device in devices_snapshot:
+            device_id = device.get("id", "")
+            if not device_id:
+                continue
+            try:
+                package_id = _get_android_foreground_package(device_id)
+            except Exception:
+                continue
+            if not package_id:
+                continue
+            _update_installation_id_runtime(device_id, package_id=package_id)
 
 def _ios_log_reader_status(device_id):
     now = time.time()
@@ -1915,7 +2062,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(11)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(12)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -1924,6 +2071,10 @@ HTML_TEMPLATE = """
                     <button id="clearUpdateCacheBtn" class="bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Clear Cache</button>
                     <button id="manualRestartBtn" class="bg-slate-500 hover:bg-slate-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Restart</button>
                     <button id="platformBtn" class="bg-white hover:bg-gray-50 text-slate-700 border border-slate-300 text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Platform: Android</button>
+                    <div id="installationIdPanel" class="min-w-[300px] max-w-[420px] bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 shadow-sm">
+                        <div id="installationIdGame" class="text-xs font-semibold text-slate-700 truncate">-</div>
+                        <div id="installationIdValue" class="text-[11px] text-slate-500 font-mono break-all leading-4 mt-1">Installation ID: -</div>
+                    </div>
                 </div>
                 </div>
                 <div class="flex items-center gap-4">
@@ -2544,7 +2695,17 @@ HTML_TEMPLATE = """
         const restartAppBtn = document.getElementById('restartAppBtn');
         const platformBtn = document.getElementById('platformBtn');
         const platformModal = document.getElementById('platformModal');
+        const installationIdGameEl = document.getElementById('installationIdGame');
+        const installationIdValueEl = document.getElementById('installationIdValue');
         let activePlatform = localStorage.getItem('eventInspectorPlatform') || '';
+        let installationIdState = {
+            device_id: '',
+            device_name: '',
+            package_id: '',
+            game_code: '',
+            installation_id: '',
+            platform: 'android',
+        };
 
         function platformLabel(platform) {
             return platform === 'ios' ? 'iOS' : 'Android';
@@ -2630,6 +2791,15 @@ HTML_TEMPLATE = """
             if (typeof setPackageRunningState === 'function') setPackageRunningState(false);
             if (typeof resetPackageLogUiState === 'function') resetPackageLogUiState();
             syncPlatformUi();
+        }
+
+        function renderInstallationIdPanel() {
+            if (!installationIdGameEl || !installationIdValueEl) return;
+            const packageId = installationIdState.package_id || '';
+            const gameCode = installationIdState.game_code || '';
+            const installationId = installationIdState.installation_id || '';
+            installationIdGameEl.textContent = packageId ? `${gameCode || 'Unknown'} | ${packageId}` : '-';
+            installationIdValueEl.textContent = installationId ? `Installation ID: ${installationId}` : 'Installation ID: -';
         }
 
         function setActivePlatform(platform, persist = true) {
@@ -3793,11 +3963,50 @@ HTML_TEMPLATE = """
             activePlatform = platform;
             if (platformBtn) platformBtn.textContent = `Platform: ${platformLabel(platform)}`;
             syncPlatformUi();
+            if (platform === 'ios') {
+                installationIdState = {
+                    device_id: '',
+                    device_name: '',
+                    package_id: '',
+                    game_code: '',
+                    installation_id: '',
+                    platform,
+                };
+                renderInstallationIdPanel();
+            }
+        });
+
+        socket.on('installation_id_status', (status) => {
+            if (
+                selectedDevice !== 'all' &&
+                status?.device_id &&
+                status.device_id !== selectedDevice
+            ) {
+                return;
+            }
+            installationIdState = {
+                device_id: status?.device_id || '',
+                device_name: status?.device_name || '',
+                package_id: status?.package_id || '',
+                game_code: status?.game_code || '',
+                installation_id: status?.installation_id || '',
+                platform: status?.platform || activePlatform || 'android',
+            };
+            renderInstallationIdPanel();
         });
         
         // --- FIXED: Trigger refresh on device change to update all tables including callback
         deviceFilter.addEventListener('change', (e) => { 
             selectedDevice = e.target.value; 
+            installationIdState = {
+                device_id: '',
+                device_name: '',
+                package_id: '',
+                game_code: '',
+                installation_id: '',
+                platform: activePlatform || 'android',
+            };
+            renderInstallationIdPanel();
             socket.emit('refresh_request'); 
             renderCallbackTable(); // Trigger client-side re-render immediately
             renderAdRevenueTable();
@@ -5915,6 +6124,9 @@ def adb_log_reader(device_id):
 
             # 5. Process Callback & Events
             process_callback_and_ad_event_log(line, device_id)
+
+            # 5.5 Process Firebase Installation ID
+            process_installation_id_log(line, device_id)
             
             # 6. Parse Generic Events for Validators
             event_name, params, json_string = find_and_parse_event(line)
@@ -6289,7 +6501,7 @@ def _reset_runtime_for_platform_switch():
     global is_paused, validator_active, sdk_check_active, sdk_check_current_network
     global target_package_name, active_package_log_session_id
     global specific_event_name_filters, specific_event_params_filters
-    global connected_devices_info
+    global connected_devices_info, installation_id_state
     with lock:
         is_paused = False
         validator_active = False
@@ -6311,6 +6523,7 @@ def _reset_runtime_for_platform_switch():
         adrevenue_logs.clear(); adrevenue_log_cache.clear()
         callback_ad_logs.clear(); incomplete_impression_logs.clear(); incomplete_ios_adrevenue_logs.clear(); incomplete_ios_load_ads_ext_logs.clear(); incomplete_adjust_adrevenue_logs.clear()
         package_log_cache.clear(); active_package_pids.clear()
+        installation_id_state.clear()
         for proc in active_ios_log_processes.values():
             try:
                 proc.terminate()
@@ -6349,6 +6562,7 @@ def _reset_runtime_for_platform_switch():
         "connected_devices": [],
         "message": _ios_device_status_message() if active_platform == "ios" else f"Waiting... (ADB: {ADB_EXECUTABLE})"
     })
+    socketio.emit("installation_id_status", _build_installation_id_payload(""))
     socketio.emit('runtime_reset', {})
     _emit_sdk_check_results()
 
@@ -6407,6 +6621,7 @@ def cl():
         incomplete_ios_adrevenue_logs.clear()
         incomplete_ios_load_ads_ext_logs.clear()
         incomplete_adjust_adrevenue_logs.clear()
+        installation_id_state.clear()
         
     socketio.emit('update_load_ads', [])
     socketio.emit('update_load_ads_ext', [])
@@ -6415,6 +6630,7 @@ def cl():
     socketio.emit('update_adrevenue_table', [])
     socketio.emit('update_callback_ad_table', [])
     socketio.emit('package_log_cache', [])
+    socketio.emit("installation_id_status", _build_installation_id_payload(""))
     _emit_sdk_check_results()
 
 @socketio.on('start_validation')
@@ -6533,6 +6749,7 @@ def connect():
     socketio.emit('pause_status', {'is_paused': is_paused})
     socketio.emit('validator_status', {'active': validator_active})
     socketio.emit('platform_status', {'platform': active_platform})
+    _emit_installation_id_state()
     # Sync recording buttons on connect
     for tab, state in recording_states.items():
         socketio.emit('record_status', {
@@ -6548,6 +6765,7 @@ def run_server(host="0.0.0.0", port=5001):
     _set_active_profile()
     _init_package_log_db()
     threading.Thread(target=device_manager, daemon=True).start()
+    threading.Thread(target=android_installation_id_monitor, daemon=True).start()
     threading.Thread(target=package_log_emitter, daemon=True).start()
     threading.Thread(target=package_pid_monitor, daemon=True).start()
     threading.Thread(target=_package_log_db_writer, daemon=True).start()
