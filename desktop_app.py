@@ -174,14 +174,6 @@ def main():
             candidate_build = candidate.get("build")
             if candidate_build is None:
                 continue
-            if candidate_build < bundled_build:
-                logging.info(
-                    "Ignoring stale update candidate from %s: build %s < bundled %s",
-                    candidate.get("source"),
-                    candidate_build,
-                    bundled_build,
-                )
-                continue
             selected_update = candidate
             break
         if selected_update:
