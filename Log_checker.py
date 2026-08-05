@@ -4750,7 +4750,7 @@ def check_update():
     except Exception as e:
         return jsonify({'ok': False, 'status': 'error', 'error': f'updater_unavailable: {e}'})
     try:
-        result = remote_update.check_for_updates(force_refresh=True)
+        result = remote_update.check_for_updates()
         return jsonify(result)
     except Exception as e:
         return jsonify({'ok': False, 'status': 'error', 'error': str(e)})
