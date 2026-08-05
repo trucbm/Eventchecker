@@ -565,3 +565,38 @@ De lam viec on dinh voi 2-3 nguoi:
 - merge qua PR
 - giu `main` sach va chay duoc
 - ghi ro trong commit message la sua source local hay publish update payload
+
+
+## 18. Harness engineering
+
+Muc tieu cua harness:
+
+- bat regression truoc khi push
+- giu cac bug lap lai khong chui qua release
+- khong can mo UI, khong can device, khong can build app
+
+File chay harness:
+
+```bash
+python3 tools/eventchecker_harness.py
+```
+
+Harness dang check nhung phan de vo nhat:
+
+- shape cua `remote_manifest.json`
+- mapping package -> game code
+- state cua installation id khi doi package
+- log contract exact-match cho Crashlytics Android va iOS
+- release marker trong `Log_checker.py`
+
+Neu muon chi chay tung nhom test:
+
+```bash
+python3 tools/eventchecker_harness.py --only test_installation_id_state_machine test_package_code_mapping
+```
+
+Nguyen tac su dung:
+
+- chay harness truoc khi commit
+- neu harness fail thi sua xong moi push
+- harness khong thay cho local run app, ma la them 1 lop chan loi

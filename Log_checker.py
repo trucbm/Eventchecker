@@ -19,6 +19,9 @@ import sqlite3
 import socket
 import platform
 import uuid
+import plistlib
+import tempfile
+import zipfile
 try:
     import webview
 except Exception:
@@ -1895,6 +1898,55 @@ def _sanitize_profile_filename(filename):
     return name
 
 
+def _sanitize_ipa_filename(filename):
+    name = os.path.basename((filename or "").strip())
+    name = name.replace("\\", "_").replace("/", "_")
+    if not name.lower().endswith(".ipa"):
+        raise ValueError("Only .ipa files are supported")
+    return name
+
+
+def _extract_brightsdk_version_from_ipa(ipa_path):
+    if not ipa_path or not os.path.exists(ipa_path):
+        return {"app_name": "", "brightsdk_version": ""}
+    tmp_dir = None
+    try:
+        tmp_dir = tempfile.mkdtemp(prefix="eventinspector_ipa_")
+        with zipfile.ZipFile(ipa_path, "r") as zf:
+            zf.extractall(tmp_dir)
+        payload_dir = os.path.join(tmp_dir, "Payload")
+        if not os.path.isdir(payload_dir):
+            return ""
+        for app_name in os.listdir(payload_dir):
+            app_dir = os.path.join(payload_dir, app_name)
+            if not app_name.endswith(".app") or not os.path.isdir(app_dir):
+                continue
+            app_display_name = ""
+            app_bundle_name = ""
+            app_plist_path = os.path.join(app_dir, "Info.plist")
+            if os.path.exists(app_plist_path):
+                with open(app_plist_path, "rb") as f:
+                    app_plist = plistlib.load(f)
+                app_display_name = str(app_plist.get("CFBundleDisplayName") or "").strip()
+                app_bundle_name = str(app_plist.get("CFBundleName") or "").strip()
+            for root, _dirs, files in os.walk(app_dir):
+                if os.path.basename(root) == "brdsdk.framework":
+                    plist_path = os.path.join(root, "Info.plist")
+                    if not os.path.exists(plist_path):
+                        continue
+                    with open(plist_path, "rb") as f:
+                        plist_data = plistlib.load(f)
+                    version = str(plist_data.get("CFBundleShortVersionString") or "").strip()
+                    return {
+                        "app_name": app_display_name or app_bundle_name or app_name[:-4],
+                        "brightsdk_version": version,
+                    }
+        return {"app_name": "", "brightsdk_version": ""}
+    finally:
+        if tmp_dir and os.path.isdir(tmp_dir):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def _list_profile_names():
     try:
         files = [
@@ -2066,7 +2118,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(12)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(14)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2128,6 +2180,7 @@ HTML_TEMPLATE = """
                     <button id="tabBtnAdRevenue" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('AdRevenue')">Revenue</button>
                     <button id="tabBtnCallbackAd" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('CallbackAd')">CallBack & Ads</button>
                     <button id="tabBtnSdkCheck" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('SdkCheck')">SDK Check</button>
+                    <button id="tabBtnBrightSDK" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('BrightSDK')">BrightSDK</button>
                     <button id="tabBtnPackage" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Package')">Package Logcat</button>
                 </div>
             </div>
@@ -2260,6 +2313,30 @@ HTML_TEMPLATE = """
                             </thead>
                             <tbody id="validatorTableBody" class="divide-y divide-gray-200"></tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 3A: BrightSDK -->
+            <div id="tabContentBrightSDK" class="hidden">
+                <div class="bg-white rounded-xl shadow-md p-4">
+                    <div class="flex flex-col gap-3">
+                        <div class="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border">
+                            <span class="text-sm font-semibold text-gray-700 whitespace-nowrap">Upload IPA:</span>
+                            <input type="file" id="brightSdkFileInput" accept=".ipa" class="hidden">
+                            <button id="importBrightSdkBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-3 rounded shadow text-xs">Choose IPA</button>
+                            <button id="clearBrightSdkBtn" class="bg-slate-200 hover:bg-slate-300 text-gray-800 font-semibold py-2 px-3 rounded shadow text-xs">Clear</button>
+                        </div>
+                        <div class="bg-gray-50 p-2.5 rounded-lg border text-sm text-slate-600 space-y-1">
+                            <div>
+                                <span class="font-semibold">App Name:</span>
+                                <span id="brightSdkAppNameValue" class="font-mono text-slate-800 ml-1">Not Found</span>
+                            </div>
+                            <div>
+                                <span class="font-semibold">BrightSDK version:</span>
+                                <span id="brightSdkVersionValue" class="font-mono text-slate-800 ml-1">Not Found</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2837,6 +2914,7 @@ HTML_TEMPLATE = """
             if (persist) localStorage.setItem('eventInspectorPlatform', activePlatform);
             if (platformBtn) platformBtn.textContent = `Platform: ${platformLabel(activePlatform)}`;
             syncPlatformUi();
+            resetBrightSdkUiState();
             socket.emit('set_platform', { platform: activePlatform, reset: !!persist });
         }
 
@@ -2855,7 +2933,7 @@ HTML_TEMPLATE = """
         function switchTab(tabName) {
             currentTab = tabName;
             // Hide all contents with Safety Check
-            ['tabContentLoadAds', 'tabContentLoadAdsExt', 'tabContentValidator', 'tabContentSpecific', 'tabContentAdRevenue', 'tabContentCallbackAd', 'tabContentSdkCheck', 'tabContentPackage'].forEach(id => {
+            ['tabContentLoadAds', 'tabContentLoadAdsExt', 'tabContentValidator', 'tabContentBrightSDK', 'tabContentSpecific', 'tabContentAdRevenue', 'tabContentCallbackAd', 'tabContentSdkCheck', 'tabContentPackage'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.classList.add('hidden');
                 else console.warn('Missing element ID:', id);
@@ -2884,6 +2962,7 @@ HTML_TEMPLATE = """
         clearAllBtn.addEventListener('click', () => {
             if (confirm('Are you sure you want to clear ALL logs?')) {
                 resetSdkCheckUiState(true);
+                resetBrightSdkUiState();
                 socket.emit('clear_all_logs');
             }
         });
@@ -3052,6 +3131,15 @@ HTML_TEMPLATE = """
             if (gameEl) {
                 gameEl.textContent = payload.game_name || 'Unknown';
             }
+        }
+
+        function resetBrightSdkUiState() {
+            const appNameEl = document.getElementById('brightSdkAppNameValue');
+            if (appNameEl) appNameEl.textContent = 'Not Found';
+            const versionEl = document.getElementById('brightSdkVersionValue');
+            if (versionEl) versionEl.textContent = 'Not Found';
+            const inputEl = document.getElementById('brightSdkFileInput');
+            if (inputEl) inputEl.value = '';
         }
 
         function renderProfileOptions(payload) {
@@ -3270,6 +3358,37 @@ HTML_TEMPLATE = """
             validator_results_cache = [];
             renderValidatorTable(validator_results_cache);
             renderProfileOptions(payload);
+        });
+
+        document.getElementById('importBrightSdkBtn')?.addEventListener('click', () => {
+            document.getElementById('brightSdkFileInput')?.click();
+        });
+
+        document.getElementById('clearBrightSdkBtn')?.addEventListener('click', () => {
+            resetBrightSdkUiState();
+        });
+
+        document.getElementById('brightSdkFileInput')?.addEventListener('change', async (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            const formData = new FormData();
+            formData.append('ipa_file', file);
+            const res = await fetch('/api/ipa/inspect', {
+                method: 'POST',
+                body: formData
+            });
+            const payload = await res.json();
+            e.target.value = '';
+            const appNameEl = document.getElementById('brightSdkAppNameValue');
+            const valueEl = document.getElementById('brightSdkVersionValue');
+            if (!payload.ok) {
+                if (appNameEl) appNameEl.textContent = 'Not Found';
+                if (valueEl) valueEl.textContent = 'Not Found';
+                alert(payload.error || 'Failed to inspect IPA');
+                return;
+            }
+            if (appNameEl) appNameEl.textContent = payload.app_name || 'Not Found';
+            if (valueEl) valueEl.textContent = payload.brightsdk_version || 'Not Found';
         });
 
         // --- Socket Listeners (Renderers) ---
@@ -4513,6 +4632,7 @@ HTML_TEMPLATE = """
                 setPackageRunningState(false);
                 resetPackageLogUiState();
             }
+            resetBrightSdkUiState();
             setPackageControlsEnabled(true);
         });
 
@@ -4578,6 +4698,35 @@ def import_profile():
         return jsonify({'ok': True, **_profile_payload()})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@app.post('/api/ipa/inspect')
+def inspect_ipa():
+    upload = request.files.get('ipa_file')
+    if not upload or not upload.filename:
+        return jsonify({'ok': False, 'error': 'ipa_file_required'}), 400
+    tmp_path = None
+    try:
+        filename = _sanitize_ipa_filename(upload.filename)
+        os.makedirs(PROFILE_DIR, exist_ok=True)
+        with tempfile.NamedTemporaryFile(prefix="eventinspector_ipa_", suffix=".ipa", delete=False) as tmp:
+            tmp_path = tmp.name
+            upload.save(tmp_path)
+        ipa_info = _extract_brightsdk_version_from_ipa(tmp_path)
+        return jsonify({
+            'ok': True,
+            'filename': filename,
+            'app_name': ipa_info.get('app_name') or 'Not Found',
+            'brightsdk_version': ipa_info.get('brightsdk_version') or 'Not Found',
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
 
 
 @app.post('/api/profiles/open-folder')
