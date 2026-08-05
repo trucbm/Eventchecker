@@ -4601,7 +4601,9 @@ def check_update():
     except Exception as e:
         return jsonify({'ok': False, 'status': 'error', 'error': f'updater_unavailable: {e}'})
     try:
-        result = remote_update.check_for_updates()
+        # Always refresh the update cache first so a stale local state cannot
+        # keep the client stuck on an older portable bundle/version.
+        result = remote_update.check_for_updates(force_refresh=True)
         return jsonify(result)
     except Exception as e:
         return jsonify({'ok': False, 'status': 'error', 'error': str(e)})
