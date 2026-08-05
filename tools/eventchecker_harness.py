@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import re
+import hashlib
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -62,6 +63,32 @@ def _assert_equal(actual, expected, message: str) -> None:
         raise AssertionError(f"{message}: expected={expected!r} actual={actual!r}")
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _payload_path_candidates(manifest_path: Path, item: dict) -> List[Path]:
+    rel_path = str(item.get("path", "")).strip()
+    if not rel_path:
+        return []
+    payload_dir = manifest_path.parent
+    candidates = [payload_dir / rel_path, ROOT / rel_path]
+    return candidates
+
+
+def _valid_payload_urls(manifest_path: Path, rel_path: str, payload_path: Path) -> set[str]:
+    repo_rel = payload_path.relative_to(ROOT).as_posix()
+    return {
+        f"https://github.com/trucbm/Eventchecker/raw/main/{repo_rel}",
+        f"https://raw.githubusercontent.com/trucbm/Eventchecker/main/{repo_rel}",
+        f"https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/{repo_rel}",
+    }
+
+
 def _manifest_paths() -> List[Path]:
     candidates = [
         ROOT / "Updates_2_3" / "remote_manifest.json",
@@ -84,6 +111,37 @@ def test_manifest_contract() -> None:
             _assert(str(item.get("path", "")).strip(), f"{manifest_path.name} contains file entry without path")
             _assert(str(item.get("url", "")).strip(), f"{manifest_path.name} contains file entry without url")
             _assert(str(item.get("sha256", "")).strip(), f"{manifest_path.name} contains file entry without sha256")
+
+
+def test_manifest_payload_integrity() -> None:
+    manifests = _manifest_paths()
+    _assert(manifests, "No release manifest files found")
+    for manifest_path in manifests:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for item in data.get("files") or []:
+            rel_path = str(item.get("path", "")).strip()
+            if not rel_path:
+                continue
+            candidates = _payload_path_candidates(manifest_path, item)
+            payload_path = next((candidate for candidate in candidates if candidate.exists()), None)
+            _assert(payload_path is not None, f"{manifest_path.name} payload missing for {rel_path}")
+
+            expected_sha = str(item.get("sha256", "")).strip().lower()
+            actual_sha = _sha256_file(payload_path).lower()
+            _assert_equal(actual_sha, expected_sha, f"{manifest_path.name} sha mismatch for {rel_path}")
+
+            valid_urls = _valid_payload_urls(manifest_path, rel_path, payload_path)
+            url = str(item.get("url", "")).strip()
+            _assert(
+                url in valid_urls,
+                f"{manifest_path.name} url points outside {manifest_path.parent.name} for {rel_path}: {url}",
+            )
+            for extra_url in item.get("urls") or []:
+                extra_url = str(extra_url).strip()
+                _assert(
+                    extra_url in valid_urls,
+                    f"{manifest_path.name} urls entry points outside {manifest_path.parent.name} for {rel_path}: {extra_url}",
+                )
 
 
 def test_package_code_mapping() -> None:
@@ -158,6 +216,7 @@ def test_release_build_marker() -> None:
 
 TESTS: List[Callable[[], None]] = [
     test_manifest_contract,
+    test_manifest_payload_integrity,
     test_package_code_mapping,
     test_installation_id_state_machine,
     test_installation_id_log_parsing,

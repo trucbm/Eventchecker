@@ -584,6 +584,8 @@ python3 tools/eventchecker_harness.py
 Harness dang check nhung phan de vo nhat:
 
 - shape cua `remote_manifest.json`
+- `sha256` trong manifest phai khop payload that
+- URL payload trong manifest phai tro dung folder release hien tai
 - mapping package -> game code
 - state cua installation id khi doi package
 - log contract exact-match cho Crashlytics Android va iOS
@@ -599,4 +601,5 @@ Nguyen tac su dung:
 
 - chay harness truoc khi commit
 - neu harness fail thi sua xong moi push
+- neu sua `Updates_2_3/` hoac manifest update thi harness la bat buoc
 - harness khong thay cho local run app, ma la them 1 lop chan loi
