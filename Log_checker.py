@@ -2559,7 +2559,7 @@ HTML_TEMPLATE = """
                                         <span>NG - com.indiez.nonogram</span>
                                     </label>
                                     <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.train.miner" data-android-value="com.indiez.train.miner" data-android-label="TM - com.indiez.train.miner" data-ios-value="IdleTrainMiner" data-ios-label="TM - IdleTrainMiner">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.train.miner" data-android-value="com.indiez.train.miner" data-android-label="TM - com.indiez.train.miner" data-ios-value="TrainIdle" data-ios-label="TM - TrainIdle">
                                         <span>TM - com.indiez.train.miner</span>
                                     </label>
                                     <label class="inline-flex items-center gap-2">
