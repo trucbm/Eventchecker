@@ -9,7 +9,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/Log_checker.py"
       ],
-      "sha256": "601653b4485aad585d278bf5ef0ce5dadb74251c99883b9ba1ab28dc86d9e12d"
+      "sha256": "2a5a914091f0e05220b176168964b7ef61e5ecaaac5c5ac23ae07613f6166a25"
     },
     {
       "path": "remote_update.py",
