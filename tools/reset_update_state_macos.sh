@@ -10,7 +10,7 @@ STATE_FILE_V240="${APP_SUPPORT_DIR}/update_state_v240.json"
 CONFIG_FILE_V240="${APP_SUPPORT_DIR}/remote_update_config_v240.json"
 UPDATES_DIR_V240="${APP_SUPPORT_DIR}/updates_v240"
 MANIFEST_URL="https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json"
-TARGET_VERSION="2026-06-16-2.4.0-4"
+TARGET_VERSION="2026-08-05-2.4.0-24"
 
 echo "Event Inspector update reset (macOS)"
 echo "Target folder: ${APP_SUPPORT_DIR}"
