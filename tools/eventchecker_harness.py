@@ -10,6 +10,7 @@ The harness intentionally focuses on the brittle parts of the app:
 - exact-match parsing contracts
 - installation-id state transitions
 - package-code mapping
+- release payload/source sync for every build target
 
 It does not start the UI or connect to devices.
 """
@@ -22,6 +23,7 @@ import os
 import re
 import hashlib
 import sys
+import types
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, List
@@ -32,6 +34,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import Log_checker as lc  # noqa: E402
+# desktop_app only needs webview after main() starts; keep the harness usable
+# in a plain Python environment that has not installed the UI dependency.
+sys.modules.setdefault("webview", types.ModuleType("webview"))
+import desktop_app as desktop  # noqa: E402
 
 
 @dataclass
@@ -214,6 +220,85 @@ def test_release_build_marker() -> None:
     _assert(re.search(r"v2\.4\.0\(\d+\)", text) is not None, "Log_checker.py should keep a release marker")
 
 
+def test_release_payload_sync() -> None:
+    source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    payload_text = (ROOT / "Updates_2_3" / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+
+    markers = {
+        "release_badge": r"v2\.4\.0\((\d+)\)",
+        "html_title": r"<title>([^<]+)</title>",
+        "brightsdk_tab": r"switchTab\('BrightSDK'\)",
+        "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
+        "check_update_call": r"result = remote_update\.check_for_updates\(\)",
+    }
+
+    for label, pattern in markers.items():
+        source_match = re.search(pattern, source_text)
+        payload_match = re.search(pattern, payload_text)
+        _assert(source_match is not None, f"source missing {label}")
+        _assert(payload_match is not None, f"payload missing {label}")
+        _assert_equal(
+            source_match.groups() or (source_match.group(0),),
+            payload_match.groups() or (payload_match.group(0),),
+            f"source/payload drift detected for {label}",
+        )
+
+
+def test_update_candidate_does_not_downgrade() -> None:
+    candidates = [
+        {"update_dir": "/tmp/v15", "build": 15, "source": "old"},
+        {"update_dir": "/tmp/v16", "build": 16, "source": "current"},
+    ]
+    selected = desktop._select_prepared_update_candidate(candidates, bundled_build=16)
+    _assert_equal(selected["build"], 16, "bundled v16 must not load a v15 prepared update")
+    _assert_equal(
+        desktop._select_prepared_update_candidate(candidates[:1], bundled_build=16),
+        None,
+        "a stale prepared update must be ignored when no newer payload exists",
+    )
+    _assert_equal(
+        desktop._select_prepared_update_candidate(candidates[:1], bundled_build=None)["build"],
+        15,
+        "legacy clients without a detected bundled build must keep update compatibility",
+    )
+
+
+def test_build_scripts_clean_outputs() -> None:
+    mac_script = (ROOT / "build" / "macos" / "build_macos.sh").read_text(encoding="utf-8", errors="ignore")
+    win_portable_script = (ROOT / "build" / "windows" / "build_portable.bat").read_text(encoding="utf-8", errors="ignore")
+    win_installer_script = (ROOT / "build" / "windows" / "build_windows.bat").read_text(encoding="utf-8", errors="ignore")
+
+    mac_expected = [
+        'rm -rf "dist/EventInspector.app"',
+        'rm -f "dist/EventInspector.dmg"',
+        'rm -rf "build/EventInspector"',
+    ]
+    for needle in mac_expected:
+        _assert(needle in mac_script, f"build_macos.sh must clean stale artifact: {needle}")
+
+    _assert('MACOS_TARGET_ARCH="${MACOS_TARGET_ARCH:-universal2}"' in mac_script, "macOS build must default to universal2")
+    _assert('--target-arch "$MACOS_TARGET_ARCH"' in mac_script, "macOS build must pass the target architecture")
+    _assert('--exclude-module "markupsafe._speedups"' in mac_script, "macOS universal build must avoid the arm64-only MarkupSafe speedup")
+    _assert('--add-data "Log_checker.py:."' in mac_script, "macOS build must package the bundled release marker")
+
+    win_expected = [
+        'if exist "dist\\EventInspector" rmdir /s /q "dist\\EventInspector"',
+        'if exist "build\\EventInspector" rmdir /s /q "build\\EventInspector"',
+    ]
+    for needle in win_expected:
+        _assert(needle in win_portable_script, f"build_portable.bat must clean stale artifact: {needle}")
+        _assert(needle in win_installer_script, f"build_windows.bat must clean stale artifact: {needle}")
+
+
+def test_windows_update_recovery_script() -> None:
+    script_path = ROOT / "tools" / "reset_update_state_windows.bat"
+    text = script_path.read_text(encoding="utf-8", errors="ignore")
+    _assert('TARGET_VERSION=2026-08-10-2.4.0-16' in text, "windows recovery script must target the current release")
+    _assert('remote_manifest.json' in text, "windows recovery script must seed the current manifest")
+    legacy_scripts = sorted((ROOT / "tools").glob("bootstrap_windows_to_v*.bat"))
+    _assert(not legacy_scripts, f"remove legacy Windows bootstrap scripts: {[p.name for p in legacy_scripts]}")
+
+
 TESTS: List[Callable[[], None]] = [
     test_manifest_contract,
     test_manifest_payload_integrity,
@@ -222,6 +307,10 @@ TESTS: List[Callable[[], None]] = [
     test_installation_id_log_parsing,
     test_sdk_exact_contracts,
     test_release_build_marker,
+    test_release_payload_sync,
+    test_update_candidate_does_not_downgrade,
+    test_build_scripts_clean_outputs,
+    test_windows_update_recovery_script,
 ]
 
 

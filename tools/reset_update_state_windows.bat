@@ -1,6 +1,10 @@
 @echo off
 setlocal
 
+rem Official Windows update recovery/bootstrap for the current release.
+rem Use this when a client machine is stuck on an old portable build or says
+rem "Already up to date" while still showing an older UI/runtime.
+
 set "APP_SUPPORT_DIR=%LOCALAPPDATA%\EventInspector"
 set "STATE_FILE=%APP_SUPPORT_DIR%\update_state_v230.json"
 set "STATE_FILE_V240=%APP_SUPPORT_DIR%\update_state_v240.json"
@@ -11,10 +15,13 @@ set "UPDATES_DIR_V240=%APP_SUPPORT_DIR%\updates_v240"
 set "MANIFEST_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json"
 set "LOG_CHECKER_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/Log_checker.py"
 set "REMOTE_UPDATE_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/remote_update.py"
-set "TARGET_VERSION=2026-08-05-2.4.0-15"
+set "TARGET_VERSION=2026-08-10-2.4.0-16"
 
-echo Event Inspector update reset (Windows)
+echo Event Inspector Windows update bootstrap
+echo Target release: v2.4.0(16)
 echo Target folder: %APP_SUPPORT_DIR%
+echo.
+echo IMPORTANT: close Event Inspector before running this script.
 echo.
 
 if not exist "%APP_SUPPORT_DIR%" mkdir "%APP_SUPPORT_DIR%"

@@ -42,6 +42,15 @@ except ValueError:
 G_SHEET_URL = "https://script.google.com/macros/s/AKfycbyLMM9nLAjS9Zhwr4-J6ikjqBSpO7ZCNaNeHKTsfKltiIa0OniDBSrzjvqfvpg87Epl/exec"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
+
+def _user_data_dir():
+    if os.name == "nt":
+        base = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "EventInspector")
+    if sys.platform == "darwin":
+        return os.path.join(os.path.expanduser("~/Library/Application Support"), "EventInspector")
+    return os.path.join(os.path.expanduser("~"), ".eventinspector")
+
 def _resolve_default_params_path():
     env_path = os.getenv("DEFAULT_PARAMS_XLSX_PATH")
     if env_path and os.path.exists(env_path):
@@ -70,6 +79,8 @@ def _resolve_default_params_path():
             resources_dir = os.path.abspath(os.path.join(exe_dir, "..", "Resources"))
             candidates.append(os.path.join(resources_dir, filename))
 
+        candidates.append(os.path.join(_user_data_dir(), "profiles", filename))
+
     # 3) PyInstaller temp bundle path
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
@@ -84,25 +95,6 @@ def _resolve_default_params_path():
     for p in candidates:
         if p and os.path.exists(p):
             return p
-
-    # If packaged, try to copy bundled file into app folder for user to edit
-    if getattr(sys, "frozen", False) and meipass:
-        bundled = os.path.join(meipass, filename)
-        if os.path.exists(bundled):
-            try:
-                target = os.path.join(os.path.dirname(sys.executable), filename)
-                shutil.copyfile(bundled, target)
-                return target
-            except Exception:
-                if sys.platform == "darwin":
-                    try:
-                        resources_dir = os.path.abspath(os.path.join(os.path.dirname(sys.executable), "..", "Resources"))
-                        os.makedirs(resources_dir, exist_ok=True)
-                        target = os.path.join(resources_dir, filename)
-                        shutil.copyfile(bundled, target)
-                        return target
-                    except Exception:
-                        pass
 
     return candidates[0]
 
@@ -132,13 +124,26 @@ def _runtime_app_dir():
 
 
 def _resolve_profiles_dir():
-    base_dir = _runtime_app_dir()
+    base_dir = _user_data_dir() if getattr(sys, "frozen", False) else SCRIPT_DIR
     profiles_dir = os.path.join(base_dir, "profiles")
     try:
         os.makedirs(profiles_dir, exist_ok=True)
+
+        # Migrate editable profiles from older bundles without writing back to
+        # the signed .app directory.
+        if getattr(sys, "frozen", False):
+            legacy_dir = os.path.join(_runtime_app_dir(), "profiles")
+            if os.path.isdir(legacy_dir) and os.path.abspath(legacy_dir) != os.path.abspath(profiles_dir):
+                for legacy_file in Path(legacy_dir).glob("*.xlsx"):
+                    target = os.path.join(profiles_dir, legacy_file.name)
+                    if not os.path.exists(target):
+                        try:
+                            shutil.copyfile(legacy_file, target)
+                        except Exception:
+                            pass
         return profiles_dir
     except Exception:
-        fallback = os.path.join(SCRIPT_DIR, "profiles")
+        fallback = os.path.join(_user_data_dir(), "profiles")
         os.makedirs(fallback, exist_ok=True)
         return fallback
 
@@ -147,15 +152,6 @@ PROFILE_DIR = _resolve_profiles_dir()
 active_profile_name = None
 active_profile_path = None
 active_profile_game_name = ""
-
-
-def _user_data_dir():
-    if os.name == "nt":
-        base = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
-        return os.path.join(base, "EventInspector")
-    if sys.platform == "darwin":
-        return os.path.join(os.path.expanduser("~/Library/Application Support"), "EventInspector")
-    return os.path.join(os.path.expanduser("~"), ".eventinspector")
 
 
 def _app_audit_config_path():
@@ -297,23 +293,25 @@ def _record_app_open_audit_once():
 
 
 def _package_history_dir():
-    candidates = [
-        os.path.join(_runtime_app_dir(), "package_log_history"),
-        os.path.join(_user_data_dir(), "package_log_history"),
-    ]
-    for history_dir in candidates:
-        try:
-            os.makedirs(history_dir, exist_ok=True)
-            test_file = os.path.join(history_dir, ".write_test")
-            with open(test_file, "w", encoding="utf-8") as f:
-                f.write("ok")
-            os.remove(test_file)
-            return history_dir
-        except Exception:
-            continue
-    fallback = os.path.join(_user_data_dir(), "package_log_history")
-    os.makedirs(fallback, exist_ok=True)
-    return fallback
+    history_dir = os.path.join(_user_data_dir(), "package_log_history")
+    try:
+        os.makedirs(history_dir, exist_ok=True)
+        legacy_db = os.path.join(_runtime_app_dir(), "package_log_history", "package_logs.sqlite3")
+        target_db = os.path.join(history_dir, "package_logs.sqlite3")
+        if os.path.exists(legacy_db) and not os.path.exists(target_db):
+            try:
+                shutil.copyfile(legacy_db, target_db)
+            except Exception:
+                pass
+        test_file = os.path.join(history_dir, ".write_test")
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(test_file)
+        return history_dir
+    except Exception:
+        fallback = os.path.join(tempfile.gettempdir(), "EventInspector", "package_log_history")
+        os.makedirs(fallback, exist_ok=True)
+        return fallback
 
 
 PACKAGE_LOG_DB_PATH = os.path.join(_package_history_dir(), "package_logs.sqlite3")
@@ -2118,7 +2116,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(15)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(16)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>

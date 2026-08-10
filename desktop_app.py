@@ -19,7 +19,6 @@ except Exception:
 
 HOST = "127.0.0.1"
 PORT = 5001
-DEFAULT_BUNDLED_UPDATE_BUILD = 61
 
 
 def _user_data_dir():
@@ -61,10 +60,9 @@ def _bundled_log_checker_path():
 
 def _get_bundled_update_build():
     bundled_path = _bundled_log_checker_path()
-    build = _extract_build_number_from_file(bundled_path) if bundled_path else None
-    if build is not None:
-        return build
-    return DEFAULT_BUNDLED_UPDATE_BUILD
+    if not bundled_path:
+        return None
+    return _extract_build_number_from_file(bundled_path)
 
 
 def _candidate_update_dirs():
@@ -101,6 +99,23 @@ def _candidate_update_dirs():
 
     candidates.sort(key=lambda item: (item.get("build") is not None, item.get("build") or -1), reverse=True)
     return candidates
+
+
+def _select_prepared_update_candidate(candidates, bundled_build=None):
+    for candidate in candidates:
+        candidate_build = candidate.get("build")
+        if candidate_build is None:
+            continue
+        if bundled_build is not None and candidate_build < bundled_build:
+            logging.info(
+                "Ignoring stale update candidate from %s: build %s < bundled %s",
+                candidate.get("source"),
+                candidate_build,
+                bundled_build,
+            )
+            continue
+        return candidate
+    return None
 
 def _setup_logging():
     log_dir = _user_data_dir()
@@ -153,7 +168,8 @@ def main():
     log_path = _setup_logging()
     port = _pick_server_port(HOST, PORT)
     bundled_build = _get_bundled_update_build()
-    os.environ["EVENTINSPECTOR_BUNDLED_BUILD"] = str(bundled_build)
+    os.environ["EVENTINSPECTOR_BUNDLED_BUILD"] = str(bundled_build or "")
+    os.environ["EVENTINSPECTOR_BUNDLED_BUILD_SOURCE"] = "detected" if bundled_build is not None else "unknown"
 
     # Provide restart command for in-app restart
     restart_cmd = sys.executable
@@ -169,13 +185,7 @@ def main():
 
     # Load any already-downloaded update, but do not check remote on launch.
     try:
-        selected_update = None
-        for candidate in _candidate_update_dirs():
-            candidate_build = candidate.get("build")
-            if candidate_build is None:
-                continue
-            selected_update = candidate
-            break
+        selected_update = _select_prepared_update_candidate(_candidate_update_dirs(), bundled_build)
         if selected_update:
             update_dir = selected_update["update_dir"]
             os.environ["EVENTINSPECTOR_UPDATE_DIR"] = update_dir

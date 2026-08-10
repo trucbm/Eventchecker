@@ -10,8 +10,17 @@ fi
 
 source .venv/bin/activate
 
+# Build one DMG that runs on both Intel Macs and Apple Silicon Macs.
+MACOS_TARGET_ARCH="${MACOS_TARGET_ARCH:-universal2}"
+
 python -m pip install --upgrade pip
 pip install -r requirements.txt
+
+# Clean stale artifacts first so every build target is forced to pick up the
+# current source instead of silently reusing old output.
+rm -rf "dist/EventInspector.app"
+rm -f "dist/EventInspector.dmg"
+rm -rf "build/EventInspector"
 
 # Build .icns from PNG if possible (requires macOS sips + iconutil)
 PNG_SRC="/Users/truc.bui/Downloads/82690-protective-slitherio-personal-wallpaper-equipment-computer-snake.png"
@@ -39,8 +48,13 @@ fi
 
 # Build .app
 pip install pyinstaller
+# MarkupSafe's optional C speedup is arm64-only in the current venv; the
+# pure-Python fallback keeps the universal2 bundle architecture-neutral.
 pyinstaller --noconfirm --clean --windowed \
+  --target-arch "$MACOS_TARGET_ARCH" \
+  --exclude-module "markupsafe._speedups" \
   --hidden-import "engineio.async_drivers.threading" \
+  --add-data "Log_checker.py:." \
   --add-data "Default event + Default Params.xlsx:." \
   --icon assets/app.icns --name "EventInspector" desktop_app.py
 

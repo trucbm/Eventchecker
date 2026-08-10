@@ -171,6 +171,10 @@ def _requested_from_bundle_build():
         return None
 
 
+def _bundle_build_is_detected():
+    return str(os.getenv("EVENTINSPECTOR_BUNDLED_BUILD_SOURCE") or "").strip().lower() == "detected"
+
+
 def _download(url, timeout):
     # Handle Google Drive confirm page for large files
     session = requests.Session()
@@ -339,6 +343,20 @@ def check_for_updates(force_refresh=False):
     manifest_version = manifest.get("version")
     existing_update_dir = state.get("update_dir") or update_dir
     manifest_files = manifest.get("files", [])
+    requested_from_bundle_build = _requested_from_bundle_build()
+    manifest_build = _extract_build_number(manifest_version)
+    if (
+        _bundle_build_is_detected()
+        and requested_from_bundle_build is not None
+        and manifest_build is not None
+        and manifest_build < requested_from_bundle_build
+    ):
+        return {
+            "ok": True,
+            "status": "up_to_date",
+            "version": manifest_version,
+            "update_dir": load_prepared_update_dir(),
+        }
     if state_version == manifest_version and _existing_update_matches_manifest(existing_update_dir, manifest_files):
         state.update({
             "last_check": time.time(),
@@ -347,7 +365,6 @@ def check_for_updates(force_refresh=False):
             "manifest_url": manifest_url,
             "files": [item.get("path") for item in manifest_files if item.get("path")],
         })
-        requested_from_bundle_build = _requested_from_bundle_build()
         if requested_from_bundle_build is not None:
             state["requested_from_bundle_build"] = requested_from_bundle_build
         _save_state(state)
@@ -414,7 +431,6 @@ def check_for_updates(force_refresh=False):
             "manifest_url": manifest_url,
             "files": [item.get("path") for item in manifest_files if item.get("path")],
         })
-        requested_from_bundle_build = _requested_from_bundle_build()
         if requested_from_bundle_build is not None:
             state["requested_from_bundle_build"] = requested_from_bundle_build
         _save_state(state)
