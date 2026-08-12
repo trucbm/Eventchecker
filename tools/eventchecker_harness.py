@@ -23,6 +23,7 @@ import os
 import re
 import hashlib
 import sys
+import tempfile
 import types
 from dataclasses import dataclass
 from pathlib import Path
@@ -217,12 +218,24 @@ def test_sdk_exact_contracts() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert(re.search(r"v2\.4\.0\(\d+\)", text) is not None, "Log_checker.py should keep a release marker")
+    _assert("v2.4.0(17)" in text, "Log_checker.py must be prepared for release 17")
+
+
+def test_rewarded_bidding_filter_contract() -> None:
+    source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    needle = 'data-message-needle="[Ad,RewardedBidding,"'
+    _assert(source_text.count('value="rewarded_bidding"') == 1, "RewardedBidding filter must exist exactly once")
+    _assert(source_text.count(needle) == 1, "RewardedBidding must use the exact message needle")
+    _assert('data-android-only="true"' in source_text, "RewardedBidding must be Android-only")
+    _assert("exactMessage.includes(state.quickMessage)" in source_text, "message filter must remain case-sensitive")
+    _assert("flex items-start justify-start gap-32" in source_text, "RewardedBidding layout must stay beside the first filter column")
 
 
 def test_release_payload_sync() -> None:
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
     payload_text = (ROOT / "Updates_2_3" / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+
+    _assert_equal(payload_text, source_text, "source and release payload must be byte-for-byte identical")
 
     markers = {
         "release_badge": r"v2\.4\.0\((\d+)\)",
@@ -263,6 +276,62 @@ def test_update_candidate_does_not_downgrade() -> None:
     )
 
 
+def test_update_flow_v16_to_v17() -> None:
+    import remote_update as updater
+
+    manifest_bytes = (ROOT / "Updates_2_3" / "remote_manifest.json").read_bytes()
+    payloads = {
+        "Log_checker.py": (ROOT / "Updates_2_3" / "Log_checker.py").read_bytes(),
+        "remote_update.py": (ROOT / "remote_update.py").read_bytes(),
+    }
+    original_home = os.environ.get("HOME")
+    original_bundle_build = os.environ.get("EVENTINSPECTOR_BUNDLED_BUILD")
+    original_bundle_source = os.environ.get("EVENTINSPECTOR_BUNDLED_BUILD_SOURCE")
+    original_download_first = updater._download_first
+    original_download_verified = updater._download_verified
+    try:
+        with tempfile.TemporaryDirectory(prefix="eventinspector_harness_") as temp_home:
+            os.environ["HOME"] = temp_home
+            os.environ["EVENTINSPECTOR_BUNDLED_BUILD"] = "16"
+            os.environ["EVENTINSPECTOR_BUNDLED_BUILD_SOURCE"] = "detected"
+
+            def fake_download_first(_urls, _timeout):
+                return manifest_bytes, "harness://remote_manifest.json"
+
+            def fake_download_verified(urls, _timeout, _expected_sha256=""):
+                rel_path = next((path for path in payloads if any(url.endswith("/" + path) for url in urls)), None)
+                _assert(rel_path is not None, f"unexpected update payload URL list: {urls}")
+                return payloads[rel_path], f"harness://{rel_path}"
+
+            updater._download_first = fake_download_first
+            updater._download_verified = fake_download_verified
+
+            first = updater.check_for_updates(force_refresh=True)
+            _assert_equal(first.get("status"), "updated", "v16 client must prepare v17 payload")
+            _assert_equal(first.get("version"), "2026-08-12-1-2.4.0-17", "prepared payload version mismatch")
+            prepared = updater.get_prepared_update_info()
+            _assert_equal(prepared.get("build"), 17, "prepared payload build mismatch")
+            _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
+
+            second = updater.check_for_updates()
+            _assert_equal(second.get("status"), "up_to_date", "same v17 payload must not download repeatedly")
+    finally:
+        updater._download_first = original_download_first
+        updater._download_verified = original_download_verified
+        if original_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = original_home
+        if original_bundle_build is None:
+            os.environ.pop("EVENTINSPECTOR_BUNDLED_BUILD", None)
+        else:
+            os.environ["EVENTINSPECTOR_BUNDLED_BUILD"] = original_bundle_build
+        if original_bundle_source is None:
+            os.environ.pop("EVENTINSPECTOR_BUNDLED_BUILD_SOURCE", None)
+        else:
+            os.environ["EVENTINSPECTOR_BUNDLED_BUILD_SOURCE"] = original_bundle_source
+
+
 def test_build_scripts_clean_outputs() -> None:
     mac_script = (ROOT / "build" / "macos" / "build_macos.sh").read_text(encoding="utf-8", errors="ignore")
     win_portable_script = (ROOT / "build" / "windows" / "build_portable.bat").read_text(encoding="utf-8", errors="ignore")
@@ -293,7 +362,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-10-2.4.0-16' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-12-1-2.4.0-17' in text, "windows recovery script must target the current release")
     _assert('remote_manifest.json' in text, "windows recovery script must seed the current manifest")
     legacy_scripts = sorted((ROOT / "tools").glob("bootstrap_windows_to_v*.bat"))
     _assert(not legacy_scripts, f"remove legacy Windows bootstrap scripts: {[p.name for p in legacy_scripts]}")
@@ -307,8 +376,10 @@ TESTS: List[Callable[[], None]] = [
     test_installation_id_log_parsing,
     test_sdk_exact_contracts,
     test_release_build_marker,
+    test_rewarded_bidding_filter_contract,
     test_release_payload_sync,
     test_update_candidate_does_not_downgrade,
+    test_update_flow_v16_to_v17,
     test_build_scripts_clean_outputs,
     test_windows_update_recovery_script,
 ]

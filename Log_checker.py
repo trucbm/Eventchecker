@@ -2116,7 +2116,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(16)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(17)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2695,26 +2695,32 @@ HTML_TEMPLATE = """
                                 <span class="block text-xs text-gray-900">Auto-scroll</span>
                             </label>
                         </div>
-                        <div class="pt-4 border-t grid grid-cols-1 gap-y-2 text-xs text-gray-700">
-                            <label class="inline-flex items-center gap-2">
-                                <input type="radio" name="tagQuickFilter" value="" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                <span>All</span>
-                            </label>
-                            <label class="inline-flex items-center gap-2">
-                                <input type="radio" name="tagQuickFilter" value="integrationhelper" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                <span>Integrationhelper</span>
-                            </label>
-                            <label class="inline-flex items-center gap-2">
-                                <input type="radio" name="tagQuickFilter" value="appsflyer" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                <span>Appsflyer</span>
-                            </label>
-                            <label class="inline-flex items-center gap-2">
-                                <input type="radio" name="tagQuickFilter" value="appmetrica" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                <span>Appmetrica</span>
-                            </label>
-                            <label class="inline-flex items-center gap-2">
-                                <input type="radio" name="tagQuickFilter" value="adjust" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                <span>Adjust</span>
+                        <div class="pt-4 border-t flex items-start justify-start gap-32 text-xs text-gray-700">
+                            <div class="grid grid-cols-1 gap-y-2">
+                                <label class="inline-flex items-center gap-2">
+                                    <input type="radio" name="tagQuickFilter" value="" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <span>All</span>
+                                </label>
+                                <label class="inline-flex items-center gap-2">
+                                    <input type="radio" name="tagQuickFilter" value="integrationhelper" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <span>Integrationhelper</span>
+                                </label>
+                                <label class="inline-flex items-center gap-2">
+                                    <input type="radio" name="tagQuickFilter" value="appsflyer" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <span>Appsflyer</span>
+                                </label>
+                                <label class="inline-flex items-center gap-2">
+                                    <input type="radio" name="tagQuickFilter" value="appmetrica" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <span>Appmetrica</span>
+                                </label>
+                                <label class="inline-flex items-center gap-2">
+                                    <input type="radio" name="tagQuickFilter" value="adjust" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <span>Adjust</span>
+                                </label>
+                            </div>
+                            <label class="inline-flex items-center gap-2 shrink-0 pt-0.5">
+                                <input type="radio" name="tagQuickFilter" value="rewarded_bidding" data-android-only="true" data-message-needle="[Ad,RewardedBidding," class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                <span>RewardedBidding</span>
                             </label>
                         </div>
                     </div>
@@ -2849,8 +2855,13 @@ HTML_TEMPLATE = """
                 const isIos = platform === 'ios';
                 radio.disabled = isIos;
                 const label = radio.closest('label');
-                if (label) label.classList.toggle('opacity-50', isIos);
+                const isAndroidOnly = radio.dataset.androidOnly === 'true' || radio.dataset.messageNeedle;
+                if (label) {
+                    label.classList.toggle('opacity-50', isIos);
+                    label.classList.toggle('hidden', Boolean(isAndroidOnly && isIos));
+                }
                 if (isIos && radio.value === '') radio.checked = true;
+                if (isIos && isAndroidOnly) radio.checked = false;
             });
         }
 
@@ -3539,12 +3550,14 @@ HTML_TEMPLATE = """
         }
 
         function getPackageFilterState() {
+            const selectedQuickFilter = document.querySelector('input[name="tagQuickFilter"]:checked');
             return {
                 selectedDevice,
                 filterText: document.getElementById('packageFilterInput').value.toLowerCase(),
                 filterText2: document.getElementById('packageFilterInput2').value.toLowerCase(),
                 tagFilter: document.getElementById('packageTagFilterInput').value.toLowerCase(),
-                quickTag: document.querySelector('input[name="tagQuickFilter"]:checked')?.value || '',
+                quickTag: selectedQuickFilter?.dataset.messageNeedle ? '' : (selectedQuickFilter?.value || ''),
+                quickMessage: selectedQuickFilter?.dataset.messageNeedle || '',
                 errorsOnly: document.getElementById('showErrorsOnly').checked,
                 warningsOnly: document.getElementById('showWarningsOnly').checked,
             };
@@ -3563,10 +3576,12 @@ HTML_TEMPLATE = """
                 }
                 const messageHaystack = `${l.message || ''}`.toLowerCase();
                 const tagHaystack = `${l.tag || ''}`.toLowerCase();
+                const exactMessage = `${l.message || l.log || ''}`;
                 if (state.quickTag) {
                     const quickNeedle = state.quickTag.toLowerCase();
                     if (!tagHaystack.includes(quickNeedle)) return false;
                 }
+                if (state.quickMessage && !exactMessage.includes(state.quickMessage)) return false;
                 if (state.tagFilter && !tagHaystack.includes(state.tagFilter)) return false;
                 if (state.filterText && !messageHaystack.includes(state.filterText)) return false;
                 if (state.filterText2 && !messageHaystack.includes(state.filterText2)) return false;

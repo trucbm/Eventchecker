@@ -19,9 +19,9 @@ import sqlite3
 import socket
 import platform
 import uuid
+import plistlib
 import tempfile
 import zipfile
-import plistlib
 try:
     import webview
 except Exception:
@@ -1914,7 +1914,7 @@ def _extract_brightsdk_version_from_ipa(ipa_path):
             zf.extractall(tmp_dir)
         payload_dir = os.path.join(tmp_dir, "Payload")
         if not os.path.isdir(payload_dir):
-            return {"app_name": "", "brightsdk_version": ""}
+            return ""
         for app_name in os.listdir(payload_dir):
             app_dir = os.path.join(payload_dir, app_name)
             if not app_name.endswith(".app") or not os.path.isdir(app_dir):
@@ -1927,7 +1927,7 @@ def _extract_brightsdk_version_from_ipa(ipa_path):
                     app_plist = plistlib.load(f)
                 app_display_name = str(app_plist.get("CFBundleDisplayName") or "").strip()
                 app_bundle_name = str(app_plist.get("CFBundleName") or "").strip()
-            for root, _dirs, _files in os.walk(app_dir):
+            for root, _dirs, files in os.walk(app_dir):
                 if os.path.basename(root) == "brdsdk.framework":
                     plist_path = os.path.join(root, "Info.plist")
                     if not os.path.exists(plist_path):
@@ -2116,7 +2116,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(16)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(17)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2695,26 +2695,32 @@ HTML_TEMPLATE = """
                                 <span class="block text-xs text-gray-900">Auto-scroll</span>
                             </label>
                         </div>
-                        <div class="pt-4 border-t grid grid-cols-1 gap-y-2 text-xs text-gray-700">
-                            <label class="inline-flex items-center gap-2">
-                                <input type="radio" name="tagQuickFilter" value="" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                <span>All</span>
-                            </label>
-                            <label class="inline-flex items-center gap-2">
-                                <input type="radio" name="tagQuickFilter" value="integrationhelper" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                <span>Integrationhelper</span>
-                            </label>
-                            <label class="inline-flex items-center gap-2">
-                                <input type="radio" name="tagQuickFilter" value="appsflyer" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                <span>Appsflyer</span>
-                            </label>
-                            <label class="inline-flex items-center gap-2">
-                                <input type="radio" name="tagQuickFilter" value="appmetrica" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                <span>Appmetrica</span>
-                            </label>
-                            <label class="inline-flex items-center gap-2">
-                                <input type="radio" name="tagQuickFilter" value="adjust" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
-                                <span>Adjust</span>
+                        <div class="pt-4 border-t flex items-start justify-start gap-32 text-xs text-gray-700">
+                            <div class="grid grid-cols-1 gap-y-2">
+                                <label class="inline-flex items-center gap-2">
+                                    <input type="radio" name="tagQuickFilter" value="" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <span>All</span>
+                                </label>
+                                <label class="inline-flex items-center gap-2">
+                                    <input type="radio" name="tagQuickFilter" value="integrationhelper" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <span>Integrationhelper</span>
+                                </label>
+                                <label class="inline-flex items-center gap-2">
+                                    <input type="radio" name="tagQuickFilter" value="appsflyer" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <span>Appsflyer</span>
+                                </label>
+                                <label class="inline-flex items-center gap-2">
+                                    <input type="radio" name="tagQuickFilter" value="appmetrica" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <span>Appmetrica</span>
+                                </label>
+                                <label class="inline-flex items-center gap-2">
+                                    <input type="radio" name="tagQuickFilter" value="adjust" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <span>Adjust</span>
+                                </label>
+                            </div>
+                            <label class="inline-flex items-center gap-2 shrink-0 pt-0.5">
+                                <input type="radio" name="tagQuickFilter" value="rewarded_bidding" data-android-only="true" data-message-needle="[Ad,RewardedBidding," class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                <span>RewardedBidding</span>
                             </label>
                         </div>
                     </div>
@@ -2849,8 +2855,13 @@ HTML_TEMPLATE = """
                 const isIos = platform === 'ios';
                 radio.disabled = isIos;
                 const label = radio.closest('label');
-                if (label) label.classList.toggle('opacity-50', isIos);
+                const isAndroidOnly = radio.dataset.androidOnly === 'true' || radio.dataset.messageNeedle;
+                if (label) {
+                    label.classList.toggle('opacity-50', isIos);
+                    label.classList.toggle('hidden', Boolean(isAndroidOnly && isIos));
+                }
                 if (isIos && radio.value === '') radio.checked = true;
+                if (isIos && isAndroidOnly) radio.checked = false;
             });
         }
 
@@ -3098,15 +3109,6 @@ HTML_TEMPLATE = """
             return str.replace(/'/g, '&#39;');
         }
 
-        function resetBrightSdkUiState() {
-            const appNameEl = document.getElementById('brightSdkAppNameValue');
-            if (appNameEl) appNameEl.textContent = 'Not Found';
-            const versionEl = document.getElementById('brightSdkVersionValue');
-            if (versionEl) versionEl.textContent = 'Not Found';
-            const inputEl = document.getElementById('brightSdkFileInput');
-            if (inputEl) inputEl.value = '';
-        }
-
         function renderSimpleTable(id, data) {
             const tbody = document.getElementById(id);
             if (!tbody) return;
@@ -3138,6 +3140,15 @@ HTML_TEMPLATE = """
             if (gameEl) {
                 gameEl.textContent = payload.game_name || 'Unknown';
             }
+        }
+
+        function resetBrightSdkUiState() {
+            const appNameEl = document.getElementById('brightSdkAppNameValue');
+            if (appNameEl) appNameEl.textContent = 'Not Found';
+            const versionEl = document.getElementById('brightSdkVersionValue');
+            if (versionEl) versionEl.textContent = 'Not Found';
+            const inputEl = document.getElementById('brightSdkFileInput');
+            if (inputEl) inputEl.value = '';
         }
 
         function renderProfileOptions(payload) {
@@ -3539,12 +3550,14 @@ HTML_TEMPLATE = """
         }
 
         function getPackageFilterState() {
+            const selectedQuickFilter = document.querySelector('input[name="tagQuickFilter"]:checked');
             return {
                 selectedDevice,
                 filterText: document.getElementById('packageFilterInput').value.toLowerCase(),
                 filterText2: document.getElementById('packageFilterInput2').value.toLowerCase(),
                 tagFilter: document.getElementById('packageTagFilterInput').value.toLowerCase(),
-                quickTag: document.querySelector('input[name="tagQuickFilter"]:checked')?.value || '',
+                quickTag: selectedQuickFilter?.dataset.messageNeedle ? '' : (selectedQuickFilter?.value || ''),
+                quickMessage: selectedQuickFilter?.dataset.messageNeedle || '',
                 errorsOnly: document.getElementById('showErrorsOnly').checked,
                 warningsOnly: document.getElementById('showWarningsOnly').checked,
             };
@@ -3563,10 +3576,12 @@ HTML_TEMPLATE = """
                 }
                 const messageHaystack = `${l.message || ''}`.toLowerCase();
                 const tagHaystack = `${l.tag || ''}`.toLowerCase();
+                const exactMessage = `${l.message || l.log || ''}`;
                 if (state.quickTag) {
                     const quickNeedle = state.quickTag.toLowerCase();
                     if (!tagHaystack.includes(quickNeedle)) return false;
                 }
+                if (state.quickMessage && !exactMessage.includes(state.quickMessage)) return false;
                 if (state.tagFilter && !tagHaystack.includes(state.tagFilter)) return false;
                 if (state.filterText && !messageHaystack.includes(state.filterText)) return false;
                 if (state.filterText2 && !messageHaystack.includes(state.filterText2)) return false;
@@ -4630,6 +4645,7 @@ HTML_TEMPLATE = """
                 setPackageRunningState(false);
                 resetPackageLogUiState();
             }
+            resetBrightSdkUiState();
             setPackageControlsEnabled(true);
         });
 
@@ -4697,21 +4713,6 @@ def import_profile():
         return jsonify({'ok': False, 'error': str(e)}), 400
 
 
-@app.post('/api/profiles/open-folder')
-def open_profile_folder():
-    try:
-        os.makedirs(PROFILE_DIR, exist_ok=True)
-        if sys.platform == 'darwin':
-            subprocess.Popen(['open', PROFILE_DIR])
-        elif sys.platform.startswith('win'):
-            os.startfile(PROFILE_DIR)
-        else:
-            subprocess.Popen(['xdg-open', PROFILE_DIR])
-        return jsonify({'ok': True, 'profile_dir': PROFILE_DIR})
-    except Exception as e:
-        return jsonify({'ok': False, 'error': str(e)}), 400
-
-
 @app.post('/api/ipa/inspect')
 def inspect_ipa():
     upload = request.files.get('ipa_file')
@@ -4735,8 +4736,25 @@ def inspect_ipa():
         return jsonify({'ok': False, 'error': str(e)}), 400
     finally:
         if tmp_path and os.path.exists(tmp_path):
-            os.remove(tmp_path)
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
 
+
+@app.post('/api/profiles/open-folder')
+def open_profile_folder():
+    try:
+        os.makedirs(PROFILE_DIR, exist_ok=True)
+        if sys.platform == 'darwin':
+            subprocess.Popen(['open', PROFILE_DIR])
+        elif sys.platform.startswith('win'):
+            os.startfile(PROFILE_DIR)
+        else:
+            subprocess.Popen(['xdg-open', PROFILE_DIR])
+        return jsonify({'ok': True, 'profile_dir': PROFILE_DIR})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
 
 @app.post('/check_update')
 def check_update():
