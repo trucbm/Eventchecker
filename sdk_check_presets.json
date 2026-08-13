@@ -86,8 +86,8 @@
       "Appsflyer\t\tRemoved",
       "Firebase Crashlytics\t\t20.0.6",
       "Facebook SDK\t\t18.3.0",
-      "AppMetrica SDK\t\t8.1.0",
-      "AdQuality\tSkip\t"
+      "AppMetrica SDK\t\t8.1.0"
+    
     ]
   }
 }
