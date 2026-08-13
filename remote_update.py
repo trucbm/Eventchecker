@@ -175,17 +175,37 @@ def _bundle_build_is_detected():
     return str(os.getenv("EVENTINSPECTOR_BUNDLED_BUILD_SOURCE") or "").strip().lower() == "detected"
 
 
+def _cache_busted_url(url):
+    """Avoid stale CDN/proxy responses while keeping the configured URL intact."""
+    value = str(url or "")
+    if not value.startswith(("http://", "https://")):
+        return value
+    separator = "&" if "?" in value else "?"
+    return f"{value}{separator}eventinspector_refresh={int(time.time() * 1000)}"
+
+
 def _download(url, timeout):
     # Handle Google Drive confirm page for large files
     session = requests.Session()
-    r = session.get(url, allow_redirects=True, timeout=timeout)
+    request_url = _cache_busted_url(url)
+    r = session.get(
+        request_url,
+        allow_redirects=True,
+        headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+        timeout=timeout,
+    )
     if r.headers.get("content-type", "").startswith("text/html"):
         m = re.search(r"confirm=([0-9A-Za-z_]+)", r.text)
         if m:
             confirm = m.group(1)
-            sep = "&" if "?" in url else "?"
-            url2 = f"{url}{sep}confirm={confirm}"
-            r = session.get(url2, allow_redirects=True, timeout=timeout)
+            sep = "&" if "?" in request_url else "?"
+            url2 = f"{request_url}{sep}confirm={confirm}"
+            r = session.get(
+                url2,
+                allow_redirects=True,
+                headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+                timeout=timeout,
+            )
     r.raise_for_status()
     return r.content
 
@@ -337,6 +357,7 @@ def check_for_updates(force_refresh=False):
 
     update_dir = os.path.join(_user_data_dir(), UPDATES_DIRNAME)
     tmp_update_dir = os.path.join(_user_data_dir(), f"{UPDATES_DIRNAME}_tmp")
+    _remove_path(tmp_update_dir)
     os.makedirs(tmp_update_dir, exist_ok=True)
 
     state_version = state.get("version")
@@ -399,29 +420,21 @@ def check_for_updates(force_refresh=False):
             break
 
     if ok:
-        # Replace old updates atomically
+        # Keep the current payload intact until the complete new directory is in place.
+        previous_update_dir = f"{update_dir}.previous"
         try:
+            _remove_path(previous_update_dir)
             if os.path.exists(update_dir):
-                for root, dirs, files in os.walk(update_dir, topdown=False):
-                    for name in files:
-                        os.remove(os.path.join(root, name))
-                    for name in dirs:
-                        os.rmdir(os.path.join(root, name))
+                os.replace(update_dir, previous_update_dir)
+            os.replace(tmp_update_dir, update_dir)
+            _remove_path(previous_update_dir)
         except Exception:
-            pass
-        # Move tmp -> update_dir
-        try:
-            if not os.path.exists(update_dir):
-                os.makedirs(update_dir, exist_ok=True)
-            for root, dirs, files in os.walk(tmp_update_dir):
-                rel = os.path.relpath(root, tmp_update_dir)
-                dest_root = update_dir if rel == '.' else os.path.join(update_dir, rel)
-                os.makedirs(dest_root, exist_ok=True)
-                for name in files:
-                    src = os.path.join(root, name)
-                    dst = os.path.join(dest_root, name)
-                    os.replace(src, dst)
-        except Exception:
+            try:
+                if not os.path.exists(update_dir) and os.path.exists(previous_update_dir):
+                    os.replace(previous_update_dir, update_dir)
+            except Exception:
+                pass
+            _remove_path(tmp_update_dir)
             return {"ok": False, "status": "error", "error": "replace_failed", "update_dir": load_prepared_update_dir()}
 
         state.update({

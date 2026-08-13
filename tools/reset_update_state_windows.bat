@@ -15,10 +15,10 @@ set "UPDATES_DIR_V240=%APP_SUPPORT_DIR%\updates_v240"
 set "MANIFEST_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json"
 set "LOG_CHECKER_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/Log_checker.py"
 set "REMOTE_UPDATE_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/remote_update.py"
-set "TARGET_VERSION=2026-08-12-1-2.4.0-17"
+set "TARGET_VERSION=2026-08-13-1-2.4.0-48"
 
 echo Event Inspector Windows update bootstrap
-echo Target release: v2.4.0(17)
+echo Target release: v2.4.0(18)
 echo Target folder: %APP_SUPPORT_DIR%
 echo.
 echo IMPORTANT: close Event Inspector before running this script.

@@ -434,6 +434,7 @@ MAX_VALIDATOR_LOGS = 1500
 MAX_SPECIFIC_EVENT_LOGS = 1500
 MAX_CALLBACK_AD_LOGS = 1500
 MAX_ADREVENUE_LOGS = 1500
+MAX_PRICE_ROTATION_LOGS = 1500
 
 # 1. Dữ liệu cho Tab Load Ads
 load_ads_events = deque(maxlen=MAX_LOAD_ADS_LOGS)
@@ -481,7 +482,11 @@ adrevenue_logs = deque(maxlen=MAX_ADREVENUE_LOGS)
 adrevenue_default_params = []
 adrevenue_source_params = {}
 
-# 8. Dữ liệu cho Tab SDK Check
+# 8. Dữ liệu cho Tab Price Rotation
+price_rotation_logs = deque(maxlen=MAX_PRICE_ROTATION_LOGS)
+PRICE_ROTATION_PREFIX = "[Ad,RewardedBidding,"
+
+# 9. Dữ liệu cho Tab SDK Check
 sdk_check_search_list = []
 sdk_check_results = {}
 sdk_check_input_list = []
@@ -1578,6 +1583,55 @@ def extract_json_object_from_text(text):
     except:
         return None
 
+
+def _parse_price_rotation_log(log_entry, device_id):
+    """Parse only logs containing the exact Price Rotation marker."""
+    raw_log = str(log_entry or "").strip()
+    if not raw_log or PRICE_ROTATION_PREFIX not in raw_log:
+        return None
+
+    marker_start = raw_log.find(PRICE_ROTATION_PREFIX)
+    type_start = marker_start + len(PRICE_ROTATION_PREFIX)
+    marker_end = raw_log.find("]", type_start)
+    if marker_end == -1:
+        return None
+
+    rotation_type = raw_log[type_start:marker_end].strip() or "Unknown"
+    payload_text = raw_log[marker_end + 1:].strip()
+    json_text = extract_json_object_from_text(payload_text)
+    parsed_json = None
+    details = payload_text or "No JSON payload"
+
+    if json_text:
+        try:
+            parsed_json = json.loads(json_text)
+            details = json.dumps(parsed_json, ensure_ascii=False, indent=2)
+        except (TypeError, ValueError):
+            details = json_text
+
+    return {
+        "device_id": device_id,
+        "device_name": get_device_name(device_id),
+        "type": rotation_type,
+        "details": details,
+        "raw_log": raw_log,
+        "json_data": json.dumps(parsed_json, ensure_ascii=False) if parsed_json is not None else "{}",
+    }
+
+
+def process_price_rotation_log(log_entry, device_id):
+    if is_paused:
+        return
+
+    parsed = _parse_price_rotation_log(log_entry, device_id)
+    if not parsed:
+        return
+
+    with lock:
+        price_rotation_logs.append(parsed)
+        snapshot = list(price_rotation_logs)
+    socketio.emit("update_price_rotation_table", snapshot)
+
 def _decode_ios_levelplay_json_text(text):
     # iOS syslog sometimes writes \" as \134", which is not valid JSON.
     return (text or "").replace(r"\134", "\\")
@@ -2116,7 +2170,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(17)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(18)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2177,6 +2231,7 @@ HTML_TEMPLATE = """
                     <button id="tabBtnSpecific" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Specific')">Specific Validator</button>
                     <button id="tabBtnAdRevenue" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('AdRevenue')">Revenue</button>
                     <button id="tabBtnCallbackAd" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('CallbackAd')">CallBack & Ads</button>
+                    <button id="tabBtnPriceRotation" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('PriceRotation')">Price Rotation</button>
                     <button id="tabBtnSdkCheck" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('SdkCheck')">SDK Check</button>
                     <button id="tabBtnBrightSDK" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('BrightSDK')">BrightSDK</button>
                     <button id="tabBtnPackage" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Package')">Package Logcat</button>
@@ -2500,7 +2555,65 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- TAB 7: SDK Check -->
+            <!-- TAB 7: Price Rotation -->
+            <div id="tabContentPriceRotation" class="hidden">
+                <div class="bg-white rounded-xl shadow-md p-4">
+                    <div class="mb-3 grid grid-cols-1 lg:grid-cols-[1fr_minmax(320px,520px)] gap-4 items-end">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-700">Filter by Type:</label>
+                            <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationTypeAll" name="priceRotationTypeFilter" type="checkbox" value="all" checked class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">All</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationTypeLevelPlay" name="priceRotationTypeFilter" type="checkbox" value="levelplay" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">LevelPlay</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationTypeAscendx" name="priceRotationTypeFilter" type="checkbox" value="ascendx" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">Ascendx</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationTypeCloudx" name="priceRotationTypeFilter" type="checkbox" value="cloudx" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">Cloudx</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationTypePriceCompare" name="priceRotationTypeFilter" type="checkbox" value="pricecompare" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">PriceCompare</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="lg:justify-self-end w-full lg:max-w-[520px]">
+                            <label for="priceRotationFilterInput" class="block text-xs font-medium text-gray-700">Filter (in raw log):</label>
+                            <input type="text" id="priceRotationFilterInput" class="mt-1 block w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" placeholder="Search...">
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full min-w-[1100px] table-fixed bg-white">
+                            <colgroup>
+                                <col style="width: 13%;">
+                                <col style="width: 14%;">
+                                <col style="width: 29%;">
+                                <col style="width: 36%;">
+                                <col style="width: 8%;">
+                            </colgroup>
+                            <thead class="bg-gray-50 sticky top-0 z-10">
+                                <tr>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Type</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Details</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="priceRotationTableBody" class="divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 8: SDK Check -->
             <div id="tabContentSdkCheck" class="hidden">
                 <div class="bg-white rounded-xl shadow-md p-4 mb-4">
                     <h2 class="text-lg font-semibold mb-2">SDK Check Setup</h2>
@@ -2886,6 +2999,7 @@ HTML_TEMPLATE = """
             if (typeof closePackageStreamModal === 'function') closePackageStreamModal();
             if (typeof setPackageRunningState === 'function') setPackageRunningState(false);
             if (typeof resetPackageLogUiState === 'function') resetPackageLogUiState();
+            if (typeof resetPriceRotationUiState === 'function') resetPriceRotationUiState();
             syncPlatformUi();
         }
 
@@ -2942,7 +3056,7 @@ HTML_TEMPLATE = """
         function switchTab(tabName) {
             currentTab = tabName;
             // Hide all contents with Safety Check
-            ['tabContentLoadAds', 'tabContentLoadAdsExt', 'tabContentValidator', 'tabContentBrightSDK', 'tabContentSpecific', 'tabContentAdRevenue', 'tabContentCallbackAd', 'tabContentSdkCheck', 'tabContentPackage'].forEach(id => {
+            ['tabContentLoadAds', 'tabContentLoadAdsExt', 'tabContentValidator', 'tabContentBrightSDK', 'tabContentSpecific', 'tabContentAdRevenue', 'tabContentCallbackAd', 'tabContentPriceRotation', 'tabContentSdkCheck', 'tabContentPackage'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.classList.add('hidden');
                 else console.warn('Missing element ID:', id);
@@ -2972,6 +3086,7 @@ HTML_TEMPLATE = """
             if (confirm('Are you sure you want to clear ALL logs?')) {
                 resetSdkCheckUiState(true);
                 resetBrightSdkUiState();
+                resetPriceRotationUiState();
                 socket.emit('clear_all_logs');
             }
         });
@@ -3507,6 +3622,75 @@ HTML_TEMPLATE = """
         // Add listeners
         document.querySelectorAll('input[name="callbackType"]').forEach(r => r.addEventListener('change', renderCallbackTable));
         document.getElementById('callbackAdFilterInput').addEventListener('input', renderCallbackTable);
+
+        let lastPriceRotationData = [];
+
+        function resetPriceRotationUiState() {
+            lastPriceRotationData = [];
+            const filterInput = document.getElementById('priceRotationFilterInput');
+            const allTypeFilter = document.getElementById('priceRotationTypeAll');
+            const tbody = document.getElementById('priceRotationTableBody');
+            if (filterInput) filterInput.value = '';
+            document.querySelectorAll('input[name="priceRotationTypeFilter"]').forEach(input => {
+                input.checked = input === allTypeFilter;
+            });
+            if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4">Waiting...</td></tr>';
+        }
+
+        socket.on('update_price_rotation_table', (data) => {
+            lastPriceRotationData = Array.isArray(data) ? data : [];
+            renderPriceRotationTable();
+        });
+
+        function renderPriceRotationTable() {
+            const tbody = document.getElementById('priceRotationTableBody');
+            if (!tbody) return;
+            const filterInput = document.getElementById('priceRotationFilterInput');
+            const selectedTypeFilters = Array.from(document.querySelectorAll('input[name="priceRotationTypeFilter"]:checked'))
+                .map(input => input.value)
+                .filter(value => value !== 'all');
+            const textFilter = (filterInput?.value || '').toLowerCase();
+            const filtered = lastPriceRotationData.filter(res => {
+                if (selectedDevice !== 'all' && res.device_id !== selectedDevice) return false;
+                if (selectedTypeFilters.length > 0 && !selectedTypeFilters.includes((res.type || '').trim().toLowerCase())) return false;
+                if (textFilter && !(res.raw_log || '').toLowerCase().includes(textFilter)) return false;
+                return true;
+            });
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4">Waiting...</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = filtered.map(res => {
+                const jsonData = res.json_data && res.json_data !== '{}' ? res.json_data : '';
+                const action = jsonData
+                    ? `<button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(jsonData)}'>View JSON</button>`
+                    : '<span class="text-xs text-gray-400">-</span>';
+                return `<tr class="hover:bg-gray-50 border-b text-sm">
+                    <td class="py-2 px-3 text-purple-700 text-sm align-top truncate" title="${escapeAttribute(res.device_name || res.device_id || '')}">${escapeHTML(res.device_name || res.device_id || '')}</td>
+                    <td class="py-2 px-3 text-sm font-semibold text-cyan-600 align-top break-words">${escapeHTML(res.type || 'Unknown')}</td>
+                    <td class="py-2 px-3 align-top"><pre class="text-xs font-mono whitespace-pre-wrap break-all max-h-64 overflow-auto">${escapeHTML(res.details || '')}</pre></td>
+                    <td class="py-2 px-3 log-cell text-xs font-normal text-gray-600 align-top"><div class="max-h-64 overflow-auto whitespace-pre-wrap break-all">${escapeHTML(res.raw_log || '')}</div></td>
+                    <td class="py-2 px-3 align-top whitespace-nowrap">${action}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        document.getElementById('priceRotationFilterInput')?.addEventListener('input', renderPriceRotationTable);
+        document.querySelectorAll('input[name="priceRotationTypeFilter"]').forEach(input => input.addEventListener('change', (event) => {
+            const allInput = document.getElementById('priceRotationTypeAll');
+            const specificInputs = Array.from(document.querySelectorAll('input[name="priceRotationTypeFilter"]'))
+                .filter(item => item !== allInput);
+            if (event.target === allInput) {
+                if (allInput.checked) specificInputs.forEach(item => item.checked = false);
+            } else if (event.target.checked) {
+                allInput.checked = false;
+            } else if (!specificInputs.some(item => item.checked)) {
+                allInput.checked = true;
+            }
+            renderPriceRotationTable();
+        }));
 
         socket.on('update_sdk_check_table', (data) => {
             const tbody = document.getElementById(activePlatform === 'ios' ? 'sdkCheckIosTableBody' : 'sdkCheckTableBody');
@@ -4172,6 +4356,7 @@ HTML_TEMPLATE = """
             socket.emit('refresh_request'); 
             renderCallbackTable(); // Trigger client-side re-render immediately
             renderAdRevenueTable();
+            renderPriceRotationTable();
         });
 
         // --- Specific Tab Logic ---
@@ -6314,6 +6499,9 @@ def adb_log_reader(device_id):
             # 4. Process AdRevenue
             process_adrevenue_log(line, device_id)
 
+            # 4.5 Process Price Rotation logs with an exact marker match
+            process_price_rotation_log(line, device_id)
+
             # 5. Process Callback & Events
             process_callback_and_ad_event_log(line, device_id)
 
@@ -6365,6 +6553,7 @@ def ios_log_reader(device_id):
             process_ios_package_log_line(log_obj)
             process_load_ads_ext_log(log_obj["raw_log"], device_id)
             process_adrevenue_log(log_obj["raw_log"], device_id)
+            process_price_rotation_log(log_obj["raw_log"], device_id)
             _process_sdk_check_line(log_obj["raw_log"], device_id)
             process_callback_and_ad_event_log(log_obj["raw_log"], device_id)
             event_name, params, json_string = find_and_parse_event(log_obj["raw_log"])
@@ -6688,6 +6877,7 @@ def handle_change_tab(data):
     if data.get('tab_name') == 'LoadAdsExt': socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
     if data.get('tab_name') == 'SdkCheck': _emit_sdk_check_results()
     if data.get('tab_name') == 'CallbackAd': socketio.emit('update_callback_ad_table', list(callback_ad_logs))
+    if data.get('tab_name') == 'PriceRotation': socketio.emit('update_price_rotation_table', list(price_rotation_logs))
 
 def _reset_runtime_for_platform_switch():
     global is_paused, validator_active, sdk_check_active, sdk_check_current_network
@@ -6714,6 +6904,7 @@ def _reset_runtime_for_platform_switch():
         specific_event_results.clear(); event_log_cache.clear()
         adrevenue_logs.clear(); adrevenue_log_cache.clear()
         callback_ad_logs.clear(); incomplete_impression_logs.clear(); incomplete_ios_adrevenue_logs.clear(); incomplete_ios_load_ads_ext_logs.clear(); incomplete_adjust_adrevenue_logs.clear()
+        price_rotation_logs.clear()
         package_log_cache.clear(); active_package_pids.clear()
         installation_id_state.clear()
         for proc in active_ios_log_processes.values():
@@ -6749,6 +6940,7 @@ def _reset_runtime_for_platform_switch():
     socketio.emit('update_specific_event_table', [])
     socketio.emit('update_adrevenue_table', [])
     socketio.emit('update_callback_ad_table', [])
+    socketio.emit('update_price_rotation_table', [])
     socketio.emit('package_log_cache', [])
     socketio.emit('device_status', {
         "connected_devices": [],
@@ -6805,7 +6997,7 @@ def cl():
         load_ads_ext_events.clear(); unique_load_ads_ext.clear()
         validator_results.clear()
         specific_event_results.clear(); event_log_cache.clear()
-        adrevenue_logs.clear(); callback_ad_logs.clear()
+        adrevenue_logs.clear(); callback_ad_logs.clear(); price_rotation_logs.clear()
         package_log_cache.clear()
         # Clean SDK check
         sdk_check_results.clear()
@@ -6821,6 +7013,7 @@ def cl():
     socketio.emit('update_specific_event_table', [])
     socketio.emit('update_adrevenue_table', [])
     socketio.emit('update_callback_ad_table', [])
+    socketio.emit('update_price_rotation_table', [])
     socketio.emit('package_log_cache', [])
     socketio.emit("installation_id_status", _build_installation_id_payload(""))
     _emit_sdk_check_results()
@@ -6934,6 +7127,7 @@ def refresh():
     socketio.emit('update_load_ads', list(load_ads_events))
     socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
     socketio.emit('update_callback_ad_table', list(callback_ad_logs)) # Ensure callback data is refreshed
+    socketio.emit('update_price_rotation_table', list(price_rotation_logs))
     # ... trigger others ...
 
 @socketio.on('connect')
@@ -6941,6 +7135,7 @@ def connect():
     socketio.emit('pause_status', {'is_paused': is_paused})
     socketio.emit('validator_status', {'active': validator_active})
     socketio.emit('platform_status', {'platform': active_platform})
+    socketio.emit('update_price_rotation_table', list(price_rotation_logs))
     _emit_installation_id_state()
     # Sync recording buttons on connect
     for tab, state in recording_states.items():
