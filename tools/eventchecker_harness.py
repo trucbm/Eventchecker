@@ -335,10 +335,10 @@ def test_sdk_check_preset_contract() -> None:
     c180_preset = presets["C-180-Android"]
     _assert_equal(c180_preset.get("platform"), "android", "C-180 preset platform changed")
     c180_lines = c180_preset.get("lines") or []
-    _assert_equal(len(c180_lines), 34, "C-180 preset line count changed")
+    _assert_equal(len(c180_lines), 33, "C-180 preset line count changed")
     _assert_equal(c180_lines[0], "Ads Network\tAdapter\tNative", "C-180 preset header changed")
     _assert("Appsflyer\t\tRemoved" in c180_lines, "C-180 Appsflyer entry changed")
-    _assert("AdQuality\tSkip\t" in c180_lines, "C-180 AdQuality entry changed")
+    _assert(not any(line.startswith("AdQuality\t") for line in c180_lines), "C-180 AdQuality entry must remain absent")
     _assert(all("http://" not in line and "https://" not in line for line in c180_lines), "C-180 preset must not contain links")
     lines = preset.get("lines") or []
     _assert_equal(len(lines), 43, "C-190 Android preset line count changed")
