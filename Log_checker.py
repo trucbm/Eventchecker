@@ -41,6 +41,84 @@ except ValueError:
 # --- CẤU HÌNH LOAD ADS (GOOGLE SHEET) ---
 G_SHEET_URL = "https://script.google.com/macros/s/AKfycbyLMM9nLAjS9Zhwr4-J6ikjqBSpO7ZCNaNeHKTsfKltiIa0OniDBSrzjvqfvpg87Epl/exec"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SDK_CHECK_PRESETS_FILENAME = "sdk_check_presets.json"
+SDK_CHECK_PRESETS_REMOTE_URLS = [
+    "https://raw.githubusercontent.com/trucbm/Eventchecker/main/sdk_check_presets.json",
+    "https://github.com/trucbm/Eventchecker/raw/main/sdk_check_presets.json",
+]
+
+
+def _sanitize_sdk_check_presets(raw):
+    if not isinstance(raw, dict):
+        return {}
+    presets = {}
+    for name, preset in raw.items():
+        if not isinstance(preset, dict):
+            continue
+        preset_name = str(name).strip()
+        platform_name = str(preset.get("platform") or "android").strip().lower()
+        lines = preset.get("lines")
+        if not preset_name or platform_name not in {"android", "ios", "all"} or not isinstance(lines, list):
+            continue
+        clean_lines = [str(line).rstrip("\r") for line in lines if str(line).strip()]
+        presets[preset_name] = {
+            "platform": platform_name,
+            "lines": clean_lines,
+        }
+    return presets
+
+
+def _sdk_check_preset_file_candidates():
+    candidates = []
+    env_path = os.getenv("SDK_CHECK_PRESETS_PATH")
+    if env_path:
+        candidates.append(env_path)
+    candidates.append(os.path.join(SCRIPT_DIR, SDK_CHECK_PRESETS_FILENAME))
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(os.path.join(meipass, SDK_CHECK_PRESETS_FILENAME))
+    if getattr(sys, "frozen", False):
+        candidates.append(os.path.join(os.path.dirname(sys.executable), SDK_CHECK_PRESETS_FILENAME))
+    return candidates
+
+
+def _load_sdk_check_presets():
+    for path in _sdk_check_preset_file_candidates():
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                presets = _sanitize_sdk_check_presets(json.load(handle))
+            if presets:
+                return presets
+        except Exception as exc:
+            logging.warning("Failed to load SDK check presets from %s: %s", path, exc)
+    return {}
+
+
+def _fetch_sdk_check_presets():
+    cache_bust = time.time_ns()
+    for base_url in SDK_CHECK_PRESETS_REMOTE_URLS:
+        try:
+            separator = "&" if "?" in base_url else "?"
+            response = requests.get(
+                f"{base_url}{separator}cache_bust={cache_bust}",
+                headers={
+                    "Accept": "application/json",
+                    "Cache-Control": "no-cache, no-store, max-age=0",
+                    "Pragma": "no-cache",
+                    "Accept-Encoding": "identity",
+                },
+                timeout=8,
+            )
+            response.raise_for_status()
+            presets = _sanitize_sdk_check_presets(response.json())
+            if presets:
+                return presets, "github"
+        except Exception as exc:
+            logging.warning("Failed to fetch SDK check presets from %s: %s", base_url, exc)
+    return _load_sdk_check_presets(), "local"
 
 
 def _user_data_dir():
@@ -667,6 +745,12 @@ SDK_ADAPTER_MISSING_PATTERN = re.compile(r'Adapter\s*[-–—]\s*MISSING\b', re.
 IOS_ADAPTER_MISSING_PATTERN = re.compile(r'Adapter\s+\*+\s*MISSING\s*\*+', re.IGNORECASE)
 SDK_VERIFICATION_PATTERN = re.compile(r'>{3,}\s*(.*?)\s*-\s*(VERIFIED|NOT VERIFIED)\b', re.IGNORECASE)
 IOS_VERIFICATION_PATTERN = re.compile(r'IntegrationHelper\s+(.+?)\s+\*+\s*(NOT VERIFIED|VERIFIED)\s*\*+', re.IGNORECASE)
+SDK_CLOUDX_ADAPTER_METADATA_PATTERN = re.compile(
+    r'\[AdapterMetadataResolver\]\s+Discovered adapter metadata:\s*'
+    r'network\s*=\s*([^,]+?)\s*,\s*'
+    r'adapterVersion\s*=\s*([0-9]+(?:\.[0-9]+)+)',
+    re.IGNORECASE,
+)
 
 # Mapping tên hiển thị cho Callback
 CALLBACK_DISPLAY_NAMES = {
@@ -1104,6 +1188,10 @@ SDK_NETWORK_ALIASES = {
     "bigo": "bigoads",
     "fyber": "digitalturbinefyber",
     "digitalturbine": "digitalturbinefyber",
+    "liftoff": "liftoffmonetizationvungle",
+    "liftoffmonetization": "liftoffmonetizationvungle",
+    "liftoffmonetize": "liftoffmonetizationvungle",
+    "vungle": "liftoffmonetizationvungle",
     "google": "googleadmobandadmanager",
     "admob": "googleadmobandadmanager",
     "googleadmanager": "googleadmobandadmanager",
@@ -1114,22 +1202,91 @@ SDK_NETWORK_ALIASES = {
     "openwrap": "pubmaticopenwrap",
     "verve": "vervepubnative",
     "pubnative": "vervepubnative",
+    "unity": "unityads",
     "meta": "metaaudiencenetwork",
     "facebook": "facebooksdk",
 }
+
+CLOUDX_NETWORK_ALIASES = {
+    "digitalturbine": "digitalturbinefyber",
+    "fyber": "digitalturbinefyber",
+    "liftoff": "liftoffmonetizationvungle",
+    "liftoffmonetization": "liftoffmonetizationvungle",
+    "liftoffmonetize": "liftoffmonetizationvungle",
+    "vungle": "liftoffmonetizationvungle",
+    "meta": "metaaudiencenetwork",
+    "facebook": "metaaudiencenetwork",
+    "unity": "unityads",
+    "verve": "vervepubnative",
+    "pubnative": "vervepubnative",
+}
+
+
+def _is_cloudx_sdk_network(name):
+    return bool(re.search(r'\s*-\s*cloudx\s*$', str(name or ''), re.IGNORECASE))
+
+
+def _cloudx_sdk_match_network(name):
+    base_name = re.sub(r'\s*-\s*cloudx\s*$', '', str(name or ''), flags=re.IGNORECASE).strip()
+    normalized = _normalize_sdk_network_name(base_name)
+    return CLOUDX_NETWORK_ALIASES.get(normalized, normalized)
+
+
+def _match_cloudx_sdk_expected_key(actual_name):
+    actual_normalized = _normalize_sdk_network_name(actual_name)
+    if not actual_normalized:
+        return ''
+    actual_match_network = CLOUDX_NETWORK_ALIASES.get(actual_normalized, actual_normalized)
+    matches = [
+        key for key, expected in sdk_check_expected_map.items()
+        if expected.get('source') == 'cloudx'
+        and expected.get('match_network') == actual_match_network
+    ]
+    return matches[0] if len(matches) == 1 else ''
 
 
 def _match_sdk_expected_key(actual_name):
     actual_norm = _normalize_sdk_network_name(actual_name)
     if not actual_norm:
         return ""
-    if actual_norm in sdk_check_expected_map:
+
+    is_cloudx = _is_cloudx_sdk_network(actual_name)
+    expected_source = "cloudx" if is_cloudx else ""
+    expected_items = [
+        (key, expected)
+        for key, expected in sdk_check_expected_map.items()
+        if (expected.get("source") or "") == expected_source
+    ]
+    if not is_cloudx:
+        expected_items = [
+            (key, expected)
+            for key, expected in sdk_check_expected_map.items()
+            if (expected.get("source") or "") != "cloudx"
+        ]
+
+    if actual_norm in {key for key, _ in expected_items}:
         return actual_norm
-    alias = SDK_NETWORK_ALIASES.get(actual_norm)
-    if alias and alias in sdk_check_expected_map:
-        return alias
+
+    actual_match = (
+        _cloudx_sdk_match_network(actual_name)
+        if is_cloudx
+        else SDK_NETWORK_ALIASES.get(actual_norm, actual_norm)
+    )
+    canonical_matches = []
+    for key, expected in expected_items:
+        expected_name = expected.get("display_name") or key
+        expected_match = (
+            _cloudx_sdk_match_network(expected_name)
+            if is_cloudx
+            else SDK_NETWORK_ALIASES.get(_normalize_sdk_network_name(expected_name), _normalize_sdk_network_name(expected_name))
+        )
+        if expected_match == actual_match:
+            canonical_matches.append(key)
+    if len(canonical_matches) == 1:
+        return canonical_matches[0]
+
     matches = []
-    for key in sdk_check_expected_map.keys():
+    for key, _ in expected_items:
         if actual_norm in key or key in actual_norm:
             matches.append(key)
     if len(matches) == 1:
@@ -1160,8 +1317,12 @@ def _extract_sdk_comparable_version(value, expected_value=""):
 def _sdk_result_status(actual_value, expected_value):
     actual_text = str(actual_value or "").strip()
     expected_text = str(expected_value or "").strip()
+    if not expected_text:
+        return "FOUND" if actual_text and actual_text.upper() not in {"NOT FOUND", "MISSING"} else "NOT_FOUND"
     if not actual_text or actual_text.upper() in {"NOT FOUND", "MISSING"}:
-        return "NOT_FOUND"
+        if expected_text.casefold() == "removed":
+            return "PASSED"
+        return "FAILED"
     actual_compare = _extract_sdk_comparable_version(actual_text)
     expected_compare = _extract_sdk_comparable_version(expected_text)
     if expected_compare:
@@ -1193,15 +1354,27 @@ def _parse_sdk_expected_line(line):
         cols = [col.strip() for col in raw.split("\t")]
         if not cols or not cols[0]:
             return None
+        source = "cloudx" if _is_cloudx_sdk_network(cols[0]) else ""
         return {
             "network": cols[0],
             "adapter": cols[1] if len(cols) > 1 else "",
             "sdk": cols[2] if len(cols) > 2 else "",
             "log_search": cols[3] if len(cols) > 3 else "",
+            "source": source,
+            "match_network": _cloudx_sdk_match_network(cols[0]) if source == "cloudx" else "",
         }
 
     version_matches = list(re.finditer(r'\b\d+(?:\.\d+)+\b', raw))
     if not version_matches:
+        if _is_cloudx_sdk_network(raw):
+            return {
+                "network": raw,
+                "adapter": "",
+                "sdk": "",
+                "log_search": "",
+                "source": "cloudx",
+                "match_network": _cloudx_sdk_match_network(raw),
+            }
         return None
 
     network = raw[:version_matches[0].start()].strip(" -–—\t")
@@ -1225,6 +1398,8 @@ def _parse_sdk_expected_line(line):
         "adapter": adapter,
         "sdk": sdk,
         "log_search": "",
+        "source": "cloudx" if _is_cloudx_sdk_network(network) else "",
+        "match_network": _cloudx_sdk_match_network(network) if _is_cloudx_sdk_network(network) else "",
     }
 
 def _extract_sdk_search_pattern(line):
@@ -1276,9 +1451,11 @@ def _parse_sdk_search_pattern_line(line, current_label=""):
         "search_pattern": pattern,
         "search_pattern_normalized": _normalize_sdk_search_text(pattern),
         "search_pattern_compact": _normalize_sdk_search_compact(pattern),
+        "source": "cloudx" if _is_cloudx_sdk_network(network) else "",
+        "match_network": _cloudx_sdk_match_network(network) if _is_cloudx_sdk_network(network) else "",
     }
 
-def _register_sdk_expected(network, adapter="", sdk="", log_search=""):
+def _register_sdk_expected(network, adapter="", sdk="", log_search="", source="", match_network=""):
     expected_key = _normalize_sdk_network_name(network)
     if not expected_key:
         return ""
@@ -1287,6 +1464,8 @@ def _register_sdk_expected(network, adapter="", sdk="", log_search=""):
         "adapter": "",
         "sdk": "",
         "log_search": "",
+        "source": "",
+        "match_network": "",
     })
     existing["display_name"] = existing.get("display_name") or network
     if adapter:
@@ -1295,6 +1474,10 @@ def _register_sdk_expected(network, adapter="", sdk="", log_search=""):
         existing["sdk"] = sdk
     if log_search:
         existing["log_search"] = log_search
+    if source:
+        existing["source"] = source
+    if match_network:
+        existing["match_network"] = match_network
     if expected_key not in sdk_check_expected_order:
         sdk_check_expected_order.append(expected_key)
     return expected_key
@@ -2133,6 +2316,12 @@ HTML_TEMPLATE = """
         .adrevenue-details-panel { max-height: none; overflow: visible; }
         .adrevenue-details-panel pre { margin: 0 !important; background: transparent !important; border: 0 !important; padding: 0 !important; border-radius: 0 !important; overflow: visible !important; }
         .adrevenue-raw-panel { height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+        .price-rotation-details,
+        .price-rotation-details * {
+            user-select: text !important;
+            -webkit-user-select: text !important;
+            cursor: text;
+        }
         #logDetailContent, #logDetailContent * { user-select: text; -webkit-user-select: text; }
         @keyframes pulse { 50% { opacity: .6; } }
         .animate-pulse-green { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
@@ -2170,7 +2359,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(18)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(19)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2619,10 +2808,17 @@ HTML_TEMPLATE = """
                     <h2 class="text-lg font-semibold mb-2">SDK Check Setup</h2>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
                          <div class="md:col-span-2">
-                            <label for="sdkCheckInput" class="block text-xs font-medium text-gray-700 mb-1">SDKs to Check (dán nội dung):</label>
-                            <textarea id="sdkCheckInput" rows="8" class="w-full p-2 border rounded-md shadow-sm font-mono text-sm" placeholder="AppLovin\n&quot;Adapter 4.3.54&quot;, &quot;search_pattern&quot;: &quot;Adapter 4.3.54&quot;\n..."></textarea>
+                            <label for="sdkCheckInput" class="block text-xs font-medium text-gray-700 mb-1">SDKs to Check (manual input):</label>
+                            <textarea id="sdkCheckInput" rows="8" class="w-full p-2 border rounded-md shadow-sm font-mono text-sm" placeholder="Chọn Saved SDK List hoặc nhập danh sách thủ công..."></textarea>
                          </div>
-                         <div>
+                         <div class="flex flex-col gap-3">
+                            <div id="sdkCheckPresetPanel" class="rounded-lg border border-indigo-100 bg-indigo-50 p-3">
+                                <div class="mb-2">
+                                    <label class="block text-xs font-semibold text-indigo-900">Saved SDK List</label>
+                                </div>
+                                <div id="sdkCheckPresetList" class="flex flex-wrap gap-2"></div>
+                                <div id="sdkCheckPresetStatus" class="mt-2 text-[11px] text-slate-600">Chọn preset để tự nạp danh sách.</div>
+                            </div>
                             <button id="startSdkCheckBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold py-2 px-4 rounded-lg w-full h-10">Start Checking</button>
                          </div>
                     </div>
@@ -2902,6 +3098,7 @@ HTML_TEMPLATE = """
         const installationIdValueEl = document.getElementById('installationIdValue');
         const copyInstallationIdBtn = document.getElementById('copyInstallationIdBtn');
         let activePlatform = localStorage.getItem('eventInspectorPlatform') || '';
+        let sdkCheckPresets = {{ sdk_check_presets | tojson }};
         let installationIdState = {
             device_id: '',
             device_name: '',
@@ -2930,6 +3127,8 @@ HTML_TEMPLATE = """
             document.querySelectorAll('.sdk-check-panel').forEach(panel => {
                 panel.classList.toggle('hidden', panel.getAttribute('data-sdk-platform') !== platform);
             });
+            const sdkPresetPanel = document.getElementById('sdkCheckPresetPanel');
+            if (sdkPresetPanel) sdkPresetPanel.classList.remove('hidden');
             document.querySelectorAll('[data-ios-hidden-source="appmetrica"]').forEach(el => {
                 el.classList.toggle('hidden', platform === 'ios');
                 const radio = el.querySelector('input[type="radio"]');
@@ -2990,6 +3189,9 @@ HTML_TEMPLATE = """
             if (clearInput) {
                 const sdkInput = document.getElementById('sdkCheckInput');
                 if (sdkInput) sdkInput.value = '';
+                document.querySelectorAll('input[name="sdkCheckPreset"]').forEach(input => input.checked = false);
+                const presetStatus = document.getElementById('sdkCheckPresetStatus');
+                if (presetStatus) presetStatus.textContent = 'Chọn preset để tự nạp danh sách.';
             }
         }
 
@@ -3070,6 +3272,8 @@ HTML_TEMPLATE = """
             
             const btnEl = document.getElementById('tabBtn' + tabName);
             if (btnEl) btnEl.classList.add('active');
+
+            if (tabName === 'SdkCheck') loadSdkCheckPresetsFromGit();
             
             socket.emit('change_tab', { tab_name: tabName });
         }
@@ -3670,7 +3874,7 @@ HTML_TEMPLATE = """
                 return `<tr class="hover:bg-gray-50 border-b text-sm">
                     <td class="py-2 px-3 text-purple-700 text-sm align-top truncate" title="${escapeAttribute(res.device_name || res.device_id || '')}">${escapeHTML(res.device_name || res.device_id || '')}</td>
                     <td class="py-2 px-3 text-sm font-semibold text-cyan-600 align-top break-words">${escapeHTML(res.type || 'Unknown')}</td>
-                    <td class="py-2 px-3 align-top"><pre class="text-xs font-mono whitespace-pre-wrap break-all max-h-64 overflow-auto">${escapeHTML(res.details || '')}</pre></td>
+                    <td class="py-2 px-3 align-top price-rotation-details"><pre class="text-xs font-mono whitespace-pre-wrap break-all max-h-64 overflow-auto">${escapeHTML(res.details || '')}</pre></td>
                     <td class="py-2 px-3 log-cell text-xs font-normal text-gray-600 align-top"><div class="max-h-64 overflow-auto whitespace-pre-wrap break-all">${escapeHTML(res.raw_log || '')}</div></td>
                     <td class="py-2 px-3 align-top whitespace-nowrap">${action}</td>
                 </tr>`;
@@ -4646,6 +4850,72 @@ HTML_TEMPLATE = """
         });
         
         let sdkCheckRunning = false;
+        function renderSdkCheckPresetOptions() {
+            const container = document.getElementById('sdkCheckPresetList');
+            if (!container) return;
+            const presets = Object.entries(sdkCheckPresets || {})
+                .filter(([, preset]) => preset && (preset.platform === 'all' || preset.platform === activePlatform));
+            if (presets.length === 0) {
+                container.innerHTML = '<span class="text-xs text-slate-500">Chưa có preset.</span>';
+                return;
+            }
+            container.innerHTML = presets.map(([name, preset]) => `
+                <label class="inline-flex items-center gap-2 rounded-md border border-indigo-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm cursor-pointer hover:bg-indigo-50">
+                    <input type="radio" name="sdkCheckPreset" value="${escapeAttribute(name)}" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                    <span>${escapeHTML(name)}</span>
+                    <span class="text-[11px] font-normal text-slate-500">${Array.isArray(preset.lines) ? preset.lines.length - 1 : 0} SDKs</span>
+                </label>
+            `).join('');
+        }
+
+        async function loadSdkCheckPresetsFromGit() {
+            const status = document.getElementById('sdkCheckPresetStatus');
+            if (status) status.textContent = 'Đang tải danh sách từ GitHub...';
+            try {
+                const response = await fetch(`/api/sdk-check-presets?ts=${Date.now()}`, {cache: 'no-store'});
+                const payload = await response.json();
+                if (!response.ok || !payload.ok || !payload.presets) throw new Error(payload.error || 'preset_load_failed');
+                sdkCheckPresets = payload.presets;
+                renderSdkCheckPresetOptions();
+                const sourceText = payload.source === 'github' ? 'GitHub' : 'Local fallback';
+                if (status) status.textContent = `${sourceText}: chọn preset để tự nạp danh sách.`;
+            } catch (error) {
+                renderSdkCheckPresetOptions();
+                if (status) status.textContent = 'Không tải được GitHub, đang dùng danh sách local.';
+                console.warn('SDK preset load failed', error);
+            }
+        }
+
+        function applySdkCheckPreset(name) {
+            const preset = sdkCheckPresets?.[name];
+            if (!preset || (preset.platform !== 'all' && preset.platform !== activePlatform)) return;
+            const lines = Array.isArray(preset?.lines) ? preset.lines.filter(line => String(line).trim()) : [];
+            const input = document.getElementById('sdkCheckInput');
+            if (!input || !lines.length) return;
+            input.value = lines.join('\\n');
+            if (sdkCheckRunning) {
+                socket.emit('stop_sdk_check');
+            }
+            socket.emit('start_sdk_check', {text: input.value});
+            sdkCheckRunning = true;
+            const btn = document.getElementById('startSdkCheckBtn');
+            if (btn) btn.textContent = 'Stop Checking';
+            const status = document.getElementById('sdkCheckPresetStatus');
+            if (status) status.textContent = `${name} loaded and checking (${lines.length - 1} SDKs).`;
+        }
+
+        renderSdkCheckPresetOptions();
+        document.getElementById('sdkCheckPresetList')?.addEventListener('change', (event) => {
+            const input = event.target.closest('input[name="sdkCheckPreset"]');
+            if (input?.checked) applySdkCheckPreset(input.value);
+        });
+
+        document.getElementById('sdkCheckInput')?.addEventListener('input', () => {
+            document.querySelectorAll('input[name="sdkCheckPreset"]').forEach(input => input.checked = false);
+            const status = document.getElementById('sdkCheckPresetStatus');
+            if (status) status.textContent = 'Manual input đang được sử dụng.';
+        });
+
         document.getElementById('startSdkCheckBtn').addEventListener('click', () => {
              const btn = document.getElementById('startSdkCheckBtn');
              if (sdkCheckRunning) {
@@ -4847,8 +5117,20 @@ def index():
     return render_template_string(
         HTML_TEMPLATE,
         default_event_names=sorted(event_specific_params.keys()),
-        current_profile_name=active_profile_name
+        current_profile_name=active_profile_name,
+        sdk_check_presets=_load_sdk_check_presets(),
     )
+
+
+@app.get('/api/sdk-check-presets')
+def get_sdk_check_presets():
+    presets, source = _fetch_sdk_check_presets()
+    return jsonify({
+        'ok': bool(presets),
+        'source': source,
+        'presets': presets,
+        'error': '' if presets else 'sdk_check_presets_unavailable',
+    })
 
 
 @app.get('/api/profiles')
@@ -6306,6 +6588,17 @@ def _apply_adrevenue_filter_and_emit():
 
     socketio.emit('update_adrevenue_table', rendered)
 
+def _sdk_result_group_sort_key(rows):
+    statuses = {row.get("status") for row in rows if row.get("status")}
+    if "FAILED" in statuses:
+        return 0
+    if "PASSED" in statuses:
+        return 1
+    if "FOUND" in statuses:
+        return 2
+    return 3
+
+
 def _emit_sdk_check_results():
     res = []
     with lock:
@@ -6316,11 +6609,12 @@ def _emit_sdk_check_results():
             return
 
         def append_sdk_network_rows(device_id, network_key, block):
+            rows = []
             if _normalize_sdk_network_name(block.get("display_name")) == "googleplayservices":
-                return
+                return rows
             expected_key = block.get("expected_key") or _match_sdk_expected_key(block.get("display_name"))
             expected = sdk_check_expected_map.get(expected_key, {})
-            res.append({"status": "LABEL", "display_text": block.get("display_name", network_key), "device_id": device_id})
+            rows.append({"status": "LABEL", "display_text": block.get("display_name", network_key), "device_id": device_id})
 
             actual_sdk = block.get("sdk_version", "")
             expected_sdk = expected.get("sdk", "")
@@ -6328,6 +6622,18 @@ def _emit_sdk_check_results():
             if not actual_adapter and block.get("adapter_missing"):
                 actual_adapter = "MISSING"
             expected_adapter = expected.get("adapter", "")
+
+            if expected.get("source") == "cloudx":
+                cloudx_status = _sdk_result_status(actual_adapter, expected_adapter)
+                cloudx_actual_display = actual_adapter
+                if cloudx_actual_display and cloudx_actual_display.upper() not in {"NOT FOUND", "MISSING"}:
+                    cloudx_actual_display = _extract_sdk_comparable_version(cloudx_actual_display, expected_adapter)
+                rows.append({
+                    "status": cloudx_status,
+                    "display_text": f"Adapter Version  Actual: {cloudx_actual_display or 'NOT FOUND'}  Expected: {expected_adapter or '—'}",
+                    "device_id": device_id
+                })
+                return rows
 
             if bool(expected_sdk) ^ bool(expected_adapter):
                 if expected_sdk:
@@ -6340,7 +6646,7 @@ def _emit_sdk_check_results():
                 actual_single_display = actual_single
                 if actual_single_display and actual_single_display.upper() not in {"NOT FOUND", "MISSING"}:
                     actual_single_display = _extract_sdk_comparable_version(actual_single_display, expected_single)
-                res.append({
+                rows.append({
                     "status": single_status,
                     "display_text": f"Version  Actual: {actual_single_display or 'NOT FOUND'}  Expected: {expected_single}",
                     "device_id": device_id
@@ -6350,7 +6656,7 @@ def _emit_sdk_check_results():
                 actual_sdk_display = actual_sdk
                 if actual_sdk_display and actual_sdk_display.upper() not in {"NOT FOUND", "MISSING"}:
                     actual_sdk_display = _extract_sdk_comparable_version(actual_sdk_display, expected_sdk)
-                res.append({
+                rows.append({
                     "status": sdk_status,
                     "display_text": f"SDK  Actual: {actual_sdk_display or 'NOT FOUND'}  Expected: {expected_sdk}",
                     "device_id": device_id
@@ -6360,11 +6666,12 @@ def _emit_sdk_check_results():
                 actual_adapter_display = actual_adapter
                 if actual_adapter_display and actual_adapter_display.upper() not in {"NOT FOUND", "MISSING"}:
                     actual_adapter_display = _extract_sdk_comparable_version(actual_adapter_display, expected_adapter)
-                res.append({
+                rows.append({
                     "status": adapter_status,
                     "display_text": f"Adapter  Actual: {actual_adapter_display or 'NOT FOUND'}  Expected: {expected_adapter}",
                     "device_id": device_id
                 })
+            return rows
 
         for dev in connected_devices_info:
             res.append({"status": "HEADER", "display_text": f"--- {dev['name']} ---", "device_name": dev['name'], "device_id": dev['id']})
@@ -6379,13 +6686,23 @@ def _emit_sdk_check_results():
             in_list_keys = [key for key in _sdk_state_network_keys(dev['id']) if key in sdk_check_expected_map]
             not_in_list_keys = [key for key in _sdk_state_network_keys(dev['id']) if key not in sdk_check_expected_map]
 
+            in_list_groups = []
             for network_key in in_list_keys:
-                append_sdk_network_rows(dev['id'], network_key, device_state.get(network_key, {}))
+                rows = append_sdk_network_rows(dev['id'], network_key, device_state.get(network_key, {}))
+                if rows:
+                    in_list_groups.append(rows)
+            for rows in sorted(in_list_groups, key=_sdk_result_group_sort_key):
+                res.extend(rows)
 
             if not_in_list_keys:
                 res.append({"status": "SECTION", "display_text": "----------- Not in List -------", "device_id": dev['id']})
+                not_in_list_groups = []
                 for network_key in not_in_list_keys:
-                    append_sdk_network_rows(dev['id'], network_key, device_state.get(network_key, {}))
+                    rows = append_sdk_network_rows(dev['id'], network_key, device_state.get(network_key, {}))
+                    if rows:
+                        not_in_list_groups.append(rows)
+                for rows in sorted(not_in_list_groups, key=_sdk_result_group_sort_key):
+                    res.extend(rows)
     socketio.emit('update_sdk_check_table', res)
 
 
@@ -6417,6 +6734,38 @@ def _sdk_check_block_for_device(device_id, network_name):
         block["updated_at"] = time.time()
     return block
 
+
+def _process_sdk_cloudx_adapter_metadata_line(line, device_id):
+    """Read Cloudx adapter metadata without using the IntegrationHelper state machine."""
+    if active_platform != "android":
+        return False
+
+    match = SDK_CLOUDX_ADAPTER_METADATA_PATTERN.search(str(line or ""))
+    if not match:
+        return False
+
+    actual_network = match.group(1).strip()
+    adapter_version = match.group(2).strip()
+    expected_key = _match_cloudx_sdk_expected_key(actual_network)
+    if not expected_key:
+        return False
+
+    expected = sdk_check_expected_map.get(expected_key, {})
+    display_name = expected.get("display_name") or actual_network
+    block = _sdk_check_block_for_device(device_id, display_name)
+    changed = (
+        block.get("adapter_version") != adapter_version
+        or block.get("adapter_missing")
+        or block.get("expected_key") != expected_key
+    )
+    block["adapter_version"] = adapter_version
+    block["adapter_missing"] = False
+    block["expected_key"] = expected_key
+    block["display_name"] = display_name
+    block["updated_at"] = time.time()
+    return changed
+
+
 # --- THREADS & PROCESSES ---
 
 def _process_sdk_check_line(line, device_id):
@@ -6425,6 +6774,9 @@ def _process_sdk_check_line(line, device_id):
 
     changed = False
     with lock:
+        if _process_sdk_cloudx_adapter_metadata_line(line, device_id):
+            changed = True
+
         if "IntegrationHelper" in line:
             current_network = sdk_check_current_network.get(device_id, "")
             header_match = SDK_HEADER_PATTERN.search(line)
@@ -7070,7 +7422,14 @@ def sdk_check(data):
                     adapter = parsed["adapter"]
                     sdk = parsed["sdk"]
                     log_search = parsed["log_search"]
-                    _register_sdk_expected(network, adapter=adapter, sdk=sdk, log_search=log_search)
+                    _register_sdk_expected(
+                        network,
+                        adapter=adapter,
+                        sdk=sdk,
+                        log_search=log_search,
+                        source=parsed.get("source", ""),
+                        match_network=parsed.get("match_network", ""),
+                    )
             else:
                 current_label = ""
                 for line in lines:
@@ -7082,15 +7441,30 @@ def sdk_check(data):
                         field = search_item.get("field", "adapter")
                         adapter = version if field in {"adapter", "both"} else ""
                         sdk = version if field in {"sdk", "both"} else ""
-                        _register_sdk_expected(search_item["network"], adapter=adapter, sdk=sdk, log_search=search_item["search_pattern"])
-                        sdk_check_search_list.append(search_item)
+                        _register_sdk_expected(
+                            search_item["network"],
+                            adapter=adapter,
+                            sdk=sdk,
+                            log_search=search_item["search_pattern"],
+                            source=search_item.get("source", ""),
+                            match_network=search_item.get("match_network", ""),
+                        )
+                        if search_item.get("source") != "cloudx":
+                            sdk_check_search_list.append(search_item)
                         sdk_check_input_list.append(search_item)
                         continue
 
                     parsed = _parse_sdk_expected_line(line)
                     if parsed:
                         network = parsed["network"]
-                        _register_sdk_expected(network, adapter=parsed["adapter"], sdk=parsed["sdk"], log_search=parsed["log_search"])
+                        _register_sdk_expected(
+                            network,
+                            adapter=parsed["adapter"],
+                            sdk=parsed["sdk"],
+                            log_search=parsed["log_search"],
+                            source=parsed.get("source", ""),
+                            match_network=parsed.get("match_network", ""),
+                        )
                         current_label = network
                         continue
                     current_label = line.strip()

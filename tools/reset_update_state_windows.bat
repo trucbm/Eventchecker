@@ -15,10 +15,11 @@ set "UPDATES_DIR_V240=%APP_SUPPORT_DIR%\updates_v240"
 set "MANIFEST_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json"
 set "LOG_CHECKER_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/Log_checker.py"
 set "REMOTE_UPDATE_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/remote_update.py"
-set "TARGET_VERSION=2026-08-13-1-2.4.0-48"
+set "SDK_PRESETS_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/sdk_check_presets.json"
+set "TARGET_VERSION=2026-08-13-1-2.4.0-49"
 
 echo Event Inspector Windows update bootstrap
-echo Target release: v2.4.0(18)
+echo Target release: v2.4.0(19)
 echo Target folder: %APP_SUPPORT_DIR%
 echo.
 echo IMPORTANT: close Event Inspector before running this script.
@@ -62,8 +63,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBa
 if errorlevel 1 goto :download_failed
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBasicParsing '%REMOTE_UPDATE_URL%' -OutFile '%UPDATES_DIR%\remote_update.py'"
 if errorlevel 1 goto :download_failed
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBasicParsing '%SDK_PRESETS_URL%' -OutFile '%UPDATES_DIR%\sdk_check_presets.json'"
+if errorlevel 1 goto :download_failed
 echo Downloaded: %UPDATES_DIR%\Log_checker.py
 echo Downloaded: %UPDATES_DIR%\remote_update.py
+echo Downloaded: %UPDATES_DIR%\sdk_check_presets.json
 
 (
   echo {
@@ -103,7 +107,8 @@ echo Wrote: %CONFIG_FILE_V240%
   echo   "manifest_url": "%MANIFEST_URL%",
   echo   "files": [
   echo     "Log_checker.py",
-  echo     "remote_update.py"
+  echo     "remote_update.py",
+  echo     "sdk_check_presets.json"
   echo   ]
   echo }
 ) > "%STATE_FILE%"
@@ -117,7 +122,8 @@ echo Wrote: %STATE_FILE%
   echo   "manifest_url": "%MANIFEST_URL%",
   echo   "files": [
   echo     "Log_checker.py",
-  echo     "remote_update.py"
+  echo     "remote_update.py",
+  echo     "sdk_check_presets.json"
   echo   ]
   echo }
 ) > "%STATE_FILE_V240%"

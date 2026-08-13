@@ -216,9 +216,188 @@ def test_sdk_exact_contracts() -> None:
     _assert_equal(lc._extract_sdk_comparable_version(ios_line), "12.12.0", "ios crashlytics version should stay exact")
 
 
+def test_cloudx_sdk_adapter_metadata() -> None:
+    original_platform = lc.active_platform
+    original_devices = lc.connected_devices_info
+    original_sdk_active = lc.sdk_check_active
+    original_search_list = list(lc.sdk_check_search_list)
+    try:
+        lc.active_platform = "android"
+        lc.connected_devices_info = []
+        lc.sdk_check_active = True
+        lc.sdk_check_expected_map = {}
+        lc.sdk_check_expected_order = []
+        lc.sdk_check_runtime_state = {}
+        lc.sdk_check_current_network = {}
+
+        labels = [
+            ("Digital Turbine (fyber) - Cloudx", "Fyber", "1.0.0"),
+            ("InMobi - Cloudx", "InMobi", "2.0.0"),
+            ("Liftoff Monetization (vungle) - Cloudx", "Vungle", "3.0.0"),
+            ("Meta Audience Network - Cloudx", "Meta", "4.0.0"),
+            ("Mintegral - Cloudx", "Mintegral", "5.0.0"),
+            ("Mobilefuse - Cloudx", "Mobilefuse", "6.0.0"),
+            ("Moloco - Cloudx", "Moloco", "7.0.0"),
+            ("Pangle - Cloudx", "Pangle", "8.0.0"),
+            ("UnityAds - Cloudx", "Unity", "9.0.0"),
+            ("Verve / Pubnative - Cloudx", "Pubnative", "10.0.0"),
+            ("TaurusX - Cloudx", "TaurusX", "11.0.0"),
+        ]
+
+        for display_name, _, expected_version in labels:
+            parsed = lc._parse_sdk_expected_line(display_name)
+            _assert(parsed is not None, f"Cloudx network label not accepted: {display_name}")
+            _assert_equal(parsed.get("source"), "cloudx", f"Cloudx source missing for {display_name}")
+            lc._register_sdk_expected(
+                display_name,
+                adapter=expected_version,
+                source=parsed.get("source", ""),
+                match_network=parsed.get("match_network", ""),
+            )
+
+        for _, actual_name, actual_version in labels:
+            line = (
+                "*[AdapterMetadataResolver] Discovered adapter metadata: "
+                f"network={actual_name}, adapterVersion={actual_version},*"
+            )
+            lc._process_sdk_cloudx_adapter_metadata_line(line, "cloudx-device")
+
+        _assert_equal(len(lc.sdk_check_expected_map), len(labels), "Cloudx network count mismatch")
+        for display_name, _, expected_version in labels:
+            expected_key = lc._normalize_sdk_network_name(display_name)
+            actual = lc.sdk_check_runtime_state["cloudx-device"][expected_key]["adapter_version"]
+            _assert_equal(actual, expected_version, f"Cloudx adapter version mismatch for {display_name}")
+
+        lc._register_sdk_expected("Meta Audience Network", adapter="1.0.0")
+        lc._process_sdk_check_line("IntegrationHelper ----- Meta Audience Network -----", "cloudx-device")
+        lc._process_sdk_check_line("IntegrationHelper Adapter Version - 1.0.0", "cloudx-device")
+        _assert_equal(
+            lc.sdk_check_runtime_state["cloudx-device"]["metaaudiencenetwork"]["adapter_version"],
+            "1.0.0",
+            "IntegrationHelper state was not kept separate",
+        )
+        _assert_equal(
+            lc.sdk_check_runtime_state["cloudx-device"]["metaaudiencenetworkcloudx"]["adapter_version"],
+            "4.0.0",
+            "Cloudx state was overwritten by IntegrationHelper",
+        )
+
+        _assert_equal(
+            lc._match_sdk_expected_key("Liftoff Monetization"),
+            "",
+            "IntegrationHelper matcher must not fall through to Cloudx-only entries",
+        )
+        lc._register_sdk_expected("Liftoff Monetization (vungle)", adapter="12.0.0")
+        liftoff_key = lc._normalize_sdk_network_name("Liftoff Monetization (vungle)")
+        _assert_equal(
+            lc._match_sdk_expected_key("Liftoff Monetization"),
+            liftoff_key,
+            "Liftoff Monetization alias did not match the list label",
+        )
+        _assert_equal(
+            lc._match_sdk_expected_key("Liftoff Monetize"),
+            liftoff_key,
+            "Liftoff Monetize alias did not match the list label",
+        )
+        lc._process_sdk_check_line("IntegrationHelper ----- Liftoff Monetize -----", "cloudx-device")
+        lc._process_sdk_check_line("IntegrationHelper Adapter Version - 12.0.0", "cloudx-device")
+        _assert_equal(
+            lc.sdk_check_runtime_state["cloudx-device"][liftoff_key]["adapter_version"],
+            "12.0.0",
+            "IntegrationHelper Liftoff alias did not update the standard entry",
+        )
+        _assert_equal(
+            lc.sdk_check_runtime_state["cloudx-device"]["liftoffmonetizationvunglecloudx"].get("adapter_version"),
+            "3.0.0",
+            "IntegrationHelper Liftoff alias overwrote Cloudx state",
+        )
+    finally:
+        lc.active_platform = original_platform
+        lc.connected_devices_info = original_devices
+        lc.sdk_check_active = original_sdk_active
+        lc.sdk_check_search_list[:] = original_search_list
+        lc.sdk_check_expected_map = {}
+        lc.sdk_check_expected_order = []
+        lc.sdk_check_runtime_state = {}
+        lc.sdk_check_current_network = {}
+
+
+def test_sdk_check_preset_contract() -> None:
+    presets = lc._load_sdk_check_presets()
+    _assert("C-190-Android" in presets, "C-190 Android SDK preset is missing")
+    _assert("C-190-iOS" in presets, "C-190 iOS SDK preset is missing")
+    _assert("C-180-Android" in presets, "C-180 Android SDK preset is missing")
+    preset = presets["C-190-Android"]
+    _assert_equal(preset.get("platform"), "android", "C-190 Android preset platform changed")
+    ios_preset = presets["C-190-iOS"]
+    _assert_equal(ios_preset.get("platform"), "ios", "C-190 iOS preset platform changed")
+    _assert_equal(ios_preset.get("lines"), [], "C-190 iOS preset must remain empty")
+    c180_preset = presets["C-180-Android"]
+    _assert_equal(c180_preset.get("platform"), "android", "C-180 preset platform changed")
+    c180_lines = c180_preset.get("lines") or []
+    _assert_equal(len(c180_lines), 34, "C-180 preset line count changed")
+    _assert_equal(c180_lines[0], "Ads Network\tAdapter\tNative", "C-180 preset header changed")
+    _assert("Appsflyer\t\tRemoved" in c180_lines, "C-180 Appsflyer entry changed")
+    _assert("AdQuality\tSkip\t" in c180_lines, "C-180 AdQuality entry changed")
+    _assert(all("http://" not in line and "https://" not in line for line in c180_lines), "C-180 preset must not contain links")
+    lines = preset.get("lines") or []
+    _assert_equal(len(lines), 43, "C-190 Android preset line count changed")
+    _assert_equal(lines[0], "Ads Network\tAdapter\tNative", "C-190 preset header changed")
+    _assert(all("http://" not in line and "https://" not in line for line in lines), "C-190 preset must not contain documentation links")
+    _assert(any(line.startswith("Digital Turbine (fyber) - Cloudx\t") for line in lines), "C-190 Cloudx entries are missing")
+    _assert("Adjust\t\t5.6.1" in lines, "C-190 single SDK entry changed")
+
+    for line in lines[1:]:
+        parsed = lc._parse_sdk_expected_line(line)
+        _assert(parsed is not None, f"C-190 Android entry cannot be parsed: {line}")
+    for line in c180_lines[1:]:
+        parsed = lc._parse_sdk_expected_line(line)
+        _assert(parsed is not None, f"C-180 Android entry cannot be parsed: {line}")
+
+    source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    _assert("sdkCheckPresetPanel" in source_text, "SDK preset panel is missing")
+    _assert("applySdkCheckPreset" in source_text, "SDK preset action is missing")
+    _assert("/api/sdk-check-presets" in source_text, "remote SDK preset endpoint is missing")
+    _assert("loadSdkCheckPresetsFromGit" in source_text, "SDK preset remote load action is missing")
+    _assert("sdkCheckInput" in source_text, "manual SDK input fallback is missing")
+    _assert("clean_lines" in source_text and '"lines": clean_lines' in source_text, "empty SDK presets must remain valid")
+    _assert('"Accept-Encoding": "identity"' in source_text, "SDK preset fetch must bypass stale compressed cache")
+
+
+def test_rendered_sdk_preset_javascript_contract() -> None:
+    response = lc.app.test_client().get("/")
+    _assert_equal(response.status_code, 200, "local UI route must render")
+    html = response.get_data(as_text=True)
+    expected_join = r"input.value = lines.join('\n');"
+    broken_join = "input.value = lines.join('" + "\n" + "');"
+    _assert(expected_join in html, "rendered SDK preset JavaScript must keep the newline escape")
+    _assert(broken_join not in html, "rendered SDK preset JavaScript contains a literal newline inside a string")
+    _assert(
+        html.index('id="sdkCheckPresetPanel"') < html.index('id="startSdkCheckBtn"'),
+        "SDK preset selector must remain above Start Checking",
+    )
+
+
+def test_sdk_failed_groups_sort_first() -> None:
+    groups = [
+        [{"status": "PASSED"}, {"status": "PASSED"}],
+        [{"status": "FAILED"}],
+        [{"status": "FOUND"}],
+        [{"status": "PASSED"}, {"status": "FAILED"}],
+    ]
+    ordered = sorted(groups, key=lc._sdk_result_group_sort_key)
+    _assert(ordered[0][0]["status"] == "FAILED", "failed SDK group must be first")
+    _assert(ordered[1][1]["status"] == "FAILED", "mixed failed SDK group must remain before passed groups")
+    _assert(ordered[-1][0]["status"] == "FOUND", "found-only SDK group must remain after passed groups")
+    _assert_equal(lc._sdk_result_status("", "1.18.3.0"), "FAILED", "missing actual with expected version must fail")
+    _assert_equal(lc._sdk_result_status("", ""), "NOT_FOUND", "empty expected version must be not found")
+    _assert_equal(lc._sdk_result_status("NOT FOUND", "Removed"), "PASSED", "removed SDK with missing actual must pass")
+    _assert_equal(lc._sdk_result_status("MISSING", "Removed"), "PASSED", "removed SDK with missing marker must pass")
+
+
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.4.0(18)" in text, "Log_checker.py must be prepared for release 18")
+    _assert("v2.4.0(19)" in text, "Log_checker.py must be prepared for release 19")
 
 
 def test_rewarded_bidding_filter_contract() -> None:
@@ -283,21 +462,22 @@ def test_update_candidate_does_not_downgrade() -> None:
         15,
         "legacy clients without a detected bundled build must keep update compatibility",
     )
-    compatibility_candidate = [{"update_dir": "/tmp/v18", "build": 48, "source": "channel_state"}]
+    compatibility_candidate = [{"update_dir": "/tmp/v19", "build": 49, "source": "channel_state"}]
     _assert_equal(
         desktop._select_prepared_update_candidate(compatibility_candidate, bundled_build=47)["build"],
-        48,
-        "legacy v2.3.0(47) clients must accept the v2.4.0(18) compatibility payload",
+        49,
+        "legacy v2.3.0(47) clients must accept the v2.4.0(19) compatibility payload",
     )
 
 
-def test_update_flow_legacy_to_v18() -> None:
+def test_update_flow_legacy_to_v19() -> None:
     import remote_update as updater
 
     manifest_bytes = (ROOT / "Updates_2_3" / "remote_manifest.json").read_bytes()
     payloads = {
         "Log_checker.py": (ROOT / "Updates_2_3" / "Log_checker.py").read_bytes(),
         "remote_update.py": (ROOT / "remote_update.py").read_bytes(),
+        "sdk_check_presets.json": (ROOT / "sdk_check_presets.json").read_bytes(),
     }
     original_home = os.environ.get("HOME")
     original_bundle_build = os.environ.get("EVENTINSPECTOR_BUNDLED_BUILD")
@@ -322,14 +502,15 @@ def test_update_flow_legacy_to_v18() -> None:
             updater._download_verified = fake_download_verified
 
             first = updater.check_for_updates(force_refresh=True)
-            _assert_equal(first.get("status"), "updated", "legacy v2.3.0(47) client must prepare v2.4.0(18) payload")
-            _assert_equal(first.get("version"), "2026-08-13-1-2.4.0-48", "prepared payload compatibility version mismatch")
+            _assert_equal(first.get("status"), "updated", "legacy v2.3.0(47) client must prepare v2.4.0(19) payload")
+            _assert_equal(first.get("version"), "2026-08-13-1-2.4.0-49", "prepared payload compatibility version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 48, "prepared payload compatibility build mismatch")
+            _assert_equal(prepared.get("build"), 49, "prepared payload compatibility build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
+            _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
 
             second = updater.check_for_updates()
-            _assert_equal(second.get("status"), "up_to_date", "same v2.4.0(18) payload must not download repeatedly")
+            _assert_equal(second.get("status"), "up_to_date", "same v2.4.0(19) payload must not download repeatedly")
     finally:
         updater._download_first = original_download_first
         updater._download_verified = original_download_verified
@@ -364,6 +545,11 @@ def test_build_scripts_clean_outputs() -> None:
     _assert('--target-arch "$MACOS_TARGET_ARCH"' in mac_script, "macOS build must pass the target architecture")
     _assert('--exclude-module "markupsafe._speedups"' in mac_script, "macOS universal build must avoid the arm64-only MarkupSafe speedup")
     _assert('--add-data "Log_checker.py:."' in mac_script, "macOS build must package the bundled release marker")
+    _assert('--add-data "sdk_check_presets.json:."' in mac_script, "macOS build must package SDK presets")
+    _assert('--add-data "sdk_check_presets.json;."' in win_portable_script, "Windows portable build must package SDK presets")
+    _assert('--add-data "sdk_check_presets.json;."' in win_installer_script, "Windows installer build must package SDK presets")
+    spec_text = (ROOT / "EventInspector.spec").read_text(encoding="utf-8", errors="ignore")
+    _assert("('sdk_check_presets.json', '.')" in spec_text, "PyInstaller spec must package SDK presets")
 
     win_expected = [
         'if exist "dist\\EventInspector" rmdir /s /q "dist\\EventInspector"',
@@ -377,7 +563,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-13-1-2.4.0-48' in text, "windows recovery script must target the current compatibility sequence")
+    _assert('TARGET_VERSION=2026-08-13-1-2.4.0-49' in text, "windows recovery script must target the current compatibility sequence")
     _assert('remote_manifest.json' in text, "windows recovery script must seed the current manifest")
     legacy_scripts = sorted((ROOT / "tools").glob("bootstrap_windows_to_v*.bat"))
     _assert(not legacy_scripts, f"remove legacy Windows bootstrap scripts: {[p.name for p in legacy_scripts]}")
@@ -390,12 +576,16 @@ TESTS: List[Callable[[], None]] = [
     test_installation_id_state_machine,
     test_installation_id_log_parsing,
     test_sdk_exact_contracts,
+    test_cloudx_sdk_adapter_metadata,
+    test_sdk_check_preset_contract,
+    test_rendered_sdk_preset_javascript_contract,
+    test_sdk_failed_groups_sort_first,
     test_release_build_marker,
     test_rewarded_bidding_filter_contract,
     test_price_rotation_exact_parser,
     test_release_payload_sync,
     test_update_candidate_does_not_downgrade,
-    test_update_flow_legacy_to_v18,
+    test_update_flow_legacy_to_v19,
     test_build_scripts_clean_outputs,
     test_windows_update_recovery_script,
 ]
