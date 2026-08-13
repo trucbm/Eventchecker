@@ -268,6 +268,110 @@ def test_cloudx_sdk_adapter_metadata() -> None:
             actual = lc.sdk_check_runtime_state["cloudx-device"][expected_key]["adapter_version"]
             _assert_equal(actual, expected_version, f"Cloudx adapter version mismatch for {display_name}")
 
+        cloudx_native_versions = {
+            "digitalturbinefybercloudx": "8.4.7",
+            "inmobicloudx": "11.4.0",
+            "liftoffmonetizationvunglecloudx": "7.7.7",
+            "metaaudiencenetworkcloudx": "6.22.0",
+            "mintegralcloudx": "17.1.71",
+            "mobilefusecloudx": "1.11.0",
+            "molococloudx": "4.11.0",
+            "panglecloudx": "8.2.0.4",
+            "unityadscloudx": "4.19.0",
+            "vervepubnativecloudx": "3.9.0",
+            "taurusxcloudx": "1.18.3",
+        }
+        cloudx_actual_names = {
+            "digitalturbinefybercloudx": "Fyber",
+            "inmobicloudx": "InMobi",
+            "liftoffmonetizationvunglecloudx": "Vungle",
+            "metaaudiencenetworkcloudx": "Meta",
+            "mintegralcloudx": "Mintegral",
+            "mobilefusecloudx": "Mobilefuse",
+            "molococloudx": "Moloco",
+            "panglecloudx": "Pangle",
+            "unityadscloudx": "Unity",
+            "vervepubnativecloudx": "Pubnative",
+            "taurusxcloudx": "TaurusX",
+        }
+        for expected_key, native_version in cloudx_native_versions.items():
+            lc.sdk_check_expected_map[expected_key]["sdk"] = native_version
+
+        mintegral_key = lc._normalize_sdk_network_name("Mintegral - Cloudx")
+        lc._process_sdk_cloudx_adapter_metadata_line(
+            "08-14 15:26:50.991 com.indiez.nonogram 20641 20791 D CloudX "
+            "[AdapterMetadataResolver] Discovered adapter metadata: "
+            "network=Mintegral, adapterVersion=17.1.71.0, "
+            "networkSdkVersion=17.1.71, minimumSdkVersion=4.2.0, "
+            "minimumSdkVersionCode=4002000, adapterApiVersion=1, extras=Bundle[]",
+            "cloudx-device",
+        )
+        mintegral_cloudx_state = lc.sdk_check_runtime_state["cloudx-device"][mintegral_key]
+        _assert_equal(mintegral_cloudx_state.get("adapter_version"), "17.1.71.0", "Mintegral Cloudx adapter version mismatch")
+        _assert_equal(mintegral_cloudx_state.get("native_version"), "17.1.71", "Mintegral Cloudx native version was not parsed")
+
+        for expected_key, native_version in cloudx_native_versions.items():
+            display_name = lc.sdk_check_expected_map[expected_key]["display_name"]
+            lc._process_sdk_cloudx_adapter_metadata_line(
+                f"[AdapterMetadataResolver] Discovered adapter metadata: network={cloudx_actual_names[expected_key]}, "
+                f"adapterVersion=1.0.0, networkSdkVersion={native_version}, minimumSdkVersion=1.0.0",
+                "cloudx-native-device",
+            )
+            _assert_equal(
+                lc.sdk_check_runtime_state["cloudx-native-device"][expected_key].get("native_version"),
+                native_version,
+                f"Cloudx native version mismatch for {display_name}",
+            )
+
+        emitted = []
+        original_emit = lc.socketio.emit
+        try:
+            lc.connected_devices_info = [{"id": "cloudx-native-device", "name": "CloudX device"}]
+            lc.socketio.emit = lambda event, payload: emitted.append((event, payload))
+            lc._emit_sdk_check_results()
+        finally:
+            lc.socketio.emit = original_emit
+        emitted_rows = next(payload for event, payload in emitted if event == "update_sdk_check_table")
+        native_rows = [row for row in emitted_rows if row.get("display_text", "").startswith("Native Version")]
+        _assert_equal(len(native_rows), len(cloudx_native_versions), "Cloudx native result row count changed")
+        _assert(all(row.get("status") == "PASSED" for row in native_rows), "Cloudx native result must pass matching versions")
+
+        lc._process_sdk_cloudx_adapter_metadata_line(
+            "[AdapterMetadataResolver] Discovered adapter metadata: "
+            "network=Mintegral, adapterVersion=17.1.71.0, networkSdkVersion=17.1.70",
+            "cloudx-native-device",
+        )
+        emitted = []
+        original_emit = lc.socketio.emit
+        try:
+            lc.socketio.emit = lambda event, payload: emitted.append((event, payload))
+            lc._emit_sdk_check_results()
+        finally:
+            lc.socketio.emit = original_emit
+        emitted_rows = next(payload for event, payload in emitted if event == "update_sdk_check_table")
+        mintegral_native_rows = [
+            row for row in emitted_rows
+            if row.get("display_text", "").startswith("Native Version")
+            and "17.1.70" in row.get("display_text", "")
+        ]
+        _assert_equal(len(mintegral_native_rows), 1, "Mintegral Cloudx native mismatch row missing")
+        _assert_equal(mintegral_native_rows[0].get("status"), "FAILED", "wrong Cloudx native version must fail")
+
+        lc._register_sdk_expected("Mintegral", adapter="5.0.0", sdk="17.1.71")
+        lc._process_sdk_check_line("IntegrationHelper ----- Mintegral -----", "cloudx-device")
+        lc._process_sdk_check_line("IntegrationHelper Adapter Version - 5.0.0", "cloudx-device")
+        mintegral_standard_key = lc._normalize_sdk_network_name("Mintegral")
+        _assert_equal(
+            lc.sdk_check_runtime_state["cloudx-device"][mintegral_standard_key]["adapter_version"],
+            "5.0.0",
+            "IntegrationHelper Mintegral state was not kept separate",
+        )
+        _assert_equal(
+            lc.sdk_check_runtime_state["cloudx-device"][mintegral_key].get("native_version"),
+            "17.1.71",
+            "IntegrationHelper Mintegral changed Cloudx native state",
+        )
+
         lc._register_sdk_expected("Meta Audience Network", adapter="1.0.0")
         lc._process_sdk_check_line("IntegrationHelper ----- Meta Audience Network -----", "cloudx-device")
         lc._process_sdk_check_line("IntegrationHelper Adapter Version - 1.0.0", "cloudx-device")
@@ -345,6 +449,10 @@ def test_sdk_check_preset_contract() -> None:
     _assert_equal(lines[0], "Ads Network\tAdapter\tNative", "C-190 preset header changed")
     _assert(all("http://" not in line and "https://" not in line for line in lines), "C-190 preset must not contain documentation links")
     _assert(any(line.startswith("Digital Turbine (fyber) - Cloudx\t") for line in lines), "C-190 Cloudx entries are missing")
+    _assert("Meta Audience Network\t5.4.0\t6.22.0" in lines, "C-190 Meta Audience Network adapter changed")
+    _assert("Mintegral - Cloudx\t17.1.71.0\t17.1.71" in lines, "Mintegral Cloudx native version changed")
+    cloudx_lines = [line for line in lines if " - Cloudx\t" in line]
+    _assert(cloudx_lines and all(len(line.split("\t")) >= 3 and line.split("\t")[2].strip() for line in cloudx_lines), "Cloudx native versions are missing")
     _assert("Adjust\t\t5.6.1" in lines, "C-190 single SDK entry changed")
 
     for line in lines[1:]:
@@ -397,7 +505,7 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.4.0(19)" in text, "Log_checker.py must be prepared for release 19")
+    _assert("v2.4.0(20)" in text, "Log_checker.py must be prepared for release 20")
 
 
 def test_rewarded_bidding_filter_contract() -> None:
@@ -462,15 +570,15 @@ def test_update_candidate_does_not_downgrade() -> None:
         15,
         "legacy clients without a detected bundled build must keep update compatibility",
     )
-    compatibility_candidate = [{"update_dir": "/tmp/v19", "build": 49, "source": "channel_state"}]
+    compatibility_candidate = [{"update_dir": "/tmp/v20", "build": 50, "source": "channel_state"}]
     _assert_equal(
         desktop._select_prepared_update_candidate(compatibility_candidate, bundled_build=47)["build"],
-        49,
-        "legacy v2.3.0(47) clients must accept the v2.4.0(19) compatibility payload",
+        50,
+        "legacy v2.3.0(47) clients must accept the v2.4.0(20) compatibility payload",
     )
 
 
-def test_update_flow_legacy_to_v19() -> None:
+def test_update_flow_legacy_to_v20() -> None:
     import remote_update as updater
 
     manifest_bytes = (ROOT / "Updates_2_3" / "remote_manifest.json").read_bytes()
@@ -502,15 +610,15 @@ def test_update_flow_legacy_to_v19() -> None:
             updater._download_verified = fake_download_verified
 
             first = updater.check_for_updates(force_refresh=True)
-            _assert_equal(first.get("status"), "updated", "legacy v2.3.0(47) client must prepare v2.4.0(19) payload")
-            _assert_equal(first.get("version"), "2026-08-13-1-2.4.0-49", "prepared payload compatibility version mismatch")
+            _assert_equal(first.get("status"), "updated", "legacy v2.3.0(47) client must prepare v2.4.0(20) payload")
+            _assert_equal(first.get("version"), "2026-08-13-1-2.4.0-50", "prepared payload compatibility version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 49, "prepared payload compatibility build mismatch")
+            _assert_equal(prepared.get("build"), 50, "prepared payload compatibility build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
 
             second = updater.check_for_updates()
-            _assert_equal(second.get("status"), "up_to_date", "same v2.4.0(19) payload must not download repeatedly")
+            _assert_equal(second.get("status"), "up_to_date", "same v2.4.0(20) payload must not download repeatedly")
     finally:
         updater._download_first = original_download_first
         updater._download_verified = original_download_verified
@@ -563,7 +671,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-13-1-2.4.0-49' in text, "windows recovery script must target the current compatibility sequence")
+    _assert('TARGET_VERSION=2026-08-13-1-2.4.0-50' in text, "windows recovery script must target the current compatibility sequence")
     _assert('remote_manifest.json' in text, "windows recovery script must seed the current manifest")
     legacy_scripts = sorted((ROOT / "tools").glob("bootstrap_windows_to_v*.bat"))
     _assert(not legacy_scripts, f"remove legacy Windows bootstrap scripts: {[p.name for p in legacy_scripts]}")
@@ -585,7 +693,7 @@ TESTS: List[Callable[[], None]] = [
     test_price_rotation_exact_parser,
     test_release_payload_sync,
     test_update_candidate_does_not_downgrade,
-    test_update_flow_legacy_to_v19,
+    test_update_flow_legacy_to_v20,
     test_build_scripts_clean_outputs,
     test_windows_update_recovery_script,
 ]

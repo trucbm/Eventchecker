@@ -98,6 +98,11 @@ def _load_sdk_check_presets():
 
 
 def _fetch_sdk_check_presets():
+    if os.getenv("SDK_CHECK_PRESETS_PATH"):
+        local_presets = _load_sdk_check_presets()
+        if local_presets:
+            return local_presets, "local"
+
     cache_bust = time.time_ns()
     for base_url in SDK_CHECK_PRESETS_REMOTE_URLS:
         try:
@@ -749,6 +754,10 @@ SDK_CLOUDX_ADAPTER_METADATA_PATTERN = re.compile(
     r'\[AdapterMetadataResolver\]\s+Discovered adapter metadata:\s*'
     r'network\s*=\s*([^,]+?)\s*,\s*'
     r'adapterVersion\s*=\s*([0-9]+(?:\.[0-9]+)+)',
+    re.IGNORECASE,
+)
+SDK_CLOUDX_NATIVE_METADATA_PATTERN = re.compile(
+    r'\bnetworkSdkVersion\s*=\s*([0-9]+(?:\.[0-9]+)+)',
     re.IGNORECASE,
 )
 
@@ -1507,6 +1516,7 @@ def _ensure_sdk_expected_blocks_for_device(device_id):
                 "display_name": expected.get("display_name", expected_key),
                 "sdk_version": "",
                 "adapter_version": "",
+                "native_version": "",
                 "adapter_missing": False,
                 "verification": "",
                 "expected_key": expected_key,
@@ -2359,7 +2369,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(19)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(20)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -6633,6 +6643,18 @@ def _emit_sdk_check_results():
                     "display_text": f"Adapter Version  Actual: {cloudx_actual_display or 'NOT FOUND'}  Expected: {expected_adapter or '—'}",
                     "device_id": device_id
                 })
+                expected_native = expected.get("sdk", "")
+                if expected.get("source") == "cloudx" and expected_native:
+                    actual_native = block.get("native_version", "")
+                    native_status = _sdk_result_status(actual_native, expected_native)
+                    native_actual_display = actual_native
+                    if native_actual_display and native_actual_display.upper() not in {"NOT FOUND", "MISSING"}:
+                        native_actual_display = _extract_sdk_comparable_version(native_actual_display, expected_native)
+                    rows.append({
+                        "status": native_status,
+                        "display_text": f"Native Version  Actual: {native_actual_display or 'NOT FOUND'}  Expected: {expected_native}",
+                        "device_id": device_id
+                    })
                 return rows
 
             if bool(expected_sdk) ^ bool(expected_adapter):
@@ -6718,6 +6740,7 @@ def _sdk_check_block_for_device(device_id, network_name):
             "display_name": network_name.strip() or expected.get("display_name", network_name.strip()),
             "sdk_version": "",
             "adapter_version": "",
+            "native_version": "",
             "adapter_missing": False,
             "verification": "",
             "expected_key": expected_key,
@@ -6746,6 +6769,7 @@ def _process_sdk_cloudx_adapter_metadata_line(line, device_id):
 
     actual_network = match.group(1).strip()
     adapter_version = match.group(2).strip()
+    native_match = SDK_CLOUDX_NATIVE_METADATA_PATTERN.search(str(line or ""))
     expected_key = _match_cloudx_sdk_expected_key(actual_network)
     if not expected_key:
         return False
@@ -6760,6 +6784,11 @@ def _process_sdk_cloudx_adapter_metadata_line(line, device_id):
     )
     block["adapter_version"] = adapter_version
     block["adapter_missing"] = False
+    if expected.get("source") == "cloudx" and native_match:
+        native_version = native_match.group(1).strip()
+        if block.get("native_version") != native_version:
+            changed = True
+        block["native_version"] = native_version
     block["expected_key"] = expected_key
     block["display_name"] = display_name
     block["updated_at"] = time.time()
