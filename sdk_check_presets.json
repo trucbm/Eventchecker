@@ -1,6 +1,6 @@
 {
-  "C-190": {
-    "platform": "all",
+  "C-190-Android": {
+    "platform": "android",
     "lines": [
       "Ads Network\tAdapter\tNative",
       "LevelPlay / ironSource\t9.5.0\t9.5.0",
@@ -46,5 +46,9 @@
       "Facebook SDK\t\t18.3.0",
       "AppMetrica SDK\t\t8.1.0"
     ]
+  },
+  "C-190-iOS": {
+    "platform": "ios",
+    "lines": []
   }
 }
