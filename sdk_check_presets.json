@@ -50,5 +50,44 @@
   "C-190-iOS": {
     "platform": "ios",
     "lines": []
+  },
+  "C-180-Android": {
+    "platform": "android",
+    "lines": [
+      "Ads Network\tAdapter\tNative",
+      "ironSource\t9.4.4\t9.4.4",
+      "AppLovin\t5.8.0\t13.6.3",
+      "BidMachine\t5.7.0\t3.7.1",
+      "Bigo Ads\t5.10.0\t5.10.1",
+      "Chartboost\t5.7.0\t9.12.1",
+      "Digital Turbine (Fyber)\t5.9.0\t8.4.6",
+      "Google (AdMob and Ad Manager)\t5.11.0\t1.2.1",
+      "HyprMX\t5.3.0\t6.4.6",
+      "InMobi\t5.7.0\t11.3.0",
+      "LINE Ads\t5.3.0\t3.1.1",
+      "Liftoff Monetization\t5.10.0\t7.7.4",
+      "Meta Audience Network\t5.2.0\t6.21.0",
+      "Mintegral\t5.16.0\t17.1.51",
+      "Mobilefuse\t5.3.0\t1.11.0",
+      "Moloco\t5.14.0\t4.10.1",
+      "myTarget (VK Ads)\t5.5.0\t5.47.1",
+      "Ogury\t5.4.0\t6.2.2",
+      "Pangle\t5.15.0\t8.0.0.4",
+      "PubMatic (OpenWrap)\t5.7.0\t5.1.2",
+      "SuperAwesome\t5.2.0\t10.1.0",
+      "UnityAds\t5.11.0\t4.19.0",
+      "Verve / Pubnative\t5.6.0\t3.9.0",
+      "Yandex\t5.9.0\t8.1.0",
+      "YSO\t5.4.0\t1.3.7",
+      "Adverty\t5.2.7\t",
+      "Gadsme\t1.12.5\t",
+      "AudioMob\t10.2.3\t",
+      "Adjust\t\t5.6.1",
+      "Appsflyer\t\tRemoved",
+      "Firebase Crashlytics\t\t20.0.6",
+      "Facebook SDK\t\t18.3.0",
+      "AppMetrica SDK\t\t8.1.0",
+      "AdQuality\tSkip\t"
+    ]
   }
 }
