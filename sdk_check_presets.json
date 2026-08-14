@@ -89,5 +89,41 @@
       "AppMetrica SDK\t\t8.1.0"
     
     ]
+  },
+  "C-180-iOS": {
+    "platform": "ios",
+    "lines": [
+      "Ads Network\tAdapter\tSDK",
+      "ironSource\t9.4.2.1\t9.4.2",
+      "MAX / AppLovin\t5.7.0.0\t13.6.3",
+      "BidMachine\t5.7.0.0\t3.7.1",
+      "Bigo Ads\t5.10.0.0\t5.3.0",
+      "Chartboost\t5.4.0.0\t9.12.0",
+      "Digital Turbine (fyber)\t5.9.0.0\t8.4.8",
+      "Google (AdMob and Ad Manager)\t5.11.0.0\t13.6.0",
+      "HyprMX\t5.4.0.0\t6.4.6",
+      "InMobi\t5.7.0.0\t11.3.0",
+      "LINE Ads/FiveAd\t5.5.0.0\t3.0.1",
+      "Liftoff Monetization\t5.10.0.0\t7.7.4",
+      "Meta Audience Network\t5.3.0.0\t6.21.1",
+      "Mintegral\t5.18.0.0\t8.1.5",
+      "Mobilefuse\t5.3.0.0\t1.11.0",
+      "Moloco\t5.14.0.0\t4.8.0",
+      "myTarget (VK Ads)\t5.12.0.0\t5.45.0",
+      "Ogury\t5.5.0.0\t5.2.3",
+      "Pangle\t5.31.0.0\t8.1.1.1",
+      "PubMatic (OpenWrap)\t5.6.0.0\t5.1.1",
+      "SuperAwesome\t5.0.0.0\t9.4.0",
+      "UnityAds\t5.9.0.0\t4.19.0",
+      "Verve / Pubnative\t5.5.0.0\t3.8.1",
+      "Yandex\t5.11.0.0\t8.2.1",
+      "YSO\t5.0.0.0\t1.1.31",
+      "Adjust\t5.6.0\t5.6.2",
+      "Facebook SDK\t18.1.0\t18.1.0",
+      "Appsflyer\tremoved\tremoved",
+      "Firebase Analytics\t\t12.15.0",
+      "Firebase Cloud Messaging\t\t12.15.0",
+      "Firebase Crashlytics\t\t12.15.0"
+    ]
   }
 }

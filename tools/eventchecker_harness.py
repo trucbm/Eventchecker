@@ -431,11 +431,21 @@ def test_sdk_check_preset_contract() -> None:
     _assert("C-190-Android" in presets, "C-190 Android SDK preset is missing")
     _assert("C-190-iOS" in presets, "C-190 iOS SDK preset is missing")
     _assert("C-180-Android" in presets, "C-180 Android SDK preset is missing")
+    _assert("C-180-iOS" in presets, "C-180 iOS SDK preset is missing")
     preset = presets["C-190-Android"]
     _assert_equal(preset.get("platform"), "android", "C-190 Android preset platform changed")
     ios_preset = presets["C-190-iOS"]
     _assert_equal(ios_preset.get("platform"), "ios", "C-190 iOS preset platform changed")
     _assert_equal(ios_preset.get("lines"), [], "C-190 iOS preset must remain empty")
+    c180_ios_preset = presets["C-180-iOS"]
+    _assert_equal(c180_ios_preset.get("platform"), "ios", "C-180 iOS preset platform changed")
+    c180_ios_lines = c180_ios_preset.get("lines") or []
+    _assert_equal(len(c180_ios_lines), 31, "C-180 iOS preset line count changed")
+    _assert_equal(c180_ios_lines[0], "Ads Network\tAdapter\tSDK", "C-180 iOS preset header changed")
+    _assert("ironSource\t9.4.2.1\t9.4.2" in c180_ios_lines, "C-180 iOS ironSource entry changed")
+    _assert("Appsflyer\tremoved\tremoved" in c180_ios_lines, "C-180 iOS Appsflyer entry changed")
+    _assert("Firebase Crashlytics\t\t12.15.0" in c180_ios_lines, "C-180 iOS Firebase Crashlytics entry changed")
+    _assert(all("http://" not in line and "https://" not in line for line in c180_ios_lines), "C-180 iOS preset must not contain links")
     c180_preset = presets["C-180-Android"]
     _assert_equal(c180_preset.get("platform"), "android", "C-180 preset platform changed")
     c180_lines = c180_preset.get("lines") or []
@@ -461,6 +471,9 @@ def test_sdk_check_preset_contract() -> None:
     for line in c180_lines[1:]:
         parsed = lc._parse_sdk_expected_line(line)
         _assert(parsed is not None, f"C-180 Android entry cannot be parsed: {line}")
+    for line in c180_ios_lines[1:]:
+        parsed = lc._parse_sdk_expected_line(line)
+        _assert(parsed is not None, f"C-180 iOS entry cannot be parsed: {line}")
 
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
     _assert("sdkCheckPresetPanel" in source_text, "SDK preset panel is missing")
