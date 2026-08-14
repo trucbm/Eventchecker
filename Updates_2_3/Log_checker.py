@@ -2375,7 +2375,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(23)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(24)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4901,7 +4901,8 @@ HTML_TEMPLATE = """
         }
 
         let sdkCheckPresetsLoadPromise = null;
-        async function loadSdkCheckPresetsFromGit() {
+        async function loadSdkCheckPresetsFromGit(force = false) {
+            if (force) sdkCheckPresetsLoadPromise = null;
             if (sdkCheckPresetsLoadPromise) return sdkCheckPresetsLoadPromise;
             const status = document.getElementById('sdkCheckPresetStatus');
             if (status) status.textContent = 'Đang tải danh sách từ GitHub...';
@@ -4956,7 +4957,7 @@ HTML_TEMPLATE = """
         });
 
         document.getElementById('reloadSdkCheckPresetsBtn')?.addEventListener('click', () => {
-            loadSdkCheckPresetsFromGit();
+            loadSdkCheckPresetsFromGit(true);
         });
 
         // Refresh remote presets on every app/page start so an edited GitHub list is available immediately.
