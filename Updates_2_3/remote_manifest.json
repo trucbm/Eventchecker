@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-14-1-2.4.0-52",
+  "version": "2026-08-14-1-2.4.0-53",
   "files": [
     {
       "path": "Log_checker.py",
@@ -9,7 +9,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/Log_checker.py"
       ],
-      "sha256": "4b8b8cbc86ac4c18c0924bef02f92fddbb0f83b6fd58ab4153bd4342af016100"
+      "sha256": "d5a4ad932bd2b69b653a714890b2e8a425a083d2d5bc4f28c4389efe26556245"
     },
     {
       "path": "sdk_check_presets.json",
@@ -19,7 +19,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/sdk_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/sdk_check_presets.json"
       ],
-      "sha256": "5e587f71bfdf48eea4927e960ce2e05b25e2557bb307175b47664f87825c9795"
+      "sha256": "1a73796f555c8bb3ef1923809065856d92d4296a72b745b31ff27a3d23be922b"
     },
     {
       "path": "remote_update.py",

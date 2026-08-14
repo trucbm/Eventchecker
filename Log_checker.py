@@ -760,6 +760,7 @@ SDK_CLOUDX_NATIVE_METADATA_PATTERN = re.compile(
     r'\bnetworkSdkVersion\s*=\s*([0-9]+(?:\.[0-9]+)+)',
     re.IGNORECASE,
 )
+SDK_CLOUDX_HTTP_METADATA_PATTERN = re.compile(r'\[CloudXHttpClient\]', re.IGNORECASE)
 
 # Mapping tên hiển thị cho Callback
 CALLBACK_DISPLAY_NAMES = {
@@ -2374,7 +2375,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(22)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(23)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2435,7 +2436,7 @@ HTML_TEMPLATE = """
                     <button id="tabBtnSpecific" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Specific')">Specific Validator</button>
                     <button id="tabBtnAdRevenue" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('AdRevenue')">Revenue</button>
                     <button id="tabBtnCallbackAd" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('CallbackAd')">CallBack & Ads</button>
-                    <button id="tabBtnPriceRotation" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('PriceRotation')">Price Rotation</button>
+                    <button id="tabBtnPriceRotation" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('PriceRotation')">Rewarded Bidding</button>
                     <button id="tabBtnSdkCheck" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('SdkCheck')">SDK Check</button>
                     <button id="tabBtnBrightSDK" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('BrightSDK')">BrightSDK</button>
                     <button id="tabBtnPackage" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Package')">Package Logcat</button>
@@ -2785,6 +2786,10 @@ HTML_TEMPLATE = """
                                 <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="priceRotationTypePriceCompare" name="priceRotationTypeFilter" type="checkbox" value="pricecompare" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
                                     <span class="ml-2 text-sm text-gray-900">PriceCompare</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationTypeWaterfall" name="priceRotationTypeFilter" type="checkbox" value="waterfall" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">Waterfall</span>
                                 </label>
                                 <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="priceRotationTypeRewardedCap" name="priceRotationTypeFilter" type="checkbox" value="rewardedcap" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
@@ -6826,6 +6831,47 @@ def _process_sdk_cloudx_adapter_metadata_line(line, device_id):
     return changed
 
 
+def _process_sdk_cloudx_http_metadata_line(line, device_id):
+    """Read the exact CloudX SDK telemetry entry without touching - Cloudx rows."""
+    if active_platform != "android":
+        return False
+    raw_line = str(line or "")
+    if not SDK_CLOUDX_HTTP_METADATA_PATTERN.search(raw_line):
+        return False
+
+    expected_key = _normalize_sdk_network_name("CloudX")
+    expected = sdk_check_expected_map.get(expected_key, {})
+    if not expected or expected.get("source") == "cloudx":
+        return False
+
+    plugin_version = _extract_json_field_version(raw_line, "pluginVersion")
+    native_version = _extract_json_field_version(raw_line, "sdkVersion")
+    if not plugin_version and not native_version:
+        return False
+
+    adapter_version = _extract_sdk_comparable_version(plugin_version, expected.get("adapter")) if plugin_version else ""
+    sdk_version = _extract_sdk_comparable_version(native_version, expected.get("sdk")) if native_version else ""
+    if not adapter_version and not sdk_version:
+        return False
+
+    display_name = expected.get("display_name") or "CloudX"
+    block = _sdk_check_block_for_device(device_id, display_name)
+    changed = False
+    if adapter_version and (
+        block.get("adapter_version") != adapter_version or block.get("adapter_missing")
+    ):
+        block["adapter_version"] = adapter_version
+        block["adapter_missing"] = False
+        changed = True
+    if sdk_version and block.get("sdk_version") != sdk_version:
+        block["sdk_version"] = sdk_version
+        changed = True
+    block["expected_key"] = expected_key
+    block["display_name"] = display_name
+    block["updated_at"] = time.time()
+    return changed
+
+
 # --- THREADS & PROCESSES ---
 
 def _process_sdk_check_line(line, device_id):
@@ -6834,6 +6880,8 @@ def _process_sdk_check_line(line, device_id):
 
     changed = False
     with lock:
+        if _process_sdk_cloudx_http_metadata_line(line, device_id):
+            changed = True
         if _process_sdk_cloudx_adapter_metadata_line(line, device_id):
             changed = True
 

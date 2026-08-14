@@ -244,6 +244,31 @@ def test_cloudx_sdk_adapter_metadata() -> None:
             ("TaurusX - Cloudx", "TaurusX", "11.0.0"),
         ]
 
+        cloudx_parsed = lc._parse_sdk_expected_line("CloudX\t4.5.0\t4.5.0")
+        _assert(cloudx_parsed is not None, "CloudX network label not accepted")
+        _assert_equal(cloudx_parsed.get("source"), "", "CloudX must not be treated as a - Cloudx row")
+        lc._register_sdk_expected("CloudX", adapter="4.5.0", sdk="4.5.0")
+        cloudx_http_log = (
+            '08-14 17:18:30.818 D CloudX [CloudXHttpClient] '
+            '[{"sdk":{"sdkVersion":"4.5.0","pluginVersion":"unity-4.5.0"}}]'
+        )
+        _assert(
+            lc._process_sdk_cloudx_http_metadata_line(cloudx_http_log, "cloudx-device"),
+            "CloudX telemetry log was not parsed",
+        )
+        cloudx_state = lc.sdk_check_runtime_state["cloudx-device"]["cloudx"]
+        _assert_equal(cloudx_state.get("adapter_version"), "4.5.0", "CloudX plugin version was not normalized")
+        _assert_equal(cloudx_state.get("sdk_version"), "4.5.0", "CloudX SDK version was not parsed")
+        _assert(
+            not lc._process_sdk_cloudx_http_metadata_line(
+                '[CloudXHttpClientExtra] [{"sdk":{"sdkVersion":"9.9.9","pluginVersion":"unity-9.9.9"}}]',
+                "cloudx-device",
+            ),
+            "CloudX parser must require the exact CloudXHttpClient marker",
+        )
+        suffix_state = lc.sdk_check_runtime_state["cloudx-device"].get("mintegralcloudx")
+        _assert(not suffix_state, "CloudX telemetry must not update a - Cloudx network")
+
         for display_name, _, expected_version in labels:
             parsed = lc._parse_sdk_expected_line(display_name)
             _assert(parsed is not None, f"Cloudx network label not accepted: {display_name}")
@@ -262,7 +287,7 @@ def test_cloudx_sdk_adapter_metadata() -> None:
             )
             lc._process_sdk_cloudx_adapter_metadata_line(line, "cloudx-device")
 
-        _assert_equal(len(lc.sdk_check_expected_map), len(labels), "Cloudx network count mismatch")
+        _assert_equal(len(lc.sdk_check_expected_map), len(labels) + 1, "Cloudx network count mismatch")
         for display_name, _, expected_version in labels:
             expected_key = lc._normalize_sdk_network_name(display_name)
             actual = lc.sdk_check_runtime_state["cloudx-device"][expected_key]["adapter_version"]
@@ -455,12 +480,17 @@ def test_sdk_check_preset_contract() -> None:
     _assert(not any(line.startswith("AdQuality\t") for line in c180_lines), "C-180 AdQuality entry must remain absent")
     _assert(all("http://" not in line and "https://" not in line for line in c180_lines), "C-180 preset must not contain links")
     lines = preset.get("lines") or []
-    _assert_equal(len(lines), 43, "C-190 Android preset line count changed")
+    _assert_equal(len(lines), 44, "C-190 Android preset line count changed")
     _assert_equal(lines[0], "Ads Network\tAdapter\tNative", "C-190 preset header changed")
     _assert(all("http://" not in line and "https://" not in line for line in lines), "C-190 preset must not contain documentation links")
+    _assert("CloudX\t4.5.0\t4.5.0" in lines, "C-190 CloudX entry changed")
     _assert(any(line.startswith("Digital Turbine (fyber) - Cloudx\t") for line in lines), "C-190 Cloudx entries are missing")
     _assert("Meta Audience Network\t5.4.0\t6.22.0" in lines, "C-190 Meta Audience Network adapter changed")
     _assert("Mintegral - Cloudx\t17.1.71.0\t17.1.71" in lines, "Mintegral Cloudx native version changed")
+    _assert("Yandex\t5.12.0\t8.3.0" in lines, "C-190 Yandex versions changed")
+    _assert("Adverty\t5.2.9\t" in lines, "C-190 Adverty version changed")
+    _assert("Gadsme\t1.12.6\t" in lines, "C-190 Gadsme version changed")
+    _assert("AppMetrica SDK\t\t8.4.1" in lines, "C-190 AppMetrica version changed")
     cloudx_lines = [line for line in lines if " - Cloudx\t" in line]
     _assert(cloudx_lines and all(len(line.split("\t")) >= 3 and line.split("\t")[2].strip() for line in cloudx_lines), "Cloudx native versions are missing")
     _assert("Adjust\t\t5.6.1" in lines, "C-190 single SDK entry changed")
@@ -522,7 +552,7 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.4.0(22)" in text, "Log_checker.py must be prepared for release 22")
+    _assert("v2.4.0(23)" in text, "Log_checker.py must be prepared for release 23")
 
 
 def test_rewarded_bidding_filter_contract() -> None:
@@ -538,11 +568,18 @@ def test_rewarded_bidding_filter_contract() -> None:
 
 
 def test_price_rotation_exact_parser() -> None:
+    source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    _assert('onclick="switchTab(\'PriceRotation\')">Rewarded Bidding</button>' in source_text, "Price Rotation tab label must be Rewarded Bidding")
+    _assert(source_text.count('id="priceRotationTypeWaterfall"') == 1, "Waterfall filter must exist exactly once")
+    _assert('value="waterfall"' in source_text, "Waterfall filter value is missing")
     valid = 'Unity : [Ad,RewardedBidding, CloudX] Raise: {"act":"demandFailedObserved","error":"WinnerBid not found"}'
     parsed = lc._parse_price_rotation_log(valid, "device-price")
     _assert(parsed is not None, "Price Rotation parser must accept the exact marker")
     _assert_equal(parsed["type"], "CloudX", "Price Rotation type should come from the marker")
     _assert('"act": "demandFailedObserved"' in parsed["details"], "Price Rotation details should format JSON")
+    waterfall = lc._parse_price_rotation_log('Unity : [Ad,RewardedBidding, Waterfall] Raise: {"act":"bid"}', "device-price")
+    _assert(waterfall is not None, "Price Rotation parser must accept the Waterfall marker")
+    _assert_equal(waterfall["type"], "Waterfall", "Waterfall type should come from the marker")
     cap = lc._parse_price_rotation_log('Unity : [Ad,RewardedBidding] RewardedCapService: {"act":"cap"}', "device-price")
     _assert(cap is not None, "Price Rotation parser must accept the RewardedCapService marker")
     _assert_equal(cap["type"], "RewardedCap", "RewardedCapService must use the RewardedCap type")
@@ -595,15 +632,15 @@ def test_update_candidate_does_not_downgrade() -> None:
         15,
         "legacy clients without a detected bundled build must keep update compatibility",
     )
-    compatibility_candidate = [{"update_dir": "/tmp/v22", "build": 52, "source": "channel_state"}]
+    compatibility_candidate = [{"update_dir": "/tmp/v23", "build": 53, "source": "channel_state"}]
     _assert_equal(
         desktop._select_prepared_update_candidate(compatibility_candidate, bundled_build=47)["build"],
-        52,
-        "legacy v2.3.0(47) clients must accept the v2.4.0(22) compatibility payload",
+        53,
+        "legacy v2.3.0(47) clients must accept the v2.4.0(23) compatibility payload",
     )
 
 
-def test_update_flow_legacy_to_v22() -> None:
+def test_update_flow_legacy_to_v23() -> None:
     import remote_update as updater
 
     manifest_bytes = (ROOT / "Updates_2_3" / "remote_manifest.json").read_bytes()
@@ -635,15 +672,15 @@ def test_update_flow_legacy_to_v22() -> None:
             updater._download_verified = fake_download_verified
 
             first = updater.check_for_updates(force_refresh=True)
-            _assert_equal(first.get("status"), "updated", "legacy v2.3.0(47) client must prepare v2.4.0(22) payload")
-            _assert_equal(first.get("version"), "2026-08-14-1-2.4.0-52", "prepared payload compatibility version mismatch")
+            _assert_equal(first.get("status"), "updated", "legacy v2.3.0(47) client must prepare v2.4.0(23) payload")
+            _assert_equal(first.get("version"), "2026-08-14-1-2.4.0-53", "prepared payload compatibility version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 52, "prepared payload compatibility build mismatch")
+            _assert_equal(prepared.get("build"), 53, "prepared payload compatibility build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
 
             second = updater.check_for_updates()
-            _assert_equal(second.get("status"), "up_to_date", "same v2.4.0(22) payload must not download repeatedly")
+            _assert_equal(second.get("status"), "up_to_date", "same v2.4.0(23) payload must not download repeatedly")
     finally:
         updater._download_first = original_download_first
         updater._download_verified = original_download_verified
@@ -696,7 +733,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-14-1-2.4.0-52' in text, "windows recovery script must target the current compatibility sequence")
+    _assert('TARGET_VERSION=2026-08-14-1-2.4.0-53' in text, "windows recovery script must target the current compatibility sequence")
     _assert('remote_manifest.json' in text, "windows recovery script must seed the current manifest")
     legacy_scripts = sorted((ROOT / "tools").glob("bootstrap_windows_to_v*.bat"))
     _assert(not legacy_scripts, f"remove legacy Windows bootstrap scripts: {[p.name for p in legacy_scripts]}")
@@ -718,7 +755,7 @@ TESTS: List[Callable[[], None]] = [
     test_price_rotation_exact_parser,
     test_release_payload_sync,
     test_update_candidate_does_not_downgrade,
-    test_update_flow_legacy_to_v22,
+    test_update_flow_legacy_to_v23,
     test_build_scripts_clean_outputs,
     test_windows_update_recovery_script,
 ]

@@ -4,6 +4,7 @@
     "lines": [
       "Ads Network\tAdapter\tNative",
       "LevelPlay / ironSource\t9.5.0\t9.5.0",
+      "CloudX\t4.5.0\t4.5.0",
       "MAX / AppLovin\t5.9.0\t13.6.4",
       "BidMachine\t5.7.0\t3.7.1",
       "Bigo Ads\t5.10.0\t5.10.1",
@@ -25,7 +26,7 @@
       "SuperAwesome\t5.4.0\t10.3.1",
       "UnityAds\t5.11.0\t4.19.0",
       "Verve / Pubnative\t5.6.0\t3.9.0",
-      "Yandex\t5.11.0\t8.2.0",
+      "Yandex\t5.12.0\t8.3.0",
       "YSO\t5.6.0\t1.3.8",
       "Digital Turbine (fyber) - Cloudx\t8.4.7.0\t8.4.7",
       "InMobi - Cloudx\t11.4.0.1\t11.4.0",
@@ -38,13 +39,13 @@
       "UnityAds - Cloudx\t4.19.0.1\t4.19.0",
       "Verve / Pubnative - Cloudx\t3.9.0.1\t3.9.0",
       "TaurusX - Cloudx\t1.18.3.0\t1.18.3",
-      "Adverty\t5.2.8\t",
-      "Gadsme\t1.12.5\t",
+      "Adverty\t5.2.9\t",
+      "Gadsme\t1.12.6\t",
       "AudioMob\t10.2.3\t",
       "Adjust\t\t5.6.1",
       "Firebase Crashlytics\t\t20.0.6",
       "Facebook SDK\t\t18.3.0",
-      "AppMetrica SDK\t\t8.1.0"
+      "AppMetrica SDK\t\t8.4.1"
     ]
   },
   "C-190-iOS": {
