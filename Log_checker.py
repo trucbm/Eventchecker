@@ -567,7 +567,7 @@ adrevenue_source_params = {}
 
 # 8. Dữ liệu cho Tab Price Rotation
 price_rotation_logs = deque(maxlen=MAX_PRICE_ROTATION_LOGS)
-PRICE_ROTATION_PREFIX = "[Ad,RewardedBidding,"
+PRICE_ROTATION_PREFIX = "[Ad,RewardedBidding"
 
 # 9. Dữ liệu cho Tab SDK Check
 sdk_check_search_list = []
@@ -1785,11 +1785,16 @@ def _parse_price_rotation_log(log_entry, device_id):
 
     marker_start = raw_log.find(PRICE_ROTATION_PREFIX)
     type_start = marker_start + len(PRICE_ROTATION_PREFIX)
+    if type_start >= len(raw_log) or raw_log[type_start] not in ",]":
+        return None
     marker_end = raw_log.find("]", type_start)
     if marker_end == -1:
         return None
 
-    rotation_type = raw_log[type_start:marker_end].strip() or "Unknown"
+    rotation_type = raw_log[type_start:marker_end].strip().lstrip(",").strip()
+    if not rotation_type:
+        service_text = raw_log[marker_end + 1:].lstrip()
+        rotation_type = "RewardedCap" if service_text.startswith("RewardedCapService") else "RewardedBidding"
     payload_text = raw_log[marker_end + 1:].strip()
     json_text = extract_json_object_from_text(payload_text)
     parsed_json = None
@@ -2369,7 +2374,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(21)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(22)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2781,6 +2786,10 @@ HTML_TEMPLATE = """
                                     <input id="priceRotationTypePriceCompare" name="priceRotationTypeFilter" type="checkbox" value="pricecompare" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
                                     <span class="ml-2 text-sm text-gray-900">PriceCompare</span>
                                 </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationTypeRewardedCap" name="priceRotationTypeFilter" type="checkbox" value="rewardedcap" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">RewardedCap</span>
+                                </label>
                             </div>
                         </div>
                         <div class="lg:justify-self-end w-full lg:max-w-[520px]">
@@ -3039,7 +3048,7 @@ HTML_TEMPLATE = """
                                 </label>
                             </div>
                             <label class="inline-flex items-center gap-2 shrink-0 pt-0.5">
-                                <input type="radio" name="tagQuickFilter" value="rewarded_bidding" data-android-only="true" data-message-needle="[Ad,RewardedBidding," class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                <input type="radio" name="tagQuickFilter" value="rewarded_bidding" data-android-only="true" data-message-needle="[Ad,RewardedBidding" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
                                 <span>RewardedBidding</span>
                             </label>
                         </div>

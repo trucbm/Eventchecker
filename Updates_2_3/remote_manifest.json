@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-14-1-2.4.0-51",
+  "version": "2026-08-14-1-2.4.0-52",
   "files": [
     {
       "path": "Log_checker.py",
@@ -9,7 +9,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/Log_checker.py"
       ],
-      "sha256": "6e4ec6774e79c0c450e7e028e08ae00570ac39ca66098fd358b52f0b30b54d7a"
+      "sha256": "4b8b8cbc86ac4c18c0924bef02f92fddbb0f83b6fd58ab4153bd4342af016100"
     },
     {
       "path": "sdk_check_presets.json",

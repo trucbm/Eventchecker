@@ -509,14 +509,16 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.4.0(21)" in text, "Log_checker.py must be prepared for release 21")
+    _assert("v2.4.0(22)" in text, "Log_checker.py must be prepared for release 22")
 
 
 def test_rewarded_bidding_filter_contract() -> None:
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    needle = 'data-message-needle="[Ad,RewardedBidding,"'
+    needle = 'data-message-needle="[Ad,RewardedBidding"'
     _assert(source_text.count('value="rewarded_bidding"') == 1, "RewardedBidding filter must exist exactly once")
+    _assert(source_text.count('value="rewardedcap"') == 1, "RewardedCap filter must exist exactly once")
     _assert(source_text.count(needle) == 1, "RewardedBidding must use the exact message needle")
+    _assert('data-message-needle="[Ad,RewardedBidding,"' not in source_text, "RewardedBidding filter must not require a trailing comma")
     _assert('data-android-only="true"' in source_text, "RewardedBidding must be Android-only")
     _assert("exactMessage.includes(state.quickMessage)" in source_text, "message filter must remain case-sensitive")
     _assert("flex items-start justify-start gap-32" in source_text, "RewardedBidding layout must stay beside the first filter column")
@@ -528,6 +530,12 @@ def test_price_rotation_exact_parser() -> None:
     _assert(parsed is not None, "Price Rotation parser must accept the exact marker")
     _assert_equal(parsed["type"], "CloudX", "Price Rotation type should come from the marker")
     _assert('"act": "demandFailedObserved"' in parsed["details"], "Price Rotation details should format JSON")
+    cap = lc._parse_price_rotation_log('Unity : [Ad,RewardedBidding] RewardedCapService: {"act":"cap"}', "device-price")
+    _assert(cap is not None, "Price Rotation parser must accept the RewardedCapService marker")
+    _assert_equal(cap["type"], "RewardedCap", "RewardedCapService must use the RewardedCap type")
+    plain = lc._parse_price_rotation_log('Unity : [Ad,RewardedBidding] Raise: {"act":"bid"}', "device-price")
+    _assert(plain is not None, "Price Rotation parser must accept a plain RewardedBidding marker")
+    _assert_equal(plain["type"], "RewardedBidding", "A plain marker must use the RewardedBidding type")
     _assert(lc._parse_price_rotation_log(valid.replace("[Ad,RewardedBidding,", "[Ad,RewardedBiddingX,"), "device-price") is None, "Price Rotation marker must be exact")
 
 
@@ -574,15 +582,15 @@ def test_update_candidate_does_not_downgrade() -> None:
         15,
         "legacy clients without a detected bundled build must keep update compatibility",
     )
-    compatibility_candidate = [{"update_dir": "/tmp/v21", "build": 51, "source": "channel_state"}]
+    compatibility_candidate = [{"update_dir": "/tmp/v22", "build": 52, "source": "channel_state"}]
     _assert_equal(
         desktop._select_prepared_update_candidate(compatibility_candidate, bundled_build=47)["build"],
-        51,
-        "legacy v2.3.0(47) clients must accept the v2.4.0(21) compatibility payload",
+        52,
+        "legacy v2.3.0(47) clients must accept the v2.4.0(22) compatibility payload",
     )
 
 
-def test_update_flow_legacy_to_v21() -> None:
+def test_update_flow_legacy_to_v22() -> None:
     import remote_update as updater
 
     manifest_bytes = (ROOT / "Updates_2_3" / "remote_manifest.json").read_bytes()
@@ -614,15 +622,15 @@ def test_update_flow_legacy_to_v21() -> None:
             updater._download_verified = fake_download_verified
 
             first = updater.check_for_updates(force_refresh=True)
-            _assert_equal(first.get("status"), "updated", "legacy v2.3.0(47) client must prepare v2.4.0(21) payload")
-            _assert_equal(first.get("version"), "2026-08-14-1-2.4.0-51", "prepared payload compatibility version mismatch")
+            _assert_equal(first.get("status"), "updated", "legacy v2.3.0(47) client must prepare v2.4.0(22) payload")
+            _assert_equal(first.get("version"), "2026-08-14-1-2.4.0-52", "prepared payload compatibility version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 51, "prepared payload compatibility build mismatch")
+            _assert_equal(prepared.get("build"), 52, "prepared payload compatibility build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
 
             second = updater.check_for_updates()
-            _assert_equal(second.get("status"), "up_to_date", "same v2.4.0(21) payload must not download repeatedly")
+            _assert_equal(second.get("status"), "up_to_date", "same v2.4.0(22) payload must not download repeatedly")
     finally:
         updater._download_first = original_download_first
         updater._download_verified = original_download_verified
@@ -675,7 +683,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-14-1-2.4.0-51' in text, "windows recovery script must target the current compatibility sequence")
+    _assert('TARGET_VERSION=2026-08-14-1-2.4.0-52' in text, "windows recovery script must target the current compatibility sequence")
     _assert('remote_manifest.json' in text, "windows recovery script must seed the current manifest")
     legacy_scripts = sorted((ROOT / "tools").glob("bootstrap_windows_to_v*.bat"))
     _assert(not legacy_scripts, f"remove legacy Windows bootstrap scripts: {[p.name for p in legacy_scripts]}")
@@ -697,7 +705,7 @@ TESTS: List[Callable[[], None]] = [
     test_price_rotation_exact_parser,
     test_release_payload_sync,
     test_update_candidate_does_not_downgrade,
-    test_update_flow_legacy_to_v21,
+    test_update_flow_legacy_to_v22,
     test_build_scripts_clean_outputs,
     test_windows_update_recovery_script,
 ]
