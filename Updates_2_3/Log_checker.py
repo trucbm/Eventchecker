@@ -2375,7 +2375,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(24)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(25)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2830,8 +2830,8 @@ HTML_TEMPLATE = """
             <div id="tabContentSdkCheck" class="hidden">
                 <div class="bg-white rounded-xl shadow-md p-4 mb-4">
                     <h2 class="text-lg font-semibold mb-2">SDK Check Setup</h2>
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-                         <div class="md:col-span-2">
+                    <div class="grid grid-cols-1 md:grid-cols-[minmax(0,4fr)_minmax(280px,5fr)] gap-4 items-end">
+                         <div>
                             <label for="sdkCheckInput" class="block text-xs font-medium text-gray-700 mb-1">SDKs to Check (manual input):</label>
                             <textarea id="sdkCheckInput" rows="8" class="w-full p-2 border rounded-md shadow-sm font-mono text-sm" placeholder="Chọn Saved SDK List hoặc nhập danh sách thủ công..."></textarea>
                          </div>
