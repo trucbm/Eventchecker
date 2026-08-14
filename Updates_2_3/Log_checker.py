@@ -2369,7 +2369,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(20)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(21)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2823,8 +2823,9 @@ HTML_TEMPLATE = """
                          </div>
                          <div class="flex flex-col gap-3">
                             <div id="sdkCheckPresetPanel" class="rounded-lg border border-indigo-100 bg-indigo-50 p-3">
-                                <div class="mb-2">
+                                <div class="mb-2 flex items-center justify-between gap-2">
                                     <label class="block text-xs font-semibold text-indigo-900">Saved SDK List</label>
+                                    <button id="reloadSdkCheckPresetsBtn" type="button" class="shrink-0 rounded border border-indigo-200 bg-white px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100">Reload</button>
                                 </div>
                                 <div id="sdkCheckPresetList" class="flex flex-wrap gap-2"></div>
                                 <div id="sdkCheckPresetStatus" class="mt-2 text-[11px] text-slate-600">Chọn preset để tự nạp danh sách.</div>
@@ -4863,6 +4864,8 @@ HTML_TEMPLATE = """
         function renderSdkCheckPresetOptions() {
             const container = document.getElementById('sdkCheckPresetList');
             if (!container) return;
+            const selectedPresetName = Array.from(container.querySelectorAll('input[name="sdkCheckPreset"]'))
+                .find(input => input.checked)?.value || '';
             const presets = Object.entries(sdkCheckPresets || {})
                 .filter(([, preset]) => preset && (preset.platform === 'all' || preset.platform === activePlatform));
             if (presets.length === 0) {
@@ -4876,24 +4879,36 @@ HTML_TEMPLATE = """
                     <span class="text-[11px] font-normal text-slate-500">${Array.isArray(preset.lines) ? preset.lines.length - 1 : 0} SDKs</span>
                 </label>
             `).join('');
+            if (selectedPresetName) {
+                container.querySelectorAll('input[name="sdkCheckPreset"]').forEach(input => {
+                    input.checked = input.value === selectedPresetName;
+                });
+            }
         }
 
+        let sdkCheckPresetsLoadPromise = null;
         async function loadSdkCheckPresetsFromGit() {
+            if (sdkCheckPresetsLoadPromise) return sdkCheckPresetsLoadPromise;
             const status = document.getElementById('sdkCheckPresetStatus');
             if (status) status.textContent = 'Đang tải danh sách từ GitHub...';
-            try {
-                const response = await fetch(`/api/sdk-check-presets?ts=${Date.now()}`, {cache: 'no-store'});
-                const payload = await response.json();
-                if (!response.ok || !payload.ok || !payload.presets) throw new Error(payload.error || 'preset_load_failed');
-                sdkCheckPresets = payload.presets;
-                renderSdkCheckPresetOptions();
-                const sourceText = payload.source === 'github' ? 'GitHub' : 'Local fallback';
-                if (status) status.textContent = `${sourceText}: chọn preset để tự nạp danh sách.`;
-            } catch (error) {
-                renderSdkCheckPresetOptions();
-                if (status) status.textContent = 'Không tải được GitHub, đang dùng danh sách local.';
-                console.warn('SDK preset load failed', error);
-            }
+            sdkCheckPresetsLoadPromise = (async () => {
+                try {
+                    const response = await fetch(`/api/sdk-check-presets?ts=${Date.now()}`, {cache: 'no-store'});
+                    const payload = await response.json();
+                    if (!response.ok || !payload.ok || !payload.presets) throw new Error(payload.error || 'preset_load_failed');
+                    sdkCheckPresets = payload.presets;
+                    renderSdkCheckPresetOptions();
+                    const sourceText = payload.source === 'github' ? 'GitHub' : 'Local fallback';
+                    if (status) status.textContent = `${sourceText}: chọn preset để tự nạp danh sách.`;
+                } catch (error) {
+                    renderSdkCheckPresetOptions();
+                    if (status) status.textContent = 'Không tải được GitHub, đang dùng danh sách local.';
+                    console.warn('SDK preset load failed', error);
+                } finally {
+                    sdkCheckPresetsLoadPromise = null;
+                }
+            })();
+            return sdkCheckPresetsLoadPromise;
         }
 
         function applySdkCheckPreset(name) {
@@ -4925,6 +4940,13 @@ HTML_TEMPLATE = """
             const status = document.getElementById('sdkCheckPresetStatus');
             if (status) status.textContent = 'Manual input đang được sử dụng.';
         });
+
+        document.getElementById('reloadSdkCheckPresetsBtn')?.addEventListener('click', () => {
+            loadSdkCheckPresetsFromGit();
+        });
+
+        // Refresh remote presets on every app/page start so an edited GitHub list is available immediately.
+        loadSdkCheckPresetsFromGit();
 
         document.getElementById('startSdkCheckBtn').addEventListener('click', () => {
              const btn = document.getElementById('startSdkCheckBtn');

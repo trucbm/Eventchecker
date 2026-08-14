@@ -468,6 +468,7 @@ def test_sdk_check_preset_contract() -> None:
     _assert("/api/sdk-check-presets" in source_text, "remote SDK preset endpoint is missing")
     _assert("loadSdkCheckPresetsFromGit" in source_text, "SDK preset remote load action is missing")
     _assert("sdkCheckInput" in source_text, "manual SDK input fallback is missing")
+    _assert(source_text.count('id="reloadSdkCheckPresetsBtn"') == 1, "SDK preset reload button must exist exactly once")
     _assert("clean_lines" in source_text and '"lines": clean_lines' in source_text, "empty SDK presets must remain valid")
     _assert('"Accept-Encoding": "identity"' in source_text, "SDK preset fetch must bypass stale compressed cache")
 
@@ -484,6 +485,9 @@ def test_rendered_sdk_preset_javascript_contract() -> None:
         html.index('id="sdkCheckPresetPanel"') < html.index('id="startSdkCheckBtn"'),
         "SDK preset selector must remain above Start Checking",
     )
+    _assert('id="reloadSdkCheckPresetsBtn"' in html, "rendered SDK preset reload button is missing")
+    _assert("loadSdkCheckPresetsFromGit();" in html, "SDK presets must reload when the app UI starts")
+    _assert("reloadSdkCheckPresetsBtn" in html and "loadSdkCheckPresetsFromGit" in html, "reload button handler is missing")
 
 
 def test_sdk_failed_groups_sort_first() -> None:
@@ -505,7 +509,7 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.4.0(20)" in text, "Log_checker.py must be prepared for release 20")
+    _assert("v2.4.0(21)" in text, "Log_checker.py must be prepared for release 21")
 
 
 def test_rewarded_bidding_filter_contract() -> None:
@@ -570,15 +574,15 @@ def test_update_candidate_does_not_downgrade() -> None:
         15,
         "legacy clients without a detected bundled build must keep update compatibility",
     )
-    compatibility_candidate = [{"update_dir": "/tmp/v20", "build": 50, "source": "channel_state"}]
+    compatibility_candidate = [{"update_dir": "/tmp/v21", "build": 51, "source": "channel_state"}]
     _assert_equal(
         desktop._select_prepared_update_candidate(compatibility_candidate, bundled_build=47)["build"],
-        50,
-        "legacy v2.3.0(47) clients must accept the v2.4.0(20) compatibility payload",
+        51,
+        "legacy v2.3.0(47) clients must accept the v2.4.0(21) compatibility payload",
     )
 
 
-def test_update_flow_legacy_to_v20() -> None:
+def test_update_flow_legacy_to_v21() -> None:
     import remote_update as updater
 
     manifest_bytes = (ROOT / "Updates_2_3" / "remote_manifest.json").read_bytes()
@@ -610,15 +614,15 @@ def test_update_flow_legacy_to_v20() -> None:
             updater._download_verified = fake_download_verified
 
             first = updater.check_for_updates(force_refresh=True)
-            _assert_equal(first.get("status"), "updated", "legacy v2.3.0(47) client must prepare v2.4.0(20) payload")
-            _assert_equal(first.get("version"), "2026-08-13-1-2.4.0-50", "prepared payload compatibility version mismatch")
+            _assert_equal(first.get("status"), "updated", "legacy v2.3.0(47) client must prepare v2.4.0(21) payload")
+            _assert_equal(first.get("version"), "2026-08-14-1-2.4.0-51", "prepared payload compatibility version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 50, "prepared payload compatibility build mismatch")
+            _assert_equal(prepared.get("build"), 51, "prepared payload compatibility build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
 
             second = updater.check_for_updates()
-            _assert_equal(second.get("status"), "up_to_date", "same v2.4.0(20) payload must not download repeatedly")
+            _assert_equal(second.get("status"), "up_to_date", "same v2.4.0(21) payload must not download repeatedly")
     finally:
         updater._download_first = original_download_first
         updater._download_verified = original_download_verified
@@ -671,7 +675,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-13-1-2.4.0-50' in text, "windows recovery script must target the current compatibility sequence")
+    _assert('TARGET_VERSION=2026-08-14-1-2.4.0-51' in text, "windows recovery script must target the current compatibility sequence")
     _assert('remote_manifest.json' in text, "windows recovery script must seed the current manifest")
     legacy_scripts = sorted((ROOT / "tools").glob("bootstrap_windows_to_v*.bat"))
     _assert(not legacy_scripts, f"remove legacy Windows bootstrap scripts: {[p.name for p in legacy_scripts]}")
@@ -693,7 +697,7 @@ TESTS: List[Callable[[], None]] = [
     test_price_rotation_exact_parser,
     test_release_payload_sync,
     test_update_candidate_does_not_downgrade,
-    test_update_flow_legacy_to_v20,
+    test_update_flow_legacy_to_v21,
     test_build_scripts_clean_outputs,
     test_windows_update_recovery_script,
 ]
