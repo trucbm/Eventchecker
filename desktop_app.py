@@ -18,7 +18,7 @@ except Exception:
     remote_update = None
 
 HOST = "127.0.0.1"
-PORT = 5001
+PORT = 5008
 
 
 def _user_data_dir():
@@ -92,8 +92,7 @@ def _candidate_update_dirs():
             logging.exception("Failed to inspect channel prepared update")
 
     for dirname, source in (
-        ("updates_v230", "scan_v230"),
-        ("updates_v240", "scan_v240"),
+        ("updates_v250", "scan_v250"),
     ):
         add_candidate(os.path.join(user_dir, dirname), None, source)
 

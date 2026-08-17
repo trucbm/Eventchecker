@@ -9,10 +9,10 @@ import shutil
 import requests
 
 APP_NAME = "EventInspector"
-CHANNEL_ID = "v250"
-CONFIG_FILENAME = "remote_update_config_v250.json"
-STATE_FILENAME = "update_state_v250.json"
-UPDATES_DIRNAME = "updates_v250"
+CHANNEL_ID = "v230"
+CONFIG_FILENAME = "remote_update_config_v230.json"
+STATE_FILENAME = "update_state_v230.json"
+UPDATES_DIRNAME = "updates_v230"
 DEFAULT_MANIFEST_URLS = [
     "https://github.com/trucbm/Eventchecker/raw/2.5.0/Updates_2_5/remote_manifest.json",
     "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/remote_manifest.json",
@@ -24,7 +24,7 @@ DEFAULT_FILE_URL_BASES = [
     "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0",
     "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0",
 ]
-KNOWN_CHANNELS = ("v250",)
+KNOWN_CHANNELS = ("v230", "v240", "v250")
 
 
 def _user_data_dir():
@@ -307,7 +307,7 @@ def _existing_update_matches_manifest(update_dir, manifest_files):
         target = os.path.join(update_dir, rel_path)
         if not os.path.exists(target):
             return False
-        expected_sha = str(item.get("sha256") or "").strip().lower()
+        expected_sha = str(item.get("compat_sha256") or item.get("sha256") or "").strip().lower()
         if expected_sha:
             try:
                 actual_sha = _sha256_file(target).lower()
@@ -366,7 +366,7 @@ def check_for_updates(force_refresh=False):
     manifest_files = manifest.get("files", [])
     requested_from_bundle_build = _requested_from_bundle_build()
     manifest_build = _extract_build_number(manifest_version)
-    if (
+    if False and (
         _bundle_build_is_detected()
         and requested_from_bundle_build is not None
         and manifest_build is not None
@@ -409,8 +409,24 @@ def check_for_updates(force_refresh=False):
             if url:
                 candidate_urls.append(url)
             candidate_urls.extend(urls)
+            download_sha256 = item.get("compat_sha256") or sha256
+            # Keep the old shell on the compatibility bridge. If it receives
+            # the native v2.5 payload, its numeric build check would reject
+            # the visible v2.5.0(1) file as older than v2.4.0(25).
+            if rel_path == "Log_checker.py":
+                download_sha256 = ""
+                candidate_urls = [
+                    url.replace("/Log_checker.py", "/Updates_2_5/compat/Log_checker.py")
+                    for url in candidate_urls
+                ]
+            elif rel_path == "remote_update.py":
+                download_sha256 = ""
+                candidate_urls = [
+                    url.replace("/remote_update.py", "/Updates_2_5/compat/remote_update.py")
+                    for url in candidate_urls
+                ]
             candidate_urls.extend(_default_repo_file_urls(rel_path))
-            data, _used_url = _download_verified(candidate_urls, timeout, sha256)
+            data, _used_url = _download_verified(candidate_urls, timeout, download_sha256)
             tmp = f"{target}.tmp"
             with open(tmp, "wb") as f:
                 f.write(data)

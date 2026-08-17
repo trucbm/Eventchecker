@@ -29,6 +29,10 @@ except Exception:
 from pathlib import Path
 from queue import Empty, Queue
 
+# Compatibility marker for the 2.4 desktop shell. The visible app version
+# remains v2.5.0(1); this marker lets old shells accept the bridge payload.
+LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(26)"
+
 # Khởi tạo ứng dụng Flask và SocketIO
 app = Flask(__name__)
 CORS(app)
@@ -1791,7 +1795,7 @@ def format_json_html(data):
                 try:
                     data = json.loads(data)
                 except: pass
-        
+
         # If it's a dict or list, dump it pretty
         if isinstance(data, (dict, list)):
             # ensure_ascii=False để hiển thị tiếng Việt đúng
@@ -2465,7 +2469,7 @@ HTML_TEMPLATE = """
             user-select: text;
             -webkit-user-select: text;
         }
-        
+
         /* Custom scrollbar for pre blocks */
         pre::-webkit-scrollbar { height: 6px; width: 6px; }
         pre::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
@@ -2538,7 +2542,7 @@ HTML_TEMPLATE = """
             <div class="flex justify-between items-end border-b border-gray-200">
                 <div class="flex flex-wrap">
                     <button id="tabBtnLoadAdsExt" class="tab-btn active text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAdsExt')">Load Ads Ironsource</button>
-                    
+
                     <button id="tabBtnValidator" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Validator')">Default Events/Params</button>
                     <button id="tabBtnSpecific" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Specific')">Specific Validator</button>
                     <button id="tabBtnAdRevenue" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('AdRevenue')">Revenue</button>
@@ -2990,7 +2994,7 @@ HTML_TEMPLATE = """
                     <iframe id="servicesCheckerFrame" title="Services Checker" class="hidden w-full rounded-lg border border-slate-200 bg-white" style="height: 78vh; min-height: 620px;"></iframe>
                 </div>
             </div>
-            
+
             <!-- TAB 8: Package -->
             <div id="tabContentPackage" class="hidden">
                  <div class="bg-white rounded-xl shadow-md p-5 mb-4">
@@ -3050,7 +3054,7 @@ HTML_TEMPLATE = """
 
         </div>
     </div>
-    
+
     <!-- MODALS -->
     <div id="jsonModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 hidden">
         <div class="bg-white rounded-xl shadow-lg p-6 w-1/2 h-2/3 flex flex-col">
@@ -3434,17 +3438,17 @@ HTML_TEMPLATE = """
             });
             // Deactivate all buttons
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-            
+
             // Activate selected with Safety Check
             const contentEl = document.getElementById('tabContent' + tabName);
             if (contentEl) contentEl.classList.remove('hidden');
-            
+
             const btnEl = document.getElementById('tabBtn' + tabName);
             if (btnEl) btnEl.classList.add('active');
 
             if (tabName === 'SdkCheck') loadSdkCheckPresetsFromGit();
             if (tabName === 'ServicesChecker') openServicesChecker();
-            
+
             socket.emit('change_tab', { tab_name: tabName });
         }
 
@@ -3534,17 +3538,17 @@ HTML_TEMPLATE = """
                     manualRestartBtn.textContent = originalText;
                 });
         });
-        
+
         // --- Recording Logic (Updated for separate tabs) ---
         function toggleRecord(tabName) {
             const btn = document.getElementById('btnRecord_' + tabName);
             const input = document.getElementById('sheetName_' + tabName);
-            
+
             if (!btn.classList.contains('bg-red-600')) {
                 const name = input.value.trim();
                 socket.emit('toggle_record', { sheet_name: name, tab_name: tabName });
-            } else { 
-                socket.emit('toggle_record', { tab_name: tabName }); 
+            } else {
+                socket.emit('toggle_record', { tab_name: tabName });
             }
         }
 
@@ -3590,7 +3594,7 @@ HTML_TEMPLATE = """
             p.textContent = str;
             return p.innerHTML.replace(/  /g, ' &nbsp;');
         }
-        
+
         // FIX: Better attribute escaping for JSON buttons
         function escapeAttribute(str) {
             if (!str) return '{}';
@@ -3602,7 +3606,7 @@ HTML_TEMPLATE = """
             const tbody = document.getElementById(id);
             if (!tbody) return;
             const filtered = (selectedDevice === 'all') ? data : data.filter(e => e.device_id === selectedDevice);
-            
+
             if (filtered.length === 0) {
                  tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-gray-400">Waiting for recording...</td></tr>';
                  return;
@@ -3727,7 +3731,7 @@ HTML_TEMPLATE = """
                  if (sourceFilter !== 'all' && (r.source || 'firebase') !== sourceFilter) return false;
                  return true;
              });
-             
+
              if (filtered.length === 0) {
                  tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Waiting...</td></tr>';
              } else {
@@ -3948,7 +3952,7 @@ HTML_TEMPLATE = """
         // ============================================
         // === FIXED: Callback Table with Client Filter ===
         // ============================================
-        
+
         let lastCallbackData = [];
 
         socket.on('update_callback_ad_table', (d) => {
@@ -3968,13 +3972,13 @@ HTML_TEMPLATE = """
             const filtered = d.filter(r => {
                 // Device filter
                 if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
-                
+
                 // Type filter
                 if (typeFilter === 'callback' && (r.type === 'Ad Event' || r.type === 'Callback Gadsme' || r.type === 'Callback Adverty5')) return false;
                 if (typeFilter === 'gadsme_callback' && r.type !== 'Callback Gadsme') return false;
                 if (typeFilter === 'adverty5_callback' && r.type !== 'Callback Adverty5') return false;
                 if (typeFilter === 'ad_event' && r.type !== 'Ad Event') return false;
-                
+
                 // Text filter
                 if (textFilter && !r.raw_log.toLowerCase().includes(textFilter)) return false;
 
@@ -4080,10 +4084,10 @@ HTML_TEMPLATE = """
                  else if (res.status === 'LABEL') rowClass += ' font-bold text-base text-indigo-700 pt-3';
                  else if (res.status === 'SECTION') rowClass += ' font-bold text-sm text-slate-500 pt-4 border-t border-gray-200';
                  else if (res.status === 'WAITING') rowClass += ' text-sm text-gray-500 italic';
-                 
+
                  // Filter
                  if (selectedDevice !== 'all' && res.device_id !== selectedDevice && res.status !== 'LABEL' && res.status !== 'SECTION' && res.status !== 'WAITING') return '';
-                 
+
                  return `<tr><td class="py-1 px-4 ${rowClass}"><pre style="font-family: monospace; margin: 0; white-space: pre-wrap;">${escapeHTML(res.display_text)}${statusText}</pre></td></tr>`;
             }).join('');
         });
@@ -4449,9 +4453,9 @@ HTML_TEMPLATE = """
                     const parsed = JSON.parse(jsonData);
                     jsonContent.textContent = JSON.stringify(parsed, null, 2);
                     jsonModal.classList.remove('hidden');
-                } catch(err) { 
+                } catch(err) {
                     console.error(err);
-                    alert('Invalid JSON data. Check console for details.'); 
+                    alert('Invalid JSON data. Check console for details.');
                 }
             }
         });
@@ -4654,7 +4658,7 @@ HTML_TEMPLATE = """
             if (selected.length === 0) return;
             openLogDetailModal(selected);
         });
-        
+
         // --- Device Status ---
         socket.on('device_status', (status) => {
             const currentFilter = deviceFilter.value;
@@ -4670,8 +4674,8 @@ HTML_TEMPLATE = """
             if([...deviceFilter.options].some(o => o.value === currentFilter)) deviceFilter.value = currentFilter;
 
             if (status.connected_devices && status.connected_devices.length > 0) {
-                 deviceListEl.innerHTML = '<ul class="list-disc list-inside text-left">' + 
-                    status.connected_devices.map(d => `<li class="${escapeHTML(d.status_class || 'text-green-600')} font-semibold">${escapeHTML(d.display_name || d.name || d.id)}</li>`).join('') + 
+                 deviceListEl.innerHTML = '<ul class="list-disc list-inside text-left">' +
+                    status.connected_devices.map(d => `<li class="${escapeHTML(d.status_class || 'text-green-600')} font-semibold">${escapeHTML(d.display_name || d.name || d.id)}</li>`).join('') +
                     '</ul>';
             } else {
                  deviceListEl.innerHTML = `<p class="text-orange-500">${status.message || 'Waiting...'}</p>`;
@@ -4714,10 +4718,10 @@ HTML_TEMPLATE = """
             };
             renderInstallationIdPanel();
         });
-        
+
         // --- FIXED: Trigger refresh on device change to update all tables including callback
-        deviceFilter.addEventListener('change', (e) => { 
-            selectedDevice = e.target.value; 
+        deviceFilter.addEventListener('change', (e) => {
+            selectedDevice = e.target.value;
             installationIdState = {
                 device_id: '',
                 device_name: '',
@@ -4727,7 +4731,7 @@ HTML_TEMPLATE = """
                 platform: activePlatform || 'android',
             };
             renderInstallationIdPanel();
-            socket.emit('refresh_request'); 
+            socket.emit('refresh_request');
             renderCallbackTable(); // Trigger client-side re-render immediately
             renderAdRevenueTable();
             renderPriceRotationTable();
@@ -4762,7 +4766,7 @@ HTML_TEMPLATE = """
             if (allRadio) allRadio.checked = true;
             renderValidatorTable(validator_results_cache);
         });
-        
+
         document.getElementById('validatorEventFilterInput').addEventListener('input', () => {
             renderValidatorTable(validator_results_cache);
         });
@@ -4792,7 +4796,7 @@ HTML_TEMPLATE = """
         document.querySelectorAll('input[name="specificSourceFilter"]').forEach(r => {
             r.addEventListener('change', () => renderSpecificEventTable());
         });
-        
+
         document.getElementById('adRevenueFilterInput').addEventListener('input', renderAdRevenueTable);
         document.querySelectorAll('input[name="adRevenueSourceFilter"]').forEach(r => r.addEventListener('change', renderAdRevenueTable));
         let packageFilterRenderTimer = null;
@@ -5018,7 +5022,7 @@ HTML_TEMPLATE = """
                 console.error('Copy failed', err);
             }
         });
-        
+
         let sdkCheckRunning = false;
         function renderSdkCheckPresetOptions() {
             const container = document.getElementById('sdkCheckPresetList');
@@ -5123,7 +5127,7 @@ HTML_TEMPLATE = """
                  btn.textContent = 'Stop Checking';
              }
         });
-        
+
         function setPackageControlsEnabled(enabled) {
             const packageIdInput = document.getElementById('packageIdInput');
             const packageCheckboxes = document.querySelectorAll('.package-id-checkbox');
@@ -5297,7 +5301,7 @@ HTML_TEMPLATE = """
         });
 
         loadPackageHistorySessions();
-        
+
     </script>
 </body>
 </html>
@@ -5696,10 +5700,10 @@ def send_to_sheet(device_name, ad_source, ad_format, raw_log, log_type):
     state = recording_states.get(log_type)
     if state and state["is_recording"] and state["current_sheet"]:
         payload = {
-            "sheet_name": state["current_sheet"], 
-            "device_name": device_name, 
-            "ad_source": ad_source, 
-            "ad_format": ad_format, 
+            "sheet_name": state["current_sheet"],
+            "device_name": device_name,
+            "ad_source": ad_source,
+            "ad_format": ad_format,
             "raw_log": raw_log
         }
         threading.Thread(target=lambda: requests.post(G_SHEET_URL, json=payload, timeout=30)).start()
@@ -5718,7 +5722,7 @@ def process_load_ads_unity_log(line, device_id):
             src = params.get("ad_source")
             fmt = params.get("ad_format")
             if params.get("mediation_ad_unit_name") == "MREC": fmt = "MREC"
-            
+
             if src and fmt:
                 d_name = get_device_name(device_id)
                 with lock:
@@ -5726,13 +5730,13 @@ def process_load_ads_unity_log(line, device_id):
                         unique_load_ads.add((device_id, src, fmt, "unity"))
                         load_ads_events.append({
                             "device_id": device_id,
-                            "device_name": d_name, 
-                            "ad_source": src, 
-                            "ad_format": fmt, 
+                            "device_name": d_name,
+                            "ad_source": src,
+                            "ad_format": fmt,
                             "raw_log": line.strip()
                         })
                         socketio.emit('update_load_ads', list(load_ads_events))
-                        
+
                         # Gửi với type "LoadAds"
                         send_to_sheet(d_name, src, fmt, line.strip(), "LoadAds")
         except: pass
@@ -5801,13 +5805,13 @@ def process_load_ads_ext_log(line, device_id):
                         unique_load_ads_ext.add((device_id, ad_network, fmt, "metrica"))
                         load_ads_ext_events.append({
                             "device_id": device_id,
-                            "device_name": d_name, 
+                            "device_name": d_name,
                             "ad_network": ad_network,
-                            "ad_format": fmt, 
+                            "ad_format": fmt,
                             "raw_log": line.strip()
                         })
                         socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
-                        
+
                         # Gửi với type "LoadAdsExt"
                         send_to_sheet(d_name, ad_network, fmt, line.strip(), "LoadAdsExt")
         except: pass
@@ -6039,7 +6043,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
             return
         except:
             pass
-    
+
     # --- 1. HANDLING BUFFERED IMPRESSION DATA (Split Logs) ---
     # Check if we are currently buffering for this device
     with lock:
@@ -6069,7 +6073,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                 current_split_key = "_OnLevelPlayImpressionDataReadyEvent"
             elif "_OnImpressionDataReadyEvent" in current_buffer:
                 current_split_key = "_OnImpressionDataReadyEvent"
-            
+
             # Case A: Start of new log
             if current_buffer and current_split_key and split_impression_key == current_split_key:
                 # Continuation line may repeat the same callback prefix; append instead of
@@ -6106,7 +6110,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                 # Try to find JSON
             # 1. Find first '{'
                 start_idx = parse_buffer.find('{')
-            
+
             # If no '{' yet, just keep buffering (unless it's been too long?)
             if parse_buffer and start_idx != -1:
                 # 2. Count braces to find end
@@ -6115,18 +6119,18 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                 for i in range(start_idx, len(parse_buffer)):
                     if parse_buffer[i] == '{': open_braces += 1
                     elif parse_buffer[i] == '}': open_braces -= 1
-                    
+
                     if open_braces == 0:
                         end_idx = i
                         break
-                
+
                 if end_idx != -1:
                     # Found complete JSON
                     json_str = parse_buffer[start_idx : end_idx+1]
                     details = ""
                     json_data_for_log = "{}"
                     display_name = "_OnLevelPlayImpressionDataReadyEvent"
-                    
+
                     try:
                         data = _parse_callback_json_payload(json_str)
                         if data is None:
@@ -6144,15 +6148,15 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
 
                     # Clear buffer
                     incomplete_impression_logs[device_id] = ""
-                    
+
                     # Emit
                     callback_ad_logs.append({
-                        "device_id": device_id, 
-                        "device_name": get_device_name(device_id), 
-                        "type": "Callback", 
-                        "event_name": display_name, 
-                        "details": details, 
-                        "raw_log": current_buffer.strip(), 
+                        "device_id": device_id,
+                        "device_name": get_device_name(device_id),
+                        "type": "Callback",
+                        "event_name": display_name,
+                        "details": details,
+                        "raw_log": current_buffer.strip(),
                         "json_data": json_data_for_log
                     })
                     socketio.emit('update_callback_ad_table', list(callback_ad_logs))
@@ -6174,7 +6178,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                 callback_ad_logs.append({"device_id": device_id, "device_name": get_device_name(device_id), "type": "Ad Event", "event_name": event_name, "details": details, "raw_log": log_entry.strip(), "json_data": json_string})
                 socketio.emit('update_callback_ad_table', list(callback_ad_logs))
         except: pass
-    
+
     # --- 3. Process Other Callbacks ---
     callback_match = CALLBACK_LOG_PATTERN.search(log_entry)
     if callback_match:
@@ -6185,7 +6189,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
         details = "N/A"
         display_name = CALLBACK_DISPLAY_NAMES.get(found_key, found_key)
         json_data_for_log = "{}"
-        
+
         if found_key == "Receive Ironsource Impression Data LevelPlayImpressionData":
              try:
                  payload = log_entry.split(found_key, 1)[1].strip()
@@ -6221,7 +6225,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
             socketio.emit('update_callback_ad_table', list(callback_ad_logs))
 
 def process_event_validator_log(event_name, actual_params, json_string, log_entry, device_id):
-    if is_paused or not validator_active: 
+    if is_paused or not validator_active:
         return
     source = "firebase"
     try:
@@ -6241,7 +6245,7 @@ def process_event_validator_log(event_name, actual_params, json_string, log_entr
         missing = sorted(required_set - actual_set)
         strange = sorted(actual_set - required_set) if required_set else []
         status = "PASSED" if not missing and not strange else "FAILED"
-        
+
         # New Formatting Logic: Highlight missing -> Show full JSON
         details_html = ""
         if not specific and event_specific_params:
@@ -6260,9 +6264,9 @@ def process_event_validator_log(event_name, actual_params, json_string, log_entr
             details_html += format_param_issue_html("Missing", missing, "text-red-600")
         if strange:
             details_html += format_param_issue_html("Strange", strange, "text-orange-600")
-        
+
         details_html += format_json_html(actual_params)
-        
+
         validator_results.append({"device_id": device_id, "event_name": event_name, "device_name": get_device_name(device_id), "status": status, "details": details_html, "raw_log": log_entry.strip(), "json_data": json_string, "source": source})
         socketio.emit('update_validator_table', list(validator_results))
 
@@ -6275,17 +6279,17 @@ def _apply_specific_filter_and_emit():
                  data = json.loads(item['json_data'])
                  evt = data.get('eventName')
                  params = data.get('e', {})
-                 
+
                  source = data.get('source', 'firebase')
 
                  # Name Filter
                  if specific_event_name_filters and not any(evt.startswith(f) for f in specific_event_name_filters):
                      continue
-                 
+
                  # Param Validation (Default Params + Default Events)
                  status = "INFO"
                  details = ""
-                 
+
                  required_all = []
                  required_all.extend(default_params)
                  # If user input params, combine with defaults
@@ -6301,13 +6305,13 @@ def _apply_specific_filter_and_emit():
                      missing = sorted(required_set - actual_set)
                      strange = sorted(actual_set - required_set)
                      status = "PASSED" if not missing and not strange else "FAILED"
-                     
+
                      if missing:
                          details += format_param_issue_html("Missing", missing, "text-red-600")
-                     
+
                      if strange:
                          details += format_param_issue_html("Strange", strange, "text-orange-600")
-                     
+
                      # Show full JSON
                      details += format_json_html(params)
                  else:
@@ -7097,18 +7101,18 @@ def adb_log_reader(device_id):
     try:
         subprocess.run([ADB_EXECUTABLE, '-s', device_id, 'logcat', '-c'], creationflags=creation_flags)
         proc = subprocess.Popen([ADB_EXECUTABLE, '-s', device_id, 'logcat'], stdout=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=creation_flags)
-        
+
         for line in iter(proc.stdout.readline, ''):
             if not line: break
             if active_platform != "android":
                 continue
-            
+
             # 1. Process Load Ads (Unity) - ONLY IF RECORDING
             process_load_ads_unity_log(line, device_id)
-            
+
             # 2. Process Load Ads Ext (Metrica) - ONLY IF RECORDING
             process_load_ads_ext_log(line, device_id)
-            
+
             # 3. Process SDK Check
             _process_sdk_check_line(line, device_id)
 
@@ -7123,7 +7127,7 @@ def adb_log_reader(device_id):
 
             # 5.5 Process Firebase Installation ID
             process_installation_id_log(line, device_id)
-            
+
             # 6. Parse Generic Events for Validators
             event_name, params, json_string = find_and_parse_event(line)
             if event_name:
@@ -7258,16 +7262,16 @@ def device_manager():
 
                 output = subprocess.run([ADB_EXECUTABLE, 'devices'], capture_output=True, text=True, creationflags=creation_flags).stdout
                 ids = {l.split('\t')[0] for l in output.strip().split('\n')[1:] if '\tdevice' in l}
-                
+
                 with lock:
                     for did in ids - set(active_log_readers.keys()):
                         t = threading.Thread(target=adb_log_reader, args=(did,), daemon=True)
                         active_log_readers[did] = t
                         t.start()
-                    
+
                     for did in set(active_log_readers.keys()) - ids:
                         del active_log_readers[did]
-                    
+
                     connected_devices_info = [_make_device_info(i, 'android') for i in ids]
                 if connected_devices_info:
                     socketio.emit('device_status', {"connected_devices": connected_devices_info})
@@ -7487,7 +7491,7 @@ def package_log_emitter():
 
 # --- SOCKET HANDLERS ---
 @socketio.on('change_tab')
-def handle_change_tab(data): 
+def handle_change_tab(data):
     # Sync logs for current tab on switch
     if data.get('tab_name') == 'LoadAds': socketio.emit('update_load_ads', list(load_ads_events))
     if data.get('tab_name') == 'LoadAdsExt': socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
@@ -7582,17 +7586,17 @@ def tr(data):
         return
 
     current_state = recording_states[tab_name]
-    
+
     if not current_state["is_recording"]:
         name = data.get('sheet_name', 'Log_Default').strip()
         try:
             res = requests.post(G_SHEET_URL, json={"action": "create_or_get_sheet", "sheet_name": name}, timeout=30)
             current_state.update({"is_recording": True, "current_sheet": res.text})
-        except: 
+        except:
             current_state.update({"is_recording": True, "current_sheet": name}) # Fallback
     else:
         current_state["is_recording"] = False
-    
+
     # Emit status back with tab_name so UI knows which button to update
     socketio.emit('record_status', {
         "tab_name": tab_name,
@@ -7601,7 +7605,7 @@ def tr(data):
     })
 
 @socketio.on('toggle_pause')
-def tp(): 
+def tp():
     global is_paused
     is_paused = not is_paused
     socketio.emit('pause_status', {'is_paused': is_paused})
@@ -7622,7 +7626,7 @@ def cl():
         incomplete_ios_load_ads_ext_logs.clear()
         incomplete_adjust_adrevenue_logs.clear()
         installation_id_state.clear()
-        
+
     socketio.emit('update_load_ads', [])
     socketio.emit('update_load_ads_ext', [])
     socketio.emit('update_validator_table', [])
@@ -7635,7 +7639,7 @@ def cl():
     _emit_sdk_check_results()
 
 @socketio.on('start_validation')
-def val(p): 
+def val(p):
     global required_params, validator_active
     required_params = p or []
     validator_active = True
@@ -7769,7 +7773,7 @@ def refresh():
     # ... trigger others ...
 
 @socketio.on('connect')
-def connect(): 
+def connect():
     socketio.emit('pause_status', {'is_paused': is_paused})
     socketio.emit('validator_status', {'active': validator_active})
     socketio.emit('platform_status', {'platform': active_platform})

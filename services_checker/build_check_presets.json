@@ -1,0 +1,30 @@
+{
+  "C-180-Android": {
+    "platform": "android",
+    "source": "services_checker/build_check_presets.json",
+    "apk_lines": [],
+    "gradle_lines": [],
+    "podfile_lines": []
+  },
+  "C-180-iOS": {
+    "platform": "ios",
+    "source": "services_checker/build_check_presets.json",
+    "apk_lines": [],
+    "gradle_lines": [],
+    "podfile_lines": []
+  },
+  "C-190-Android": {
+    "platform": "android",
+    "source": "services_checker/build_check_presets.json",
+    "apk_lines": [],
+    "gradle_lines": [],
+    "podfile_lines": []
+  },
+  "C-190-iOS": {
+    "platform": "ios",
+    "source": "services_checker/build_check_presets.json",
+    "apk_lines": [],
+    "gradle_lines": [],
+    "podfile_lines": []
+  }
+}

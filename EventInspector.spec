@@ -5,7 +5,12 @@ a = Analysis(
     ['desktop_app.py'],
     pathex=[],
     binaries=[],
-    datas=[('Log_checker.py', '.'), ('Default event + Default Params.xlsx', '.')],
+    datas=[
+        ('Log_checker.py', '.'),
+        ('Default event + Default Params.xlsx', '.'),
+        ('remote_update_config_v250.json', '.'),
+        ('services_checker', 'services_checker'),
+    ],
     hiddenimports=['engineio.async_drivers.threading'],
     hookspath=[],
     hooksconfig={},
