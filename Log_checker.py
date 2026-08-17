@@ -23,6 +23,7 @@ import uuid
 import plistlib
 import tempfile
 import zipfile
+import glob
 try:
     import webview
 except Exception:
@@ -449,6 +450,15 @@ def _load_remote_update_module():
 
 SERVICES_CHECKER_DEFAULT_PORT = 5010
 SERVICES_CHECKER_EXTERNAL_URL_DEFAULT = "http://127.0.0.1:5000"
+SERVICES_CHECKER_APP_RELATIVE_PATH = os.path.join(
+    "Shared drives",
+    "IndieZ - Tester",
+    "Automation & Tools",
+    "Checker",
+    "Services checker",
+    "app.py",
+)
+SERVICES_CHECKER_KEYSTORE_FILENAME = "my-key.keystore"
 _services_checker_lock = threading.Lock()
 _services_checker_state = {
     "module": None,
@@ -461,8 +471,68 @@ _services_checker_state = {
 }
 
 
-def _services_checker_file_candidates():
+def _services_checker_drive_app_candidates():
+    """Find the shared Services Checker app.py before using the bundled copy.
+
+    The shared app owns the matching keystore and bundletool files.  Keep this
+    lookup here as a second line of defence in case a launcher is unavailable
+    on a portable client.
+    """
     candidates = []
+    configured = os.getenv("EVENTINSPECTOR_SERVICES_APP_PATH", "").strip()
+    if configured:
+        candidates.append(os.path.expandvars(os.path.expanduser(configured)))
+
+    if os.name == "nt":
+        roots = [
+            os.getenv("GOOGLE_DRIVE_ROOT", ""),
+            os.getenv("GOOGLE_DRIVE_MOUNT", ""),
+            os.getenv("GDRIVE_ROOT", ""),
+        ]
+        roots.extend(f"{letter}:\\" for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ")
+        profile = os.path.expanduser("~")
+        roots.extend([
+            os.path.join(profile, "Google Drive"),
+            os.path.join(profile, "GoogleDrive"),
+        ])
+        for root in roots:
+            if not root:
+                continue
+            candidates.append(os.path.join(root, SERVICES_CHECKER_APP_RELATIVE_PATH))
+            candidates.append(os.path.join(root, "Google Drive", SERVICES_CHECKER_APP_RELATIVE_PATH))
+    else:
+        cloud_roots = glob.glob(os.path.expanduser("~/Library/CloudStorage/GoogleDrive-*"))
+        cloud_roots.extend([
+            os.path.expanduser("~/Google Drive"),
+            os.path.expanduser("~/GoogleDrive"),
+        ])
+        for root in cloud_roots:
+            candidates.append(os.path.join(root, SERVICES_CHECKER_APP_RELATIVE_PATH))
+
+    seen = set()
+    return [
+        path for path in candidates
+        if path and path not in seen and not seen.add(path) and os.path.isfile(path)
+    ]
+
+
+def _services_checker_launcher_is_drive_aware(path):
+    """Return whether a saved launcher resolves the shared Drive app."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+            source = handle.read(128 * 1024)
+        return (
+            "Shared drives" in source
+            and "IndieZ - Tester" in source
+            and "Services checker" in source
+            and "app.py" in source
+        )
+    except (OSError, UnicodeError):
+        return False
+
+
+def _services_checker_file_candidates():
+    candidates = _services_checker_drive_app_candidates()
     update_dir = os.getenv("EVENTINSPECTOR_UPDATE_DIR")
     if update_dir:
         candidates.append(os.path.join(update_dir, "services_checker", "app.py"))
@@ -483,9 +553,6 @@ def _services_checker_command_candidates():
     configured = os.getenv("EVENTINSPECTOR_SERVICES_COMMAND", "").strip()
     if configured:
         candidates.append(os.path.expanduser(configured))
-    saved_host = _services_checker_saved_host_path()
-    if os.path.isfile(saved_host):
-        candidates.append(saved_host)
     if os.name == "nt":
         candidates.extend([
             os.path.expanduser("~/Desktop/Androidchecker.cmd"),
@@ -493,6 +560,16 @@ def _services_checker_command_candidates():
         ])
     else:
         candidates.append(os.path.expanduser("~/Desktop/AndroidTool.command"))
+
+    # A previously imported host may be stale and still launch the bundled
+    # checker. Prefer the current Drive-aware launchers; keep a saved host as
+    # a fallback only when it also points at the shared app.py.
+    saved_host = _services_checker_saved_host_path()
+    if os.path.isfile(saved_host) and (
+        _services_checker_launcher_is_drive_aware(saved_host)
+        or not _services_checker_drive_app_candidates()
+    ):
+        candidates.append(saved_host)
 
     seen = set()
     return [path for path in candidates if path and not (path in seen or seen.add(path))]
@@ -618,6 +695,21 @@ def _services_checker_ready(url):
         return False
 
 
+def _services_checker_uses_shared_keystore(url):
+    """Identify the Drive-backed host without trusting a generic root page."""
+    try:
+        response = requests.get(f"{url.rstrip('/')}/get_keystore_config", timeout=0.8)
+        if not response.ok:
+            return False
+        payload = response.json()
+        return bool(
+            payload.get("use_hardcoded")
+            and payload.get("filename") == SERVICES_CHECKER_KEYSTORE_FILENAME
+        )
+    except Exception:
+        return False
+
+
 def _find_services_checker_port(preferred=SERVICES_CHECKER_DEFAULT_PORT):
     for port in (preferred,):
         try:
@@ -639,7 +731,11 @@ def _start_services_checker():
             return existing_url
 
         external_url = _services_checker_external_url()
-        if _services_checker_ready(external_url):
+        drive_app_path = next(iter(_services_checker_drive_app_candidates()), "")
+        external_ready = _services_checker_ready(external_url)
+        if external_ready and (
+            not drive_app_path or _services_checker_uses_shared_keystore(external_url)
+        ):
             _services_checker_state.update({
                 "url": external_url,
                 "port": None,
@@ -648,11 +744,16 @@ def _start_services_checker():
             })
             return external_url
 
+        # If port 5000 is occupied by the old bundled service, do not attach
+        # to it. Import the Drive app on the private local port below instead.
+        # This makes Reload self-healing without requiring a client-side shell.
+        force_drive_import = bool(external_ready and drive_app_path)
+
         command_path = next(
             (path for path in _services_checker_command_candidates() if os.path.isfile(path)),
             "",
         )
-        if command_path:
+        if command_path and not force_drive_import:
             log_path = os.path.join(tempfile.gettempdir(), "eventinspector-services-checker.log")
             try:
                 with open(log_path, "ab") as log_handle:
@@ -878,6 +979,10 @@ adrevenue_source_params = {}
 # 8. Dữ liệu cho Tab Price Rotation
 price_rotation_logs = deque(maxlen=MAX_PRICE_ROTATION_LOGS)
 PRICE_ROTATION_PREFIX = "[Ad,RewardedBidding"
+PRICE_ROTATION_PREFIXES = (
+    ("Rewarded", "[Ad,RewardedBidding"),
+    ("Interstitial", "[Ad,InterstitialBidding"),
+)
 
 # 9. Dữ liệu cho Tab SDK Check
 sdk_check_search_list = []
@@ -2089,15 +2194,25 @@ def extract_json_object_from_text(text):
 
 
 def _parse_price_rotation_log(log_entry, device_id):
-    """Parse only logs containing the exact Price Rotation marker."""
+    """Parse exact RewardedBidding and InterstitialBidding markers."""
     raw_log = str(log_entry or "").strip()
-    if not raw_log or PRICE_ROTATION_PREFIX not in raw_log:
+    if not raw_log:
         return None
 
-    marker_start = raw_log.find(PRICE_ROTATION_PREFIX)
-    type_start = marker_start + len(PRICE_ROTATION_PREFIX)
-    if type_start >= len(raw_log) or raw_log[type_start] not in ",]":
+    marker_candidates = []
+    for bidding_name, marker_prefix in PRICE_ROTATION_PREFIXES:
+        marker_start = raw_log.find(marker_prefix)
+        if marker_start == -1:
+            continue
+        type_start = marker_start + len(marker_prefix)
+        if type_start < len(raw_log) and raw_log[type_start] in ",]":
+            marker_candidates.append((marker_start, bidding_name, marker_prefix))
+
+    if not marker_candidates:
         return None
+
+    marker_start, bidding_name, marker_prefix = min(marker_candidates, key=lambda item: item[0])
+    type_start = marker_start + len(marker_prefix)
     marker_end = raw_log.find("]", type_start)
     if marker_end == -1:
         return None
@@ -2105,7 +2220,8 @@ def _parse_price_rotation_log(log_entry, device_id):
     rotation_type = raw_log[type_start:marker_end].strip().lstrip(",").strip()
     if not rotation_type:
         service_text = raw_log[marker_end + 1:].lstrip()
-        rotation_type = "RewardedCap" if service_text.startswith("RewardedCapService") else "RewardedBidding"
+        cap_service = f"{bidding_name}CapService"
+        rotation_type = f"{bidding_name}Cap" if service_text.startswith(cap_service) else f"{bidding_name}Bidding"
     payload_text = raw_log[marker_end + 1:].strip()
     json_text = extract_json_object_from_text(payload_text)
     parsed_json = None
@@ -2121,6 +2237,7 @@ def _parse_price_rotation_log(log_entry, device_id):
     return {
         "device_id": device_id,
         "device_name": get_device_name(device_id),
+        "bidding_name": bidding_name,
         "type": rotation_type,
         "details": details,
         "raw_log": raw_log,
@@ -2608,7 +2725,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(26)</title>
+    <title>Event Inspector v2.5.0(27)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -2685,7 +2802,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(26)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(27)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2746,7 +2863,7 @@ HTML_TEMPLATE = """
                     <button id="tabBtnSpecific" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Specific')">Specific Validator</button>
                     <button id="tabBtnAdRevenue" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('AdRevenue')">Revenue</button>
                     <button id="tabBtnCallbackAd" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('CallbackAd')">CallBack & Ads</button>
-                    <button id="tabBtnPriceRotation" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('PriceRotation')">Rewarded Bidding</button>
+                    <button id="tabBtnPriceRotation" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('PriceRotation')">Bidding</button>
                     <button id="tabBtnSdkCheck" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('SdkCheck')">SDK Check</button>
                     <button id="tabBtnBrightSDK" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('BrightSDK')">BrightSDK</button>
                     <button id="tabBtnPackage" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Package')">Package Logcat</button>
@@ -3071,7 +3188,7 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- TAB 7: Price Rotation -->
+            <!-- TAB 7: Bidding -->
             <div id="tabContentPriceRotation" class="hidden">
                 <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="mb-3 grid grid-cols-1 lg:grid-cols-[1fr_minmax(320px,520px)] gap-4 items-end">
@@ -3105,6 +3222,25 @@ HTML_TEMPLATE = """
                                 <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="priceRotationTypeRewardedCap" name="priceRotationTypeFilter" type="checkbox" value="rewardedcap" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
                                     <span class="ml-2 text-sm text-gray-900">RewardedCap</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationTypeInterstitialCap" name="priceRotationTypeFilter" type="checkbox" value="interstitialcap" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">InterstitialCap</span>
+                                </label>
+                            </div>
+                            <label class="block text-xs font-medium text-gray-700 mt-3">Filter by Ad Type:</label>
+                            <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationAdTypeAll" name="priceRotationAdTypeFilter" type="checkbox" value="all" checked class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">All</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationAdTypeRewarded" name="priceRotationAdTypeFilter" type="checkbox" value="rewarded" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">Rewarded</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationAdTypeInterstitial" name="priceRotationAdTypeFilter" type="checkbox" value="interstitial" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">Interstitial</span>
                                 </label>
                             </div>
                         </div>
@@ -4289,10 +4425,14 @@ HTML_TEMPLATE = """
             lastPriceRotationData = [];
             const filterInput = document.getElementById('priceRotationFilterInput');
             const allTypeFilter = document.getElementById('priceRotationTypeAll');
+            const allAdTypeFilter = document.getElementById('priceRotationAdTypeAll');
             const tbody = document.getElementById('priceRotationTableBody');
             if (filterInput) filterInput.value = '';
             document.querySelectorAll('input[name="priceRotationTypeFilter"]').forEach(input => {
                 input.checked = input === allTypeFilter;
+            });
+            document.querySelectorAll('input[name="priceRotationAdTypeFilter"]').forEach(input => {
+                input.checked = input === allAdTypeFilter;
             });
             if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4">Waiting...</td></tr>';
         }
@@ -4309,11 +4449,16 @@ HTML_TEMPLATE = """
             const selectedTypeFilters = Array.from(document.querySelectorAll('input[name="priceRotationTypeFilter"]:checked'))
                 .map(input => input.value)
                 .filter(value => value !== 'all');
+            const selectedAdTypeFilters = Array.from(document.querySelectorAll('input[name="priceRotationAdTypeFilter"]:checked'))
+                .map(input => input.value)
+                .filter(value => value !== 'all');
             const textFilter = (filterInput?.value || '').toLowerCase();
             const filtered = lastPriceRotationData.filter(res => {
                 if (selectedDevice !== 'all' && res.device_id !== selectedDevice) return false;
                 if (selectedTypeFilters.length > 0 && !selectedTypeFilters.includes((res.type || '').trim().toLowerCase())) return false;
-                if (textFilter && !(res.raw_log || '').toLowerCase().includes(textFilter)) return false;
+                const rawLog = (res.raw_log || '').toLowerCase();
+                if (selectedAdTypeFilters.length > 0 && !selectedAdTypeFilters.some(value => rawLog.includes(value))) return false;
+                if (textFilter && !rawLog.includes(textFilter)) return false;
                 return true;
             });
 
@@ -4338,19 +4483,24 @@ HTML_TEMPLATE = """
         }
 
         document.getElementById('priceRotationFilterInput')?.addEventListener('input', renderPriceRotationTable);
-        document.querySelectorAll('input[name="priceRotationTypeFilter"]').forEach(input => input.addEventListener('change', (event) => {
-            const allInput = document.getElementById('priceRotationTypeAll');
-            const specificInputs = Array.from(document.querySelectorAll('input[name="priceRotationTypeFilter"]'))
-                .filter(item => item !== allInput);
-            if (event.target === allInput) {
-                if (allInput.checked) specificInputs.forEach(item => item.checked = false);
-            } else if (event.target.checked) {
-                allInput.checked = false;
-            } else if (!specificInputs.some(item => item.checked)) {
-                allInput.checked = true;
-            }
-            renderPriceRotationTable();
-        }));
+        function bindPriceRotationCheckboxGroup(inputName, allInputId) {
+            document.querySelectorAll(`input[name="${inputName}"]`).forEach(input => input.addEventListener('change', (event) => {
+                const allInput = document.getElementById(allInputId);
+                const specificInputs = Array.from(document.querySelectorAll(`input[name="${inputName}"]`))
+                    .filter(item => item !== allInput);
+                if (event.target === allInput) {
+                    if (allInput.checked) specificInputs.forEach(item => item.checked = false);
+                } else if (event.target.checked) {
+                    allInput.checked = false;
+                } else if (!specificInputs.some(item => item.checked)) {
+                    allInput.checked = true;
+                }
+                renderPriceRotationTable();
+            }));
+        }
+
+        bindPriceRotationCheckboxGroup('priceRotationTypeFilter', 'priceRotationTypeAll');
+        bindPriceRotationCheckboxGroup('priceRotationAdTypeFilter', 'priceRotationAdTypeAll');
 
         socket.on('update_sdk_check_table', (data) => {
             const tbody = document.getElementById(activePlatform === 'ios' ? 'sdkCheckIosTableBody' : 'sdkCheckTableBody');

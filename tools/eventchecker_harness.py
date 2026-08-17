@@ -554,12 +554,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(26)" in text, "Log_checker.py must be prepared for v2.5.0(26)")
+    _assert("v2.5.0(27)" in text, "Log_checker.py must be prepared for v2.5.0(27)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(26)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(27)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -578,8 +578,13 @@ def test_rewarded_bidding_filter_contract() -> None:
 
 def test_price_rotation_exact_parser() -> None:
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert('onclick="switchTab(\'PriceRotation\')">Rewarded Bidding</button>' in source_text, "Price Rotation tab label must be Rewarded Bidding")
+    _assert('onclick="switchTab(\'PriceRotation\')">Bidding</button>' in source_text, "Price Rotation tab label must be Bidding")
     _assert(source_text.count('id="priceRotationTypeWaterfall"') == 1, "Waterfall filter must exist exactly once")
+    _assert(source_text.count('id="priceRotationTypeInterstitialCap"') == 1, "InterstitialCap filter must exist exactly once")
+    _assert(source_text.count('id="priceRotationAdTypeAll"') == 1, "Ad type All filter must exist exactly once")
+    _assert(source_text.count('id="priceRotationAdTypeRewarded"') == 1, "Rewarded ad type filter must exist exactly once")
+    _assert(source_text.count('id="priceRotationAdTypeInterstitial"') == 1, "Interstitial ad type filter must exist exactly once")
+    _assert('value="rewarded"' in source_text and 'value="interstitial"' in source_text, "Rewarded/Interstitial filters are missing")
     _assert('value="waterfall"' in source_text, "Waterfall filter value is missing")
     valid = 'Unity : [Ad,RewardedBidding, CloudX] Raise: {"act":"demandFailedObserved","error":"WinnerBid not found"}'
     parsed = lc._parse_price_rotation_log(valid, "device-price")
@@ -595,7 +600,18 @@ def test_price_rotation_exact_parser() -> None:
     plain = lc._parse_price_rotation_log('Unity : [Ad,RewardedBidding] Raise: {"act":"bid"}', "device-price")
     _assert(plain is not None, "Price Rotation parser must accept a plain RewardedBidding marker")
     _assert_equal(plain["type"], "RewardedBidding", "A plain marker must use the RewardedBidding type")
+    interstitial_raw = 'Unity : [Ad,InterstitialBidding, LevelPlay] Raise: {"act":"bid"}'
+    interstitial = lc._parse_price_rotation_log(interstitial_raw, "device-price")
+    _assert(interstitial is not None, "Price Rotation parser must accept the InterstitialBidding marker")
+    _assert_equal(interstitial["type"], "LevelPlay", "Interstitial type should come from the marker")
+    interstitial_cap = lc._parse_price_rotation_log('Unity : [Ad,InterstitialBidding] InterstitialCapService: {"act":"cap"}', "device-price")
+    _assert(interstitial_cap is not None, "Price Rotation parser must accept the InterstitialCapService marker")
+    _assert_equal(interstitial_cap["type"], "InterstitialCap", "InterstitialCapService must use the InterstitialCap type")
+    interstitial_plain = lc._parse_price_rotation_log('Unity : [Ad,InterstitialBidding] Raise: {"act":"bid"}', "device-price")
+    _assert(interstitial_plain is not None, "Price Rotation parser must accept a plain InterstitialBidding marker")
+    _assert_equal(interstitial_plain["type"], "InterstitialBidding", "A plain marker must use the InterstitialBidding type")
     _assert(lc._parse_price_rotation_log(valid.replace("[Ad,RewardedBidding,", "[Ad,RewardedBiddingX,"), "device-price") is None, "Price Rotation marker must be exact")
+    _assert(lc._parse_price_rotation_log(interstitial_raw.replace("[Ad,InterstitialBidding,", "[Ad,InterstitialBiddingX,"), "device-price") is None, "Interstitial marker must be exact")
 
 
 def test_release_payload_sync() -> None:
@@ -610,11 +626,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-17-1-2.5.0-26", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-17-1-2.5.0-27", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(26\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(27\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -707,9 +723,9 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-17-1-2.5.0-26", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-17-1-2.5.0-27", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 26, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 27, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
@@ -824,7 +840,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-17-1-2.5.0-26' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-17-1-2.5.0-27' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
@@ -839,6 +855,9 @@ def test_services_checker_bridge_contract() -> None:
         _assert("EVENTINSPECTOR_SERVICES_COMMAND" in payload_source, "Services Checker command override missing")
         _assert("AndroidTool.command" in payload_source, "Drive launcher fallback missing")
         _assert("Androidchecker.cmd" in payload_source, "Windows Drive launcher fallback missing")
+        _assert("SERVICES_CHECKER_APP_RELATIVE_PATH" in payload_source, "shared Drive app path resolver missing")
+        _assert("_services_checker_uses_shared_keystore" in payload_source, "Drive keystore source check missing")
+        _assert("force_drive_import" in payload_source, "stale Services Checker source must be bypassed")
         _assert("subprocess.Popen" in payload_source, "Services Checker launcher missing")
         _assert("_services_checker_ready" in payload_source, "Services Checker readiness check missing")
         _assert("_services_checker_saved_host_path" in payload_source, "saved host override missing")
@@ -847,6 +866,12 @@ def test_services_checker_bridge_contract() -> None:
         _assert("servicesCheckerReplaceHostBtn" in payload_source, "host replacement UI missing")
         _assert("servicesCheckerReloadBtn" in payload_source, "Services Checker reload UI missing")
         _assert('"services_checker", "app.py"' in payload_source, "bundled Services Checker fallback missing")
+
+    windows_launcher = Path.home() / "Downloads" / "Androidchecker.cmd"
+    if windows_launcher.exists():
+        launcher_source = windows_launcher.read_text(encoding="utf-8", errors="ignore")
+        _assert("Shared drives\\IndieZ - Tester" in launcher_source, "Windows launcher must resolve the shared Drive app")
+        _assert("SERVICE_APP_PATH" in launcher_source, "Windows launcher override missing")
 
     service_source = (ROOT / "services_checker" / "app.py").read_text(encoding="utf-8")
     _assert("value.join('\\\\n')" in service_source, "bundled Services Checker newline escape is invalid")

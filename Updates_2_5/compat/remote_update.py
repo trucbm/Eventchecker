@@ -412,7 +412,7 @@ def check_for_updates(force_refresh=False):
             download_sha256 = item.get("compat_sha256") or sha256
             # Keep the old shell on the compatibility bridge. If it receives
             # the native v2.5 payload, its numeric build check would reject
-            # the visible v2.5.0(26) file as older than v2.4.0(25).
+            # the visible v2.5.0(27) file as older than v2.4.0(25).
             if rel_path == "Log_checker.py":
                 candidate_urls = [
                     candidate_url
