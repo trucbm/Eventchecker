@@ -56,6 +56,16 @@
       "sha256": "e7ad4e6e7051b8232ceed5286500d0ba61b8c947bcd18974862c6987c709e540"
     },
     {
+      "path": "services_checker/bundletool-all-1.18.1.jar",
+      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/bundletool-all-1.18.1.jar",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/bundletool-all-1.18.1.jar",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/bundletool-all-1.18.1.jar",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/bundletool-all-1.18.1.jar"
+      ],
+      "sha256": "675786493983787ffa11550bdb7c0715679a44e1643f3ff980a529e9c822595c"
+    },
+    {
       "path": "services_checker/build_check_presets.json",
       "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/build_check_presets.json",
       "urls": [
