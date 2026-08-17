@@ -18,6 +18,7 @@ It does not start the UI or connect to devices.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -83,24 +84,24 @@ def _payload_path_candidates(manifest_path: Path, item: dict) -> List[Path]:
     if not rel_path:
         return []
     payload_dir = manifest_path.parent
-    candidates = [payload_dir / rel_path, ROOT / rel_path]
+    candidates = [ROOT / rel_path, payload_dir / rel_path]
+    if item.get("compat_sha256"):
+        candidates.append(ROOT / "Updates_2_5" / "compat" / rel_path)
     return candidates
 
 
 def _valid_payload_urls(manifest_path: Path, rel_path: str, payload_path: Path) -> set[str]:
     repo_rel = payload_path.relative_to(ROOT).as_posix()
+    branch = "2.5.0" if manifest_path.parent.name == "Updates_2_5" else "main"
     return {
-        f"https://github.com/trucbm/Eventchecker/raw/main/{repo_rel}",
-        f"https://raw.githubusercontent.com/trucbm/Eventchecker/main/{repo_rel}",
-        f"https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/{repo_rel}",
+        f"https://github.com/trucbm/Eventchecker/raw/{branch}/{repo_rel}",
+        f"https://raw.githubusercontent.com/trucbm/Eventchecker/{branch}/{repo_rel}",
+        f"https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@{branch}/{repo_rel}",
     }
 
 
 def _manifest_paths() -> List[Path]:
-    candidates = [
-        ROOT / "Updates_2_3" / "remote_manifest.json",
-        ROOT / "Updates_2_4" / "remote_manifest.json",
-    ]
+    candidates = [ROOT / "Updates_2_5" / "remote_manifest.json"]
     return [path for path in candidates if path.exists()]
 
 
@@ -553,7 +554,14 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.4.0(25)" in text, "Log_checker.py must be prepared for release 25")
+    _assert("v2.5.0(26)" in text, "Log_checker.py must be prepared for v2.5.0(26)")
+    compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
+        encoding="utf-8", errors="ignore"
+    )
+    _assert(
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(26)"' in compatibility_text,
+        "compatibility payload must remain visible to legacy numeric update checks",
+    )
 
 
 def test_rewarded_bidding_filter_contract() -> None:
@@ -592,13 +600,22 @@ def test_price_rotation_exact_parser() -> None:
 
 def test_release_payload_sync() -> None:
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    payload_text = (ROOT / "Updates_2_3" / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-
-    _assert_equal(payload_text, source_text, "source and release payload must be byte-for-byte identical")
+    manifest_path = ROOT / "Updates_2_5" / "remote_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    log_item = next(item for item in manifest["files"] if item.get("path") == "Log_checker.py")
+    _assert_equal(_sha256_file(ROOT / "Log_checker.py"), log_item["sha256"], "source/release Log_checker.py drift detected")
+    compatibility_path = ROOT / "Updates_2_5" / "compat" / "Log_checker.py"
+    _assert_equal(
+        _sha256_file(compatibility_path),
+        log_item["compat_sha256"],
+        "compatibility Log_checker.py drift detected",
+    )
+    _assert_equal(manifest["version"], "2026-08-17-1-2.5.0-26", "v2.5 release manifest version changed")
 
     markers = {
-        "release_badge": r"v2\.4\.0\((\d+)\)",
-        "html_title": r"<title>([^<]+)</title>",
+        "release_badge": r"v2\.5\.0\((\d+)\)",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(26\)</title>",
+        "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
         "check_update_call": r"result = remote_update\.check_for_updates\(\)",
@@ -606,14 +623,7 @@ def test_release_payload_sync() -> None:
 
     for label, pattern in markers.items():
         source_match = re.search(pattern, source_text)
-        payload_match = re.search(pattern, payload_text)
         _assert(source_match is not None, f"source missing {label}")
-        _assert(payload_match is not None, f"payload missing {label}")
-        _assert_equal(
-            source_match.groups() or (source_match.group(0),),
-            payload_match.groups() or (payload_match.group(0),),
-            f"source/payload drift detected for {label}",
-        )
 
 
 def test_update_candidate_does_not_downgrade() -> None:
@@ -641,14 +651,37 @@ def test_update_candidate_does_not_downgrade() -> None:
     )
 
 
+def test_legacy_v24025_bridge_contract() -> None:
+    bridge_path = ROOT / "Updates_2_3" / "remote_manifest.json"
+    bridge = json.loads(bridge_path.read_text(encoding="utf-8"))
+    version = str(bridge.get("version") or "")
+    match = re.search(r"2\.5\.0-(\d+)$", version)
+    _assert(match is not None, "legacy bridge must target a concrete v2.5 build")
+    _assert(int(match.group(1)) > 25, "legacy v2.4.0(25) clients must see a newer numeric build")
+
+    files = {str(item.get("path")): item for item in bridge.get("files") or []}
+    for rel_path in ("Log_checker.py", "remote_update.py"):
+        item = files.get(rel_path)
+        _assert(item is not None, f"legacy bridge missing {rel_path}")
+        _assert("/Updates_2_5/compat/" in str(item.get("url")), f"legacy bridge must use compat {rel_path}")
+        compat_path = ROOT / "Updates_2_5" / "compat" / rel_path
+        _assert_equal(
+            _sha256_file(compat_path),
+            item.get("sha256"),
+            f"legacy bridge hash mismatch for compat {rel_path}",
+        )
+
+
 def test_update_flow_legacy_to_v25() -> None:
     import remote_update as updater
 
-    manifest_bytes = (ROOT / "Updates_2_3" / "remote_manifest.json").read_bytes()
+    manifest_path = ROOT / "Updates_2_5" / "remote_manifest.json"
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
     payloads = {
-        "Log_checker.py": (ROOT / "Updates_2_3" / "Log_checker.py").read_bytes(),
-        "remote_update.py": (ROOT / "remote_update.py").read_bytes(),
-        "sdk_check_presets.json": (ROOT / "sdk_check_presets.json").read_bytes(),
+        str(item["path"]): (ROOT / str(item["path"])).read_bytes()
+        for item in manifest.get("files") or []
+        if item.get("path")
     }
     original_home = os.environ.get("HOME")
     original_bundle_build = os.environ.get("EVENTINSPECTOR_BUNDLED_BUILD")
@@ -658,7 +691,7 @@ def test_update_flow_legacy_to_v25() -> None:
     try:
         with tempfile.TemporaryDirectory(prefix="eventinspector_harness_") as temp_home:
             os.environ["HOME"] = temp_home
-            os.environ["EVENTINSPECTOR_BUNDLED_BUILD"] = "47"
+            os.environ["EVENTINSPECTOR_BUNDLED_BUILD"] = "1"
             os.environ["EVENTINSPECTOR_BUNDLED_BUILD_SOURCE"] = "detected"
 
             def fake_download_first(_urls, _timeout):
@@ -673,15 +706,72 @@ def test_update_flow_legacy_to_v25() -> None:
             updater._download_verified = fake_download_verified
 
             first = updater.check_for_updates(force_refresh=True)
-            _assert_equal(first.get("status"), "updated", "legacy v2.3.0(47) client must prepare v2.4.0(25) payload")
-            _assert_equal(first.get("version"), "2026-08-14-1-2.4.0-55", "prepared payload compatibility version mismatch")
+            _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
+            _assert_equal(first.get("version"), "2026-08-17-1-2.5.0-26", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 55, "prepared payload compatibility build mismatch")
+            _assert_equal(prepared.get("build"), 26, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
+            _assert(
+                os.path.exists(os.path.join(prepared["update_dir"], "services_checker", "bundletool-all-1.18.1.jar")),
+                "prepared bundletool payload missing",
+            )
 
             second = updater.check_for_updates()
-            _assert_equal(second.get("status"), "up_to_date", "same v2.4.0(25) payload must not download repeatedly")
+            _assert_equal(second.get("status"), "up_to_date", "same v2.5 payload must not download repeatedly")
+
+        # The bridge file is what an already installed v2.4 client executes
+        # after the first handoff. It must verify compat hashes on repeat.
+        compat_spec = importlib.util.spec_from_file_location(
+            "eventinspector_compat_update",
+            ROOT / "Updates_2_5" / "compat" / "remote_update.py",
+        )
+        _assert(compat_spec is not None and compat_spec.loader is not None, "compat updater could not be loaded")
+        compat = importlib.util.module_from_spec(compat_spec)
+        compat_spec.loader.exec_module(compat)
+        with tempfile.TemporaryDirectory(prefix="eventinspector_compat_harness_") as compat_home:
+            os.environ["HOME"] = compat_home
+            os.environ["EVENTINSPECTOR_BUNDLED_BUILD"] = "26"
+            compat_downloads = []
+
+            def compat_download_first(_urls, _timeout):
+                return manifest_bytes, "harness://v250-manifest"
+
+            def compat_download_verified(urls, _timeout, _expected_sha256=""):
+                if any("/compat/Log_checker.py" in url for url in urls):
+                    rel_path = "Updates_2_5/compat/Log_checker.py"
+                    data = (ROOT / rel_path).read_bytes()
+                elif any("/compat/remote_update.py" in url for url in urls):
+                    rel_path = "Updates_2_5/compat/remote_update.py"
+                    data = (ROOT / rel_path).read_bytes()
+                else:
+                    rel_path = next(
+                        (path for path in payloads if any(url.endswith("/" + path) for url in urls)),
+                        None,
+                    )
+                    _assert(rel_path is not None, f"unexpected compat payload URL list: {urls}")
+                    data = payloads[rel_path]
+                compat_downloads.append(rel_path)
+                return data, f"harness://{rel_path}"
+
+            original_compat_first = compat._download_first
+            original_compat_verified = compat._download_verified
+            compat._download_first = compat_download_first
+            compat._download_verified = compat_download_verified
+            try:
+                bridge_first = compat.check_for_updates(force_refresh=True)
+                _assert_equal(bridge_first.get("status"), "updated", "v2.4 bridge must bootstrap v2.5")
+                first_download_count = len(compat_downloads)
+                bridge_second = compat.check_for_updates()
+                _assert_equal(bridge_second.get("status"), "up_to_date", "v2.4 bridge must not download repeatedly")
+                _assert_equal(
+                    len(compat_downloads),
+                    first_download_count,
+                    "v2.4 bridge downloaded payload again after reaching up_to_date",
+                )
+            finally:
+                compat._download_first = original_compat_first
+                compat._download_verified = original_compat_verified
     finally:
         updater._download_first = original_download_first
         updater._download_verified = original_download_verified
@@ -734,10 +824,46 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-14-1-2.4.0-55' in text, "windows recovery script must target the current compatibility sequence")
-    _assert('remote_manifest.json' in text, "windows recovery script must seed the current manifest")
+    _assert('TARGET_VERSION=2026-08-17-1-2.5.0-26' in text, "windows recovery script must target the current release")
+    _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
+    _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
+    _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
     legacy_scripts = sorted((ROOT / "tools").glob("bootstrap_windows_to_v*.bat"))
     _assert(not legacy_scripts, f"remove legacy Windows bootstrap scripts: {[p.name for p in legacy_scripts]}")
+
+
+def test_services_checker_bridge_contract() -> None:
+    source = (ROOT / "Log_checker.py").read_text(encoding="utf-8")
+    compat_source = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(encoding="utf-8")
+    for payload_source in (source, compat_source):
+        _assert("EVENTINSPECTOR_SERVICES_COMMAND" in payload_source, "Services Checker command override missing")
+        _assert("AndroidTool.command" in payload_source, "Drive launcher fallback missing")
+        _assert("Androidchecker.cmd" in payload_source, "Windows Drive launcher fallback missing")
+        _assert("subprocess.Popen" in payload_source, "Services Checker launcher missing")
+        _assert("_services_checker_ready" in payload_source, "Services Checker readiness check missing")
+        _assert("_services_checker_saved_host_path" in payload_source, "saved host override missing")
+        _assert("/api/services-checker/host" in payload_source, "host replacement API missing")
+        _assert("/api/services-checker/reload" in payload_source, "Services Checker reload API missing")
+        _assert("servicesCheckerReplaceHostBtn" in payload_source, "host replacement UI missing")
+        _assert("servicesCheckerReloadBtn" in payload_source, "Services Checker reload UI missing")
+        _assert('"services_checker", "app.py"' in payload_source, "bundled Services Checker fallback missing")
+
+    service_source = (ROOT / "services_checker" / "app.py").read_text(encoding="utf-8")
+    _assert("value.join('\\\\n')" in service_source, "bundled Services Checker newline escape is invalid")
+
+
+def test_native_download_contract() -> None:
+    source = (ROOT / "desktop_app.py").read_text(encoding="utf-8")
+    configure_marker = "webview.settings['ALLOW_DOWNLOADS'] = True"
+    _assert(configure_marker in source, "native WebView downloads must be enabled")
+    configure_index = source.index("_configure_webview_downloads()")
+    window_index = source.index("webview.create_window(")
+    _assert(configure_index < window_index, "download setting must be applied before creating the WebView")
+
+    service_path = ROOT / "services_checker" / "app.py"
+    service_source = service_path.read_text(encoding="utf-8", errors="ignore")
+    _assert("@app.route('/download/<filename>')" in service_source, "Services Checker download route is missing")
+    _assert("as_attachment=True" in service_source, "Services Checker download route must return an attachment")
 
 
 TESTS: List[Callable[[], None]] = [
@@ -756,9 +882,12 @@ TESTS: List[Callable[[], None]] = [
     test_price_rotation_exact_parser,
     test_release_payload_sync,
     test_update_candidate_does_not_downgrade,
+    test_legacy_v24025_bridge_contract,
     test_update_flow_legacy_to_v25,
     test_build_scripts_clean_outputs,
     test_windows_update_recovery_script,
+    test_services_checker_bridge_contract,
+    test_native_download_contract,
 ]
 
 

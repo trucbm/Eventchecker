@@ -56,6 +56,7 @@ pyinstaller --noconfirm --clean --windowed \
   --hidden-import "engineio.async_drivers.threading" \
   --add-data "Log_checker.py:." \
   --add-data "Default event + Default Params.xlsx:." \
+  --add-data "sdk_check_presets.json:." \
   --add-data "remote_update_config_v250.json:." \
   --add-data "services_checker:services_checker" \
   --icon assets/app.icns --name "EventInspector" desktop_app.py

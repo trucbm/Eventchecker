@@ -2901,7 +2901,7 @@ HTML_TEMPLATE = """
         }
 
         function presetLines(value) {
-            if (Array.isArray(value)) return value.join('\n');
+            if (Array.isArray(value)) return value.join('\\n');
             return typeof value === 'string' ? value : '';
         }
 

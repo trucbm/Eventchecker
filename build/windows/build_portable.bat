@@ -42,6 +42,7 @@ pyinstaller --noconfirm --clean --windowed --icon assets\app.ico --name "EventIn
   --hidden-import "PySide6.QtWebEngineWidgets" ^
   --hidden-import "shiboken6" ^
   --add-data "Default event + Default Params.xlsx;." ^
+  --add-data "sdk_check_presets.json;." ^
   --add-data "remote_update_config_v250.json;." ^
   --add-data "services_checker;services_checker" ^
   desktop_app.py

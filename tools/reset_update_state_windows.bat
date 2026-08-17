@@ -1,145 +1,85 @@
 @echo off
 setlocal
 
-rem Official Windows update recovery/bootstrap for the current release.
-rem Use this when a client machine is stuck on an old portable build or says
-rem "Already up to date" while still showing an older UI/runtime.
+rem Official Windows update reset for the v2.5.0 channel.
+rem Use this only while Event Inspector is fully closed.
 
 set "APP_SUPPORT_DIR=%LOCALAPPDATA%\EventInspector"
-set "STATE_FILE=%APP_SUPPORT_DIR%\update_state_v230.json"
-set "STATE_FILE_V240=%APP_SUPPORT_DIR%\update_state_v240.json"
-set "CONFIG_FILE=%APP_SUPPORT_DIR%\remote_update_config_v230.json"
-set "CONFIG_FILE_V240=%APP_SUPPORT_DIR%\remote_update_config_v240.json"
-set "UPDATES_DIR=%APP_SUPPORT_DIR%\updates_v230"
-set "UPDATES_DIR_V240=%APP_SUPPORT_DIR%\updates_v240"
-set "MANIFEST_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json"
-set "LOG_CHECKER_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/Log_checker.py"
-set "REMOTE_UPDATE_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/remote_update.py"
-set "SDK_PRESETS_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/sdk_check_presets.json"
-set "TARGET_VERSION=2026-08-14-1-2.4.0-55"
+set "MANIFEST_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/remote_manifest.json"
+set "TARGET_VERSION=2026-08-17-1-2.5.0-26"
+set "UPDATES_DIR_V250=%APP_SUPPORT_DIR%\updates_v250"
 
-echo Event Inspector Windows update bootstrap
-echo Target release: v2.4.0(25)
+echo Event Inspector update reset (Windows)
+echo Target release: v2.5.0(26)
 echo Target folder: %APP_SUPPORT_DIR%
 echo.
-echo IMPORTANT: close Event Inspector before running this script.
+echo Make sure Event Inspector is fully closed before continuing.
 echo.
 
 if not exist "%APP_SUPPORT_DIR%" mkdir "%APP_SUPPORT_DIR%"
 
-if exist "%STATE_FILE%" (
-  del /f /q "%STATE_FILE%"
-  echo Removed: %STATE_FILE%
-) else (
-  echo Skip (not found): %STATE_FILE%
+for %%C in (v230 v240 v250) do (
+  if exist "%APP_SUPPORT_DIR%\update_state_%%C.json" (
+    del /f /q "%APP_SUPPORT_DIR%\update_state_%%C.json"
+    echo Removed: %APP_SUPPORT_DIR%\update_state_%%C.json
+  ) else (
+    echo Skip (not found): %APP_SUPPORT_DIR%\update_state_%%C.json
+  )
+  if exist "%APP_SUPPORT_DIR%\remote_update_config_%%C.json" (
+    del /f /q "%APP_SUPPORT_DIR%\remote_update_config_%%C.json"
+    echo Removed: %APP_SUPPORT_DIR%\remote_update_config_%%C.json
+  ) else (
+    echo Skip (not found): %APP_SUPPORT_DIR%\remote_update_config_%%C.json
+  )
+  if exist "%APP_SUPPORT_DIR%\updates_%%C" (
+    rmdir /s /q "%APP_SUPPORT_DIR%\updates_%%C"
+    echo Removed: %APP_SUPPORT_DIR%\updates_%%C
+  ) else (
+    echo Skip (not found): %APP_SUPPORT_DIR%\updates_%%C
+  )
+  if exist "%APP_SUPPORT_DIR%\updates_%%C_tmp" (
+    rmdir /s /q "%APP_SUPPORT_DIR%\updates_%%C_tmp"
+    echo Removed: %APP_SUPPORT_DIR%\updates_%%C_tmp
+  ) else (
+    echo Skip (not found): %APP_SUPPORT_DIR%\updates_%%C_tmp
+  )
 )
-
-if exist "%STATE_FILE_V240%" (
-  del /f /q "%STATE_FILE_V240%"
-  echo Removed: %STATE_FILE_V240%
-) else (
-  echo Skip (not found): %STATE_FILE_V240%
-)
-
-if exist "%UPDATES_DIR%" (
-  rmdir /s /q "%UPDATES_DIR%"
-  echo Removed: %UPDATES_DIR%
-) else (
-  echo Skip (not found): %UPDATES_DIR%
-)
-
-if exist "%UPDATES_DIR_V240%" (
-  rmdir /s /q "%UPDATES_DIR_V240%"
-  echo Removed: %UPDATES_DIR_V240%
-) else (
-  echo Skip (not found): %UPDATES_DIR_V240%
-)
-
-mkdir "%UPDATES_DIR%" >nul 2>nul
-mkdir "%UPDATES_DIR_V240%" >nul 2>nul
-
-echo Downloading latest update payload...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBasicParsing '%LOG_CHECKER_URL%' -OutFile '%UPDATES_DIR%\Log_checker.py'"
-if errorlevel 1 goto :download_failed
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBasicParsing '%REMOTE_UPDATE_URL%' -OutFile '%UPDATES_DIR%\remote_update.py'"
-if errorlevel 1 goto :download_failed
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-WebRequest -UseBasicParsing '%SDK_PRESETS_URL%' -OutFile '%UPDATES_DIR%\sdk_check_presets.json'"
-if errorlevel 1 goto :download_failed
-echo Downloaded: %UPDATES_DIR%\Log_checker.py
-echo Downloaded: %UPDATES_DIR%\remote_update.py
-echo Downloaded: %UPDATES_DIR%\sdk_check_presets.json
 
 (
   echo {
   echo   "enabled": true,
   echo   "manifest_url": "%MANIFEST_URL%",
   echo   "manifest_urls": [
-  echo     "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json",
-  echo     "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_3/remote_manifest.json",
-  echo     "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json"
+  echo     "%MANIFEST_URL%",
+  echo     "https://github.com/trucbm/Eventchecker/raw/2.5.0/Updates_2_5/remote_manifest.json",
+  echo     "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/remote_manifest.json"
   echo   ],
-  echo   "timeout_sec": 10,
+  echo   "timeout_sec": 15,
   echo   "min_interval_sec": 0
   echo }
-) > "%CONFIG_FILE%"
-echo Wrote: %CONFIG_FILE%
-
-(
-  echo {
-  echo   "enabled": true,
-  echo   "manifest_url": "%MANIFEST_URL%",
-  echo   "manifest_urls": [
-  echo     "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json",
-  echo     "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_3/remote_manifest.json",
-  echo     "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json"
-  echo   ],
-  echo   "timeout_sec": 10,
-  echo   "min_interval_sec": 0
-  echo }
-) > "%CONFIG_FILE_V240%"
-echo Wrote: %CONFIG_FILE_V240%
+) > "%APP_SUPPORT_DIR%\remote_update_config_v250.json"
+echo Wrote: %APP_SUPPORT_DIR%\remote_update_config_v250.json
 
 (
   echo {
   echo   "last_check": 0,
   echo   "version": "%TARGET_VERSION%",
-  echo   "update_dir": "%UPDATES_DIR:\=\\%",
+  echo   "update_dir": "%UPDATES_DIR_V250:\=\\%",
   echo   "manifest_url": "%MANIFEST_URL%",
   echo   "files": [
   echo     "Log_checker.py",
   echo     "remote_update.py",
-  echo     "sdk_check_presets.json"
+  echo     "sdk_check_presets.json",
+  echo     "remote_update_config_v250.json",
+  echo     "services_checker/app.py",
+  echo     "services_checker/bundletool-all-1.18.1.jar",
+  echo     "services_checker/build_check_presets.json"
   echo   ]
   echo }
-) > "%STATE_FILE%"
-echo Wrote: %STATE_FILE%
-
-(
-  echo {
-  echo   "last_check": 0,
-  echo   "version": "%TARGET_VERSION%",
-  echo   "update_dir": "%UPDATES_DIR_V240:\=\\%",
-  echo   "manifest_url": "%MANIFEST_URL%",
-  echo   "files": [
-  echo     "Log_checker.py",
-  echo     "remote_update.py",
-  echo     "sdk_check_presets.json"
-  echo   ]
-  echo }
-) > "%STATE_FILE_V240%"
-echo Wrote: %STATE_FILE_V240%
+) > "%APP_SUPPORT_DIR%\update_state_v250.json"
+echo Wrote: %APP_SUPPORT_DIR%\update_state_v250.json
 
 echo.
-echo Done.
-echo Next steps:
-echo 1. Make sure Event Inspector is fully closed before running this script
-echo 2. Open Event Inspector again
-echo 3. Tool should load the prepared update immediately
-echo 4. If needed, press Check Update after the new version is open
+echo Done. Open Event Inspector and press Check Update once.
 pause
 exit /b 0
-
-:download_failed
-echo Failed to download latest update payload.
-pause
-exit /b 1

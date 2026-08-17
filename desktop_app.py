@@ -163,6 +163,13 @@ def _pick_server_port(host, preferred_port):
     return port
 
 
+def _configure_webview_downloads():
+    """Allow attachment responses such as generated APKs to open the save flow."""
+    # pywebview defaults this to False, which makes an <a download> link appear
+    # clickable but silently ignore the download in the native app window.
+    webview.settings['ALLOW_DOWNLOADS'] = True
+
+
 def main():
     log_path = _setup_logging()
     port = _pick_server_port(HOST, PORT)
@@ -232,6 +239,7 @@ def main():
         logging.error(message)
         raise RuntimeError(message)
 
+    _configure_webview_downloads()
     webview.create_window(
         "Event Inspector",
         f"http://{HOST}:{port}",

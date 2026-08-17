@@ -18,6 +18,7 @@ import logging
 import sqlite3
 import socket
 import platform
+import signal
 import uuid
 import plistlib
 import tempfile
@@ -30,7 +31,7 @@ from pathlib import Path
 from queue import Empty, Queue
 
 # Compatibility marker for the 2.4 desktop shell. The visible app version
-# remains v2.5.0(1); this marker lets old shells accept the bridge payload.
+# remains v2.5.0(26); this marker documents the legacy handoff build.
 LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(26)"
 
 # Khởi tạo ứng dụng Flask và SocketIO
@@ -451,11 +452,15 @@ def _load_remote_update_module():
 
 
 SERVICES_CHECKER_DEFAULT_PORT = 5010
+SERVICES_CHECKER_EXTERNAL_URL_DEFAULT = "http://127.0.0.1:5000"
 _services_checker_lock = threading.Lock()
 _services_checker_state = {
     "module": None,
     "thread": None,
     "port": None,
+    "url": None,
+    "process": None,
+    "source": "",
     "error": "",
 }
 
@@ -477,6 +482,144 @@ def _services_checker_file_candidates():
     return [path for path in candidates if path and not (path in seen or seen.add(path))]
 
 
+def _services_checker_command_candidates():
+    candidates = []
+    configured = os.getenv("EVENTINSPECTOR_SERVICES_COMMAND", "").strip()
+    if configured:
+        candidates.append(os.path.expanduser(configured))
+    saved_host = _services_checker_saved_host_path()
+    if os.path.isfile(saved_host):
+        candidates.append(saved_host)
+    if os.name == "nt":
+        candidates.extend([
+            os.path.expanduser("~/Desktop/Androidchecker.cmd"),
+            os.path.expanduser("~/Downloads/Androidchecker.cmd"),
+        ])
+    else:
+        candidates.append(os.path.expanduser("~/Desktop/AndroidTool.command"))
+
+    seen = set()
+    return [path for path in candidates if path and not (path in seen or seen.add(path))]
+
+
+def _services_checker_saved_host_path():
+    filename = "Androidchecker.cmd" if os.name == "nt" else "AndroidTool.command"
+    return os.path.join(_user_data_dir(), "services_checker_host", filename)
+
+
+def _services_checker_host_status():
+    path = _services_checker_saved_host_path()
+    return {
+        "saved": os.path.isfile(path),
+        "filename": os.path.basename(path),
+    }
+
+
+def _save_services_checker_host(upload):
+    filename = os.path.basename(upload.filename or "")
+    suffix = os.path.splitext(filename)[1].lower()
+    if suffix not in {".command", ".sh", ".cmd", ".bat"}:
+        raise ValueError("host_file_must_be_command_or_batch_script")
+
+    target_dir = os.path.dirname(_services_checker_saved_host_path())
+    os.makedirs(target_dir, exist_ok=True)
+    target = _services_checker_saved_host_path()
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="host_",
+            suffix=suffix,
+            dir=target_dir,
+            delete=False,
+        ) as temp_file:
+            temp_path = temp_file.name
+        upload.save(temp_path)
+        if os.path.getsize(temp_path) > 2 * 1024 * 1024:
+            raise ValueError("host_file_too_large")
+        if os.name != "nt":
+            os.chmod(temp_path, 0o755)
+        os.replace(temp_path, target)
+        return target
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
+def _stop_services_checker_process(process):
+    if not process or process.poll() is not None:
+        return
+
+    try:
+        if os.name == "nt":
+            process.terminate()
+        else:
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+    except (OSError, ProcessLookupError):
+        return
+
+    deadline = time.time() + 5
+    while time.time() < deadline and process.poll() is None:
+        time.sleep(0.1)
+
+    if process.poll() is None:
+        try:
+            if os.name == "nt":
+                process.kill()
+            else:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+
+
+def _reload_services_checker():
+    with _services_checker_lock:
+        owned_process = _services_checker_state.get("process")
+        _stop_services_checker_process(owned_process)
+        restarted = owned_process is not None
+        _services_checker_state.update({
+            "module": None,
+            "thread": None,
+            "port": None,
+            "url": None,
+            "process": None,
+            "source": "",
+            "error": "",
+        })
+
+    if restarted:
+        deadline = time.time() + 8
+        external_url = _services_checker_external_url()
+        while time.time() < deadline and _services_checker_ready(external_url):
+            time.sleep(0.15)
+
+    return _start_services_checker(), restarted
+
+
+def _services_checker_external_url():
+    return os.getenv(
+        "EVENTINSPECTOR_SERVICES_CHECKER_URL",
+        SERVICES_CHECKER_EXTERNAL_URL_DEFAULT,
+    ).strip().rstrip("/")
+
+
+def _services_checker_ready(url):
+    try:
+        response = requests.get(f"{url.rstrip('/')}/", timeout=0.8)
+        if not response.ok:
+            return False
+        body = response.text.lower()
+        return any(marker in body for marker in (
+            "apk-upload-form",
+            "aab-converter-upload-form",
+            "services checker",
+        ))
+    except Exception:
+        return False
+
+
 def _find_services_checker_port(preferred=SERVICES_CHECKER_DEFAULT_PORT):
     for port in (preferred,):
         try:
@@ -493,18 +636,78 @@ def _find_services_checker_port(preferred=SERVICES_CHECKER_DEFAULT_PORT):
 
 def _start_services_checker():
     with _services_checker_lock:
-        existing_port = _services_checker_state.get("port")
-        if existing_port:
+        existing_url = _services_checker_state.get("url")
+        if existing_url and _services_checker_ready(existing_url):
+            return existing_url
+
+        external_url = _services_checker_external_url()
+        if _services_checker_ready(external_url):
+            _services_checker_state.update({
+                "url": external_url,
+                "port": None,
+                "source": "external",
+                "error": "",
+            })
+            return external_url
+
+        command_path = next(
+            (path for path in _services_checker_command_candidates() if os.path.isfile(path)),
+            "",
+        )
+        if command_path:
+            log_path = os.path.join(tempfile.gettempdir(), "eventinspector-services-checker.log")
             try:
-                response = requests.get(f"http://127.0.0.1:{existing_port}/health", timeout=0.8)
-                if response.ok:
-                    return f"http://127.0.0.1:{existing_port}"
-            except Exception:
-                pass
+                with open(log_path, "ab") as log_handle:
+                    launch_args = ["/bin/bash", command_path]
+                    launch_kwargs = {
+                        "cwd": os.path.dirname(command_path) or None,
+                        "stdin": subprocess.DEVNULL,
+                        "stdout": log_handle,
+                        "stderr": subprocess.STDOUT,
+                    }
+                    if os.name == "nt":
+                        launch_args = ["cmd.exe", "/d", "/c", command_path]
+                        launch_kwargs["creationflags"] = getattr(
+                            subprocess,
+                            "CREATE_NEW_PROCESS_GROUP",
+                            0,
+                        )
+                    else:
+                        launch_kwargs["start_new_session"] = True
+                    process = subprocess.Popen(
+                        launch_args,
+                        **launch_kwargs,
+                    )
+            except Exception as exc:
+                raise RuntimeError(f"Cannot start Services Checker command: {exc}") from exc
+
+            deadline = time.time() + 15
+            while time.time() < deadline:
+                if _services_checker_ready(external_url):
+                    _services_checker_state.update({
+                        "process": process,
+                        "url": external_url,
+                        "port": None,
+                        "source": command_path,
+                        "error": "",
+                    })
+                    return external_url
+                if process.poll() is not None:
+                    break
+                time.sleep(0.2)
+
+            _services_checker_state["error"] = f"command_not_ready:{command_path}"
+            raise RuntimeError(
+                f"Services Checker did not become ready at {external_url}; "
+                f"see {log_path}"
+            )
 
         app_path = next((path for path in _services_checker_file_candidates() if os.path.exists(path)), "")
         if not app_path:
-            raise FileNotFoundError("services_checker/app.py is not included in this build")
+            raise FileNotFoundError(
+                "Services Checker command/app.py was not found. "
+                "Set EVENTINSPECTOR_SERVICES_COMMAND or install the bundled checker."
+            )
 
         module_name = f"eventinspector_services_checker_{os.getpid()}"
         spec = importlib.util.spec_from_file_location(module_name, app_path)
@@ -535,22 +738,20 @@ def _start_services_checker():
         thread = threading.Thread(target=serve, name="services-checker", daemon=True)
         thread.start()
         deadline = time.time() + 12
-        health_url = f"http://127.0.0.1:{port}/health"
+        service_url = f"http://127.0.0.1:{port}"
         last_error = "service_start_timeout"
         while time.time() < deadline:
-            try:
-                response = requests.get(health_url, timeout=0.8)
-                if response.ok:
-                    _services_checker_state.update({
-                        "module": module,
-                        "thread": thread,
-                        "port": port,
-                        "error": "",
-                    })
-                    return f"http://127.0.0.1:{port}"
-                last_error = f"health_status_{response.status_code}"
-            except Exception as exc:
-                last_error = str(exc)
+            if _services_checker_ready(service_url):
+                _services_checker_state.update({
+                    "module": module,
+                    "thread": thread,
+                    "port": port,
+                    "url": service_url,
+                    "source": app_path,
+                    "error": "",
+                })
+                return service_url
+            last_error = "service_root_not_ready"
             time.sleep(0.15)
 
         _services_checker_state["error"] = last_error
@@ -2409,7 +2610,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(52)</title>
+    <title>Event Inspector v2.5.0(26)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -2486,7 +2687,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(1)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(26)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2549,9 +2750,9 @@ HTML_TEMPLATE = """
                     <button id="tabBtnCallbackAd" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('CallbackAd')">CallBack & Ads</button>
                     <button id="tabBtnPriceRotation" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('PriceRotation')">Rewarded Bidding</button>
                     <button id="tabBtnSdkCheck" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('SdkCheck')">SDK Check</button>
-                    <button id="tabBtnServicesChecker" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('ServicesChecker')">Services Checker</button>
                     <button id="tabBtnBrightSDK" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('BrightSDK')">BrightSDK</button>
                     <button id="tabBtnPackage" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Package')">Package Logcat</button>
+                    <button id="tabBtnServicesChecker" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('ServicesChecker')">Services Checker</button>
                 </div>
             </div>
         </div>
@@ -2989,6 +3190,12 @@ HTML_TEMPLATE = """
                         <div>
                             <h2 class="text-lg font-semibold">Services Checker</h2>
                             <p id="servicesCheckerStatus" class="text-xs text-slate-500 mt-1">Ready to open the companion checker.</p>
+                            <p id="servicesCheckerHostStatus" class="text-[11px] text-slate-400 mt-1">Host file: auto-detect</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input id="servicesCheckerHostFileInput" type="file" accept=".command,.sh,.cmd,.bat" class="hidden">
+                            <button id="servicesCheckerReplaceHostBtn" type="button" class="text-xs font-semibold py-2 px-3 rounded-lg shadow-sm bg-slate-600 hover:bg-slate-700 text-white">Replace Host</button>
+                            <button id="servicesCheckerReloadBtn" type="button" class="text-xs font-semibold py-2 px-3 rounded-lg shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white">Reload</button>
                         </div>
                     </div>
                     <iframe id="servicesCheckerFrame" title="Services Checker" class="hidden w-full rounded-lg border border-slate-200 bg-white" style="height: 78vh; min-height: 620px;"></iframe>
@@ -3225,7 +3432,9 @@ HTML_TEMPLATE = """
 
     <!-- SCRIPTS -->
     <script>
-        const socket = io();
+        const socket = typeof window.io === 'function'
+            ? window.io()
+            : { on() { return this; }, emit() { return this; } };
         let currentTab = 'LoadAdsExt';
         let selectedDevice = 'all';
 
@@ -3405,6 +3614,80 @@ HTML_TEMPLATE = """
         else showPlatformModal();
 
         // --- Tab Logic ---
+        async function loadServicesCheckerHostStatus() {
+            const hostStatus = document.getElementById('servicesCheckerHostStatus');
+            if (!hostStatus) return;
+            try {
+                const response = await fetch('/api/services-checker/host', { cache: 'no-store' });
+                const data = await response.json();
+                if (!response.ok || !data.ok) throw new Error(data.error || 'host_status_failed');
+                hostStatus.textContent = data.saved
+                    ? `Host file: ${data.filename} (saved override)`
+                    : 'Host file: auto-detect';
+            } catch (error) {
+                hostStatus.textContent = 'Host file: status unavailable';
+            }
+        }
+
+        async function reloadServicesChecker() {
+            const status = document.getElementById('servicesCheckerStatus');
+            const frame = document.getElementById('servicesCheckerFrame');
+            const button = document.getElementById('servicesCheckerReloadBtn');
+            if (!status || !frame) return;
+            if (button) button.disabled = true;
+            status.textContent = 'Reloading Services Checker...';
+            try {
+                const response = await fetch('/api/services-checker/reload', { method: 'POST' });
+                const data = await response.json();
+                if (!response.ok || !data.ok || !data.url) {
+                    throw new Error(data.error || 'services_checker_reload_failed');
+                }
+                frame.src = `${data.url}/?reload=${Date.now()}`;
+                frame.dataset.started = 'true';
+                frame.classList.remove('hidden');
+                status.textContent = data.restarted
+                    ? 'Services Checker reloaded.'
+                    : 'Services Checker refreshed.';
+                await loadServicesCheckerHostStatus();
+            } catch (error) {
+                status.textContent = 'Unable to reload Services Checker: ' + error;
+            } finally {
+                if (button) button.disabled = false;
+            }
+        }
+
+        async function replaceServicesCheckerHost(file) {
+            const status = document.getElementById('servicesCheckerStatus');
+            if (!file || !status) return;
+            const formData = new FormData();
+            formData.append('host_file', file);
+            status.textContent = 'Saving host file...';
+            try {
+                const response = await fetch('/api/services-checker/host', {
+                    method: 'POST',
+                    body: formData,
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) {
+                    throw new Error(data.error || 'host_file_save_failed');
+                }
+                await loadServicesCheckerHostStatus();
+                await reloadServicesChecker();
+            } catch (error) {
+                status.textContent = 'Unable to save host file: ' + error;
+            }
+        }
+
+        document.getElementById('servicesCheckerReplaceHostBtn')?.addEventListener('click', () => {
+            document.getElementById('servicesCheckerHostFileInput')?.click();
+        });
+        document.getElementById('servicesCheckerHostFileInput')?.addEventListener('change', (event) => {
+            const file = event.target.files && event.target.files[0];
+            replaceServicesCheckerHost(file);
+            event.target.value = '';
+        });
+        document.getElementById('servicesCheckerReloadBtn')?.addEventListener('click', reloadServicesChecker);
+
         async function openServicesChecker() {
             const status = document.getElementById('servicesCheckerStatus');
             const frame = document.getElementById('servicesCheckerFrame');
@@ -3422,6 +3705,7 @@ HTML_TEMPLATE = """
                 frame.dataset.started = 'true';
                 frame.classList.remove('hidden');
                 status.textContent = 'Services Checker is running locally.';
+                loadServicesCheckerHostStatus();
             } catch (error) {
                 status.textContent = 'Unable to start Services Checker: ' + error;
                 frame.dataset.started = 'false';
@@ -5336,6 +5620,38 @@ def start_services_checker():
         return jsonify({'ok': True, 'url': url})
     except Exception as exc:
         logging.exception("Services Checker start failed")
+        return jsonify({'ok': False, 'error': str(exc)}), 500
+
+
+@app.get('/api/services-checker/host')
+def get_services_checker_host():
+    return jsonify({'ok': True, **_services_checker_host_status()})
+
+
+@app.post('/api/services-checker/host')
+def replace_services_checker_host():
+    upload = request.files.get('host_file')
+    if not upload or not upload.filename:
+        return jsonify({'ok': False, 'error': 'host_file_required'}), 400
+    try:
+        target = _save_services_checker_host(upload)
+        return jsonify({
+            'ok': True,
+            'filename': os.path.basename(target),
+            **_services_checker_host_status(),
+        })
+    except Exception as exc:
+        logging.exception("Services Checker host file save failed")
+        return jsonify({'ok': False, 'error': str(exc)}), 400
+
+
+@app.post('/api/services-checker/reload')
+def reload_services_checker():
+    try:
+        url, restarted = _reload_services_checker()
+        return jsonify({'ok': True, 'url': url, 'restarted': restarted})
+    except Exception as exc:
+        logging.exception("Services Checker reload failed")
         return jsonify({'ok': False, 'error': str(exc)}), 500
 
 

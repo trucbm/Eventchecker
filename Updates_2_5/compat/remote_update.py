@@ -412,18 +412,26 @@ def check_for_updates(force_refresh=False):
             download_sha256 = item.get("compat_sha256") or sha256
             # Keep the old shell on the compatibility bridge. If it receives
             # the native v2.5 payload, its numeric build check would reject
-            # the visible v2.5.0(1) file as older than v2.4.0(25).
+            # the visible v2.5.0(26) file as older than v2.4.0(25).
             if rel_path == "Log_checker.py":
-                download_sha256 = ""
                 candidate_urls = [
-                    url.replace("/Log_checker.py", "/Updates_2_5/compat/Log_checker.py")
-                    for url in candidate_urls
+                    candidate_url
+                    if "/Updates_2_5/compat/Log_checker.py" in candidate_url
+                    else candidate_url.replace(
+                        "/Log_checker.py",
+                        "/Updates_2_5/compat/Log_checker.py",
+                    )
+                    for candidate_url in candidate_urls
                 ]
             elif rel_path == "remote_update.py":
-                download_sha256 = ""
                 candidate_urls = [
-                    url.replace("/remote_update.py", "/Updates_2_5/compat/remote_update.py")
-                    for url in candidate_urls
+                    candidate_url
+                    if "/Updates_2_5/compat/remote_update.py" in candidate_url
+                    else candidate_url.replace(
+                        "/remote_update.py",
+                        "/Updates_2_5/compat/remote_update.py",
+                    )
+                    for candidate_url in candidate_urls
                 ]
             candidate_urls.extend(_default_repo_file_urls(rel_path))
             data, _used_url = _download_verified(candidate_urls, timeout, download_sha256)

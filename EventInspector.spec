@@ -8,6 +8,7 @@ a = Analysis(
     datas=[
         ('Log_checker.py', '.'),
         ('Default event + Default Params.xlsx', '.'),
+        ('sdk_check_presets.json', '.'),
         ('remote_update_config_v250.json', '.'),
         ('services_checker', 'services_checker'),
     ],
