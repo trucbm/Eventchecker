@@ -10,8 +10,11 @@ import shutil
 import logging
 import importlib
 import importlib.util
+import tempfile
+import time
 from pathlib import Path # For finding home directory
 from urllib.parse import quote
+from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET # Still needed for the object structure
 import sys # For printing sys.path for debugging
 import traceback # For printing full tracebacks
@@ -575,6 +578,9 @@ HTML_TEMPLATE = """
         .results-section p, .results-section li, .results-section .comparison-item { font-size: 0.68rem; line-height: 1.3; }
         .results-section .comparison-item strong { font-size: 0.72rem; }
         .results-section .code { font-size: 0.64rem; padding: 0.1rem 0.25rem; }
+        .results-section .manifest-permission-item { font-size: 0.78rem; line-height: 1.4; }
+        .results-section .manifest-permission-item strong { font-size: 0.82rem; }
+        .results-section .manifest-permission-item .code { font-size: 0.74rem; }
         .error-message { color: #ef4444; background-color: #fee2e2; padding: 0.75rem; border-radius: 0.375rem; margin-bottom: 1rem; border: 1px solid #fca5a5; }
         .info-message { color: #059669; background-color: #d1fae5; padding: 0.75rem; border-radius: 0.375rem; margin-bottom: 1rem; border: 1px solid #6ee7b7;}
         .warning-message { color: #f59e0b; background-color: #fef3c7; padding: 0.75rem; border-radius: 0.375rem; margin-bottom: 1rem; border: 1px solid #fcd34d;}
@@ -894,14 +900,21 @@ HTML_TEMPLATE = """
             if (input) input.value = presetLines((preset || {}).lines);
         }
 
-        async function loadBuildCheckPresets() {
+        async function loadBuildCheckPresets(forceRemote = false) {
             const selectedValues = Object.fromEntries(buildCheckPresetControls.map(control => {
                 const select = document.getElementById(control.selectId);
                 return [control.selectId, select ? select.value : ''];
             }));
             try {
-                const response = await fetch('/api/build-check-presets?ts=' + Date.now(), { cache: 'no-store' });
+                const refreshQuery = forceRemote ? '&refresh=1' : '';
+                const response = await fetch('/api/build-check-presets?ts=' + Date.now() + refreshQuery, { cache: 'no-store' });
                 const data = await response.json();
+                if (data.refresh_errors && data.refresh_errors.length) {
+                    console.warn('Some Services Checker presets could not be refreshed:', data.refresh_errors);
+                    if (forceRemote) {
+                        showMessage('Some preset files could not be refreshed from GitHub. The previous local copy was kept.', 'warning');
+                    }
+                }
                 buildCheckPresetControls.forEach(control => {
                     const select = document.getElementById(control.selectId);
                     if (!select) return;
@@ -939,7 +952,7 @@ HTML_TEMPLATE = """
             reloadButton?.addEventListener('click', async () => {
                 reloadButton.disabled = true;
                 reloadButton.textContent = 'Reloading...';
-                await loadBuildCheckPresets();
+                await loadBuildCheckPresets(true);
                 reloadButton.disabled = false;
                 reloadButton.textContent = 'Reload';
             });
@@ -1495,9 +1508,9 @@ HTML_TEMPLATE = """
             comparisonDiv.appendChild(ul);
         }
 
-        function appendManifestComparisonRow(container, row) {
+        function appendManifestComparisonRow(container, row, extraClass = '') {
             const item = document.createElement('div');
-            item.className = 'comparison-item';
+            item.className = `comparison-item ${extraClass}`.trim();
             const statusClass = row.status === 'PASSED'
                 ? 'status-passed'
                 : (row.status === 'STRANGE' ? 'status-strange' : 'status-failed');
@@ -1529,7 +1542,8 @@ HTML_TEMPLATE = """
                 groupTitle.className = 'mt-4 mb-2 font-semibold text-gray-700';
                 groupTitle.textContent = title;
                 section.appendChild(groupTitle);
-                rows.forEach(row => appendManifestComparisonRow(section, row));
+                const rowClass = title === 'Permissions' ? 'manifest-permission-item' : '';
+                rows.forEach(row => appendManifestComparisonRow(section, row, rowClass));
             });
             manifestComparisonOutputDiv.appendChild(section);
         }
@@ -1707,28 +1721,132 @@ GRADLE_CHECK_PRESETS_FILENAME = "gradle_check_presets.json"
 PODFILE_CHECK_PRESETS_FILENAME = "podfile_check_presets.json"
 MANIFEST_CHECK_PRESETS_FILENAME = "manifest_check_presets.json"
 
+# Presets are live data. The Reload buttons fetch the GitHub copy so list
+# edits do not require rebuilding the desktop app. `main` is the editable
+# source; the release branch remains a fallback for clients on a new build.
+SERVICES_CHECKER_PRESET_BRANCH = os.getenv("EVENTINSPECTOR_PRESET_BRANCH", "main").strip() or "main"
+SERVICES_CHECKER_PRESET_BRANCHES = tuple(dict.fromkeys((
+    SERVICES_CHECKER_PRESET_BRANCH,
+    "main",
+    "2.5.0",
+)))
+SERVICES_CHECKER_PRESET_FILENAMES = (
+    APK_CHECK_PRESETS_FILENAME,
+    GRADLE_CHECK_PRESETS_FILENAME,
+    PODFILE_CHECK_PRESETS_FILENAME,
+    MANIFEST_CHECK_PRESETS_FILENAME,
+)
+
+
+def _services_checker_preset_cache_dir():
+    """Return a writable per-user cache shared by bundled and portable builds."""
+    configured = os.getenv("EVENTINSPECTOR_PRESET_CACHE_DIR", "").strip()
+    if configured:
+        cache_dir = os.path.expandvars(os.path.expanduser(configured))
+    elif os.name == "nt":
+        cache_dir = os.path.join(
+            os.getenv("LOCALAPPDATA") or os.path.expanduser("~"),
+            "EventInspector",
+            "services_checker_presets",
+        )
+    elif sys.platform == "darwin":
+        cache_dir = os.path.expanduser(
+            "~/Library/Application Support/EventInspector/services_checker_presets"
+        )
+    else:
+        cache_dir = os.path.expanduser("~/.eventinspector/services_checker_presets")
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except OSError:
+        # A bundled app may be launched from a read-only location. Keep the
+        # live preset cache writable without touching the installed payload.
+        cache_dir = os.path.join(tempfile.gettempdir(), "EventInspector", "services_checker_presets")
+        os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
+
+
+def _preset_file_candidates(filename):
+    """Prefer the latest writable Git cache, then the bundled fallback file."""
+    return (
+        os.path.join(_services_checker_preset_cache_dir(), filename),
+        os.path.join(APP_ROOT, filename),
+    )
+
+
+def _remote_preset_urls(filename):
+    for branch in SERVICES_CHECKER_PRESET_BRANCHES:
+        yield f"https://raw.githubusercontent.com/trucbm/Eventchecker/{branch}/services_checker/{filename}"
+        yield f"https://github.com/trucbm/Eventchecker/raw/{branch}/services_checker/{filename}"
+        yield f"https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@{branch}/services_checker/{filename}"
+
+
+def _fetch_remote_preset(filename):
+    """Fetch and validate one preset file, bypassing intermediary caches."""
+    last_error = None
+    for url in _remote_preset_urls(filename):
+        separator = "&" if "?" in url else "?"
+        request = Request(
+            f"{url}{separator}eventinspector_refresh={int(time.time() * 1000)}",
+            headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
+        )
+        try:
+            with urlopen(request, timeout=8) as response:
+                payload = response.read()
+            decoded = json.loads(payload.decode("utf-8"))
+            if not isinstance(decoded, dict) or not decoded:
+                raise ValueError("preset_root_must_be_object")
+            return payload
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(f"remote_preset_unavailable:{filename}:{last_error}")
+
+
+def _refresh_remote_preset_files():
+    """Refresh every preset atomically; keep the previous copy on failures."""
+    cache_dir = _services_checker_preset_cache_dir()
+    refreshed = []
+    errors = []
+    for filename in SERVICES_CHECKER_PRESET_FILENAMES:
+        try:
+            payload = _fetch_remote_preset(filename)
+            temp_path = os.path.join(cache_dir, f".{filename}.{secrets.token_hex(4)}.tmp")
+            with open(temp_path, "wb") as handle:
+                handle.write(payload)
+            os.replace(temp_path, os.path.join(cache_dir, filename))
+            refreshed.append(filename)
+        except Exception as exc:
+            errors.append(str(exc))
+            temp_path = os.path.join(cache_dir, f".{filename}.tmp")
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except OSError:
+                pass
+    return refreshed, errors
+
 
 def _load_preset_file(filename, default_platform):
-    path = os.path.join(APP_ROOT, filename)
-    try:
-        with open(path, "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-        if not isinstance(payload, dict):
-            return {}
-        presets = {}
-        for name, preset in payload.items():
-            if isinstance(preset, list):
-                preset = {"lines": preset}
-            if not isinstance(preset, dict):
+    for path in _preset_file_candidates(filename):
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            if not isinstance(payload, dict):
                 continue
-            normalized = dict(preset)
-            normalized.setdefault("platform", default_platform)
-            normalized.setdefault("lines", [])
-            presets[str(name)] = normalized
-        return presets
-    except Exception as exc:
-        logger.warning("Preset file unavailable (%s): %s", filename, exc)
-        return {}
+            presets = {}
+            for name, preset in payload.items():
+                if isinstance(preset, list):
+                    preset = {"lines": preset}
+                if not isinstance(preset, dict):
+                    continue
+                normalized = dict(preset)
+                normalized.setdefault("platform", default_platform)
+                normalized.setdefault("lines", [])
+                presets[str(name)] = normalized
+            if presets:
+                return presets
+        except Exception as exc:
+            logger.warning("Preset file unavailable (%s): %s", path, exc)
+    return {}
 
 
 def _load_build_check_presets():
@@ -1843,13 +1961,26 @@ def index():
 
 @app.get('/api/build-check-presets')
 def get_build_check_presets_final():
+    refresh_requested = request.args.get("refresh", "").strip().lower() in {"1", "true", "yes"}
+    refreshed = []
+    refresh_errors = []
+    if refresh_requested:
+        refreshed, refresh_errors = _refresh_remote_preset_files()
     presets = _load_build_check_presets()
     gradle_presets = _load_gradle_check_presets()
     podfile_presets = _load_podfile_check_presets()
     manifest_presets = _load_manifest_check_presets()
+    if len(refreshed) == len(SERVICES_CHECKER_PRESET_FILENAMES):
+        source = 'github'
+    elif refreshed:
+        source = 'github (partial)'
+    else:
+        source = 'local preset files'
     return jsonify({
         'success': bool(presets or gradle_presets or podfile_presets or manifest_presets),
-        'source': 'local preset files',
+        'source': source,
+        'refreshed_files': refreshed,
+        'refresh_errors': refresh_errors,
         'presets': presets,
         'gradle_presets': gradle_presets,
         'podfile_presets': podfile_presets,

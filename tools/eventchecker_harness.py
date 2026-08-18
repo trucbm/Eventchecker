@@ -517,6 +517,10 @@ def test_sdk_check_preset_contract() -> None:
     _assert(source_text.count('id="reloadSdkCheckPresetsBtn"') == 1, "SDK preset reload button must exist exactly once")
     _assert("clean_lines" in source_text and '"lines": clean_lines' in source_text, "empty SDK presets must remain valid")
     _assert('"Accept-Encoding": "identity"' in source_text, "SDK preset fetch must bypass stale compressed cache")
+    _assert("def _fetch_sdk_check_presets(force_remote=False):" in source_text, "SDK preset force refresh support is missing")
+    _assert("refresh_requested = request.args.get(\"refresh\"" in source_text, "SDK preset refresh query is missing")
+    _assert("force_remote=refresh_requested" in source_text, "SDK preset endpoint must honor forced refresh")
+    _assert("2.5.0/sdk_check_presets.json" in source_text, "SDK preset release fallback URL is missing")
 
 
 def test_rendered_sdk_preset_javascript_contract() -> None:
@@ -534,6 +538,7 @@ def test_rendered_sdk_preset_javascript_contract() -> None:
     _assert('id="reloadSdkCheckPresetsBtn"' in html, "rendered SDK preset reload button is missing")
     _assert("loadSdkCheckPresetsFromGit();" in html, "SDK presets must reload when the app UI starts")
     _assert("loadSdkCheckPresetsFromGit(true);" in html, "preset Reload button must force a fresh GitHub request")
+    _assert("refreshQuery = force ? '&refresh=1'" in html, "SDK preset Reload must request a remote refresh")
     _assert("reloadSdkCheckPresetsBtn" in html and "loadSdkCheckPresetsFromGit" in html, "reload button handler is missing")
 
 
@@ -556,12 +561,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(35)" in text, "Log_checker.py must be prepared for v2.5.0(35)")
+    _assert("v2.5.0(36)" in text, "Log_checker.py must be prepared for v2.5.0(36)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(35)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(36)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -684,6 +689,7 @@ def test_load_ads_provider_contract() -> None:
 
 def test_release_payload_sync() -> None:
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    compatibility_source = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
     manifest_path = ROOT / "Updates_2_5" / "remote_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     log_item = next(item for item in manifest["files"] if item.get("path") == "Log_checker.py")
@@ -694,11 +700,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-18-1-2.5.0-35", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-18-1-2.5.0-36", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(35\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(36\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -708,6 +714,14 @@ def test_release_payload_sync() -> None:
     for label, pattern in markers.items():
         source_match = re.search(pattern, source_text)
         _assert(source_match is not None, f"source missing {label}")
+
+    for remote_contract in (
+        "def _fetch_sdk_check_presets(force_remote=False):",
+        "refresh_requested = request.args.get(\"refresh\"",
+        "force_remote=refresh_requested",
+        "const refreshQuery = force ? '&refresh=1'",
+    ):
+        _assert(remote_contract in compatibility_source, f"compatibility SDK preset refresh is missing: {remote_contract}")
 
 
 def test_update_candidate_does_not_downgrade() -> None:
@@ -745,9 +759,28 @@ def test_update_candidate_does_not_downgrade() -> None:
 def test_services_checker_gradle_mapping_contract() -> None:
     service_source = (ROOT / "services_checker" / "app.py").read_text(encoding="utf-8")
     gradle_presets = json.loads((ROOT / "services_checker" / "gradle_check_presets.json").read_text(encoding="utf-8"))
+    podfile_presets = json.loads((ROOT / "services_checker" / "podfile_check_presets.json").read_text(encoding="utf-8"))
     c190_gradle_lines = gradle_presets.get("C-190-Android", {}).get("lines") or []
     _assert("Voodoo (ADN) Adapter\t5.7.0" in c190_gradle_lines, "C-190 Voodoo adapter version changed")
     _assert("Voodoo (ADN) SDK\t4.29.2" in c190_gradle_lines, "C-190 Voodoo SDK version changed")
+    _assert_equal(
+        podfile_presets.get("C-180-iOS", {}).get("lines") or [],
+        [
+            "Kidoz Adapter\t2.2.0",
+            "Kidoz SDK\t10.1.5",
+            "Yeahmobi/ Maticoo Adapter\t2.2.0",
+            "Yeahmobi/ Maticoo SDK\t2.2.0",
+            "TaurusX SDK\t1.18.1",
+            "TaurusX Adapter\t1.18.1",
+            "Odeeo SDK\t3.10.0",
+            "AppMetrica Analytics\t6.4.0",
+            "Google UMP SDK\t3.1.0",
+            "Ascendx adapter\t0.9.0",
+            "Voodoo Adapter\t5.2.0.0",
+            "Adjust/AdjustGoogleOd\t5.6.2",
+        ],
+        "C-180 iOS Podfile preset changed",
+    )
     _assert_equal(
         service_source.count("GRADLE_LIB_MAPPING ="),
         1,
@@ -770,8 +803,20 @@ def test_services_checker_gradle_mapping_contract() -> None:
         "apk_check_presets.json",
         "gradle_check_presets.json",
         "podfile_check_presets.json",
+        "manifest_check_presets.json",
     ):
         _assert(preset_file in service_source, f"Services Checker preset file is missing: {preset_file}")
+    for remote_contract in (
+        "SERVICES_CHECKER_PRESET_BRANCHES",
+        "SERVICES_CHECKER_PRESET_FILENAMES",
+        "def _remote_preset_urls(",
+        "def _refresh_remote_preset_files(",
+        "refresh_requested = request.args.get(\"refresh\"",
+        "forceRemote = false",
+        "refreshQuery = forceRemote ? '&refresh=1'",
+        "await loadBuildCheckPresets(true)",
+    ):
+        _assert(remote_contract in service_source, f"Live Services Checker preset refresh is missing: {remote_contract}")
     _assert("'gradle_presets': gradle_presets" in service_source, "Gradle preset API group is missing")
     _assert("'podfile_presets': podfile_presets" in service_source, "Podfile preset API group is missing")
     required_mappings = {
@@ -789,9 +834,11 @@ def test_services_checker_gradle_mapping_contract() -> None:
         'id="apk-build-check-preset"',
         'id="gradle-build-check-preset"',
         'id="podfile-build-check-preset"',
+        'id="manifest-check-preset"',
         'id="reload-apk-build-check-presets"',
         'id="reload-gradle-build-check-presets"',
         'id="reload-podfile-build-check-presets"',
+        'id="reload-manifest-check-presets"',
     ):
         _assert(service_source.count(control_id) == 1, f"Services Checker preset control must exist once: {control_id}")
     _assert('platform: \'android\'' in service_source, "Android build preset filtering is missing")
@@ -856,9 +903,9 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-18-1-2.5.0-35", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-18-1-2.5.0-36", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 35, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 36, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
@@ -1028,7 +1075,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-18-1-2.5.0-35' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-18-1-2.5.0-36' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")

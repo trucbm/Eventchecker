@@ -48,6 +48,8 @@ SDK_CHECK_PRESETS_FILENAME = "sdk_check_presets.json"
 SDK_CHECK_PRESETS_REMOTE_URLS = [
     "https://raw.githubusercontent.com/trucbm/Eventchecker/main/sdk_check_presets.json",
     "https://github.com/trucbm/Eventchecker/raw/main/sdk_check_presets.json",
+    "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/sdk_check_presets.json",
+    "https://github.com/trucbm/Eventchecker/raw/2.5.0/sdk_check_presets.json",
 ]
 
 
@@ -100,8 +102,8 @@ def _load_sdk_check_presets():
     return {}
 
 
-def _fetch_sdk_check_presets():
-    if os.getenv("SDK_CHECK_PRESETS_PATH"):
+def _fetch_sdk_check_presets(force_remote=False):
+    if os.getenv("SDK_CHECK_PRESETS_PATH") and not force_remote:
         local_presets = _load_sdk_check_presets()
         if local_presets:
             return local_presets, "local"
@@ -2766,7 +2768,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(35)</title>
+    <title>Event Inspector v2.5.0(36)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -2843,7 +2845,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(35)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(36)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5477,7 +5479,8 @@ HTML_TEMPLATE = """
             if (status) status.textContent = 'Đang tải danh sách từ GitHub...';
             sdkCheckPresetsLoadPromise = (async () => {
                 try {
-                    const response = await fetch(`/api/sdk-check-presets?ts=${Date.now()}`, {cache: 'no-store'});
+                    const refreshQuery = force ? '&refresh=1' : '';
+                    const response = await fetch(`/api/sdk-check-presets?ts=${Date.now()}${refreshQuery}`, {cache: 'no-store'});
                     const payload = await response.json();
                     if (!response.ok || !payload.ok || !payload.presets) throw new Error(payload.error || 'preset_load_failed');
                     sdkCheckPresets = payload.presets;
@@ -5740,7 +5743,8 @@ def index():
 
 @app.get('/api/sdk-check-presets')
 def get_sdk_check_presets():
-    presets, source = _fetch_sdk_check_presets()
+    refresh_requested = request.args.get("refresh", "").strip().lower() in {"1", "true", "yes"}
+    presets, source = _fetch_sdk_check_presets(force_remote=refresh_requested)
     return jsonify({
         'ok': bool(presets),
         'source': source,
