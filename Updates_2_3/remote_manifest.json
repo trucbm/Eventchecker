@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-17-1-2.5.0-26",
+  "version": "2026-08-18-1-2.5.0-34",
   "update_enabled": true,
   "update_message": "",
   "files": [
@@ -11,7 +11,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/compat/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/compat/Log_checker.py"
       ],
-      "sha256": "b12c4b6e8e99abacba585bfdfaf8149a58bdbd4fc361e6c18f9074b7daa53bbb"
+      "sha256": "28d17f4802ee02d4a1909c8bd2772d4e511d34f117b71f3a551ba250c45a0cfb"
     },
     {
       "path": "remote_update.py",
@@ -21,7 +21,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/compat/remote_update.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/compat/remote_update.py"
       ],
-      "sha256": "bd9dbf2ed9ad82b5824d47e76dbad858fcbccf976af28975393b66dca4d77f3f"
+      "sha256": "f8cafa69fb69f0c287b30025f4ae1fea1de37d3b0ddce35bcfc4071886cc27b5"
     },
     {
       "path": "sdk_check_presets.json",
@@ -31,7 +31,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/sdk_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/sdk_check_presets.json"
       ],
-      "sha256": "028a44e2e643d48268b16f7f6ec1a7c692ac2ac9466ff48222ed4e0c87249390"
+      "sha256": "3bb3d9cb3a1b4d18d0bdb0d609f9ff473ccfab97a53b5bb179a634f05e9f0b5c"
     },
     {
       "path": "remote_update_config_v250.json",
@@ -51,7 +51,27 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/app.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/app.py"
       ],
-      "sha256": "c1af6f1872170b8fa0a42896632f9ee08fac984116643f9579a3c59eecac4cf8"
+      "sha256": "f176e71b4c430460b4a1348d189becc148284980cf0c0644e3cdd090a4a72641"
+    },
+    {
+      "path": "services_checker/axml_fallback.py",
+      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/axml_fallback.py",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/axml_fallback.py",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/axml_fallback.py",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/axml_fallback.py"
+      ],
+      "sha256": "39f16591b4ff34bd5c8beb71bb0633a2bdeb2fdd0a3c3309376f91c1c5ad03bf"
+    },
+    {
+      "path": "services_checker/my-key.keystore",
+      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/my-key.keystore",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/my-key.keystore",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/my-key.keystore",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/my-key.keystore"
+      ],
+      "sha256": "48c751cdf0af6d6ed98b0111f852abb988bf27b1398d6ac309c98a95d4ba5d44"
     },
     {
       "path": "services_checker/bundletool-all-1.18.1.jar",
@@ -64,14 +84,44 @@
       "sha256": "675786493983787ffa11550bdb7c0715679a44e1643f3ff980a529e9c822595c"
     },
     {
-      "path": "services_checker/build_check_presets.json",
-      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/build_check_presets.json",
+      "path": "services_checker/apk_check_presets.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/apk_check_presets.json",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/build_check_presets.json",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/build_check_presets.json",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/build_check_presets.json"
+        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/apk_check_presets.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/apk_check_presets.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/apk_check_presets.json"
       ],
-      "sha256": "d27acb2e22fff2ce359a603154261f888d4e925e1e5fa4b812a74ce0091643b4"
+      "sha256": "4ce1d45248739efe6603d5521576f297174460283bb86279978118da46984371"
+    },
+    {
+      "path": "services_checker/gradle_check_presets.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/gradle_check_presets.json",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/gradle_check_presets.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/gradle_check_presets.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/gradle_check_presets.json"
+      ],
+      "sha256": "d0e29c2a480af8724e6a5594ea31fe9eaf9868656d251ed5ec6f71d4e6c2a09a"
+    },
+    {
+      "path": "services_checker/podfile_check_presets.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/podfile_check_presets.json",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/podfile_check_presets.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/podfile_check_presets.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/podfile_check_presets.json"
+      ],
+      "sha256": "04fbe9fda8ba52ed9fd0d44a82da63ab24f116061bbb04680678966f084d4e53"
+    },
+    {
+      "path": "services_checker/manifest_check_presets.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/manifest_check_presets.json",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/manifest_check_presets.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/manifest_check_presets.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/manifest_check_presets.json"
+      ],
+      "sha256": "65e54042ac6f93adf456d900707208aed144b581855d057470071fb429da01d9"
     }
   ]
 }
