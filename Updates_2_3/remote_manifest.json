@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-18-1-2.5.0-33",
+  "version": "2026-08-18-1-2.5.0-34",
   "update_enabled": true,
   "update_message": "",
   "files": [
@@ -11,7 +11,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/compat/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/compat/Log_checker.py"
       ],
-      "sha256": "923537c536536a8adcf675ad82f51dd69e7c26f54180de9651a70a5a45c95647"
+      "sha256": "28d17f4802ee02d4a1909c8bd2772d4e511d34f117b71f3a551ba250c45a0cfb"
     },
     {
       "path": "remote_update.py",
@@ -21,7 +21,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/compat/remote_update.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/compat/remote_update.py"
       ],
-      "sha256": "4fffd1a2a552637d84f6565178f5743010c5ff568f637ae3aba78bf8b433d6c1"
+      "sha256": "f8cafa69fb69f0c287b30025f4ae1fea1de37d3b0ddce35bcfc4071886cc27b5"
     },
     {
       "path": "sdk_check_presets.json",
@@ -51,7 +51,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/app.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/app.py"
       ],
-      "sha256": "1612dbe8acbf43a27b0b5805c34fe1eb32e87ee808d51b77ebdf9f1a32924c29"
+      "sha256": "f176e71b4c430460b4a1348d189becc148284980cf0c0644e3cdd090a4a72641"
     },
     {
       "path": "services_checker/axml_fallback.py",
