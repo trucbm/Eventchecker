@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-18-1-2.5.0-31",
+  "version": "2026-08-18-1-2.5.0-32",
   "update_enabled": true,
   "update_message": "",
   "files": [
@@ -11,8 +11,8 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Log_checker.py"
       ],
-      "sha256": "cf49f4a7a611ffff63e86bea2f748494d0b74375611caa96b2b035f63ccc8fb7",
-      "compat_sha256": "79bde446ef5f736a3db86ec1e04119b69a0e0bce188291a370b2f35affedd7c0"
+      "sha256": "0f65748491d1ffcc2fd03e26e3d14f305169c15a7756a91f2ee2778dd55d7c7c",
+      "compat_sha256": "7dee2b8d65bb854de5e63d7a01e00ea0bd85f5a9291149e05960643245998b69"
     },
     {
       "path": "remote_update.py",
@@ -23,7 +23,7 @@
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/remote_update.py"
       ],
       "sha256": "cd49e7021b76d83127e24f4d173c953e70ecb72daaa479de4c594814d6f68bc2",
-      "compat_sha256": "ce5ec9f22d661fb0b5445d738e43194a27e46d3b4cf013aac9bc0bca94ac6f44"
+      "compat_sha256": "c3e2619e5f375eebaf5eecd447bfacd7775acca11dcac79a8b87df151a70c17b"
     },
     {
       "path": "sdk_check_presets.json",
@@ -53,7 +53,17 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/app.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/app.py"
       ],
-      "sha256": "88b4c1dbe3a2bd7484cc9936815e920656fe0379e8a088bd712d950f860cb798"
+      "sha256": "4a4e90a540dd2cb47a3202d2812d9f8bca2a5fcc0cfd9de96c9b5d5498ba8c1e"
+    },
+    {
+      "path": "services_checker/axml_fallback.py",
+      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/axml_fallback.py",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/axml_fallback.py",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/axml_fallback.py",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/axml_fallback.py"
+      ],
+      "sha256": "39f16591b4ff34bd5c8beb71bb0633a2bdeb2fdd0a3c3309376f91c1c5ad03bf"
     },
     {
       "path": "services_checker/my-key.keystore",

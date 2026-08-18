@@ -8,6 +8,7 @@ import configparser  # To parse .properties files
 import subprocess # For running bundletool
 import logging
 import importlib
+import importlib.util
 from pathlib import Path # For finding home directory
 from urllib.parse import quote
 import xml.etree.ElementTree as ET # Still needed for the object structure
@@ -49,11 +50,34 @@ androguard_axml_available = False
 AXMLPrinter_class_from_androguard = None
 
 
+def _load_fallback_axml_printer():
+    """Load the dependency-free parser shipped with remote update payloads."""
+    fallback_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "axml_fallback.py")
+    if not os.path.isfile(fallback_path):
+        return None
+
+    module_name = f"eventinspector_axml_fallback_{os.getpid()}"
+    spec = importlib.util.spec_from_file_location(module_name, fallback_path)
+    if not spec or not spec.loader:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+    return getattr(module, "AXMLPrinter", None)
+
+
 def _load_axml_printer():
     """Load AXMLPrinter from source, update, or PyInstaller bundle paths."""
     global androguard_axml_available, AXMLPrinter_class_from_androguard
 
-    roots = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))]
+    roots = [
+        os.path.dirname(os.path.abspath(__file__)),
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    ]
     meipass = getattr(sys, "_MEIPASS", "")
     if meipass:
         roots.insert(0, meipass)
@@ -75,10 +99,20 @@ def _load_axml_printer():
     except Exception as error:
         androguard_axml_available = False
         AXMLPrinter_class_from_androguard = None
-        print(f"ERROR: Failed to import AXMLPrinter from androguard.core.axml: {error}")
-        print("Please ensure androguard is installed and included in the application bundle.")
-        traceback.print_exc()
-        return False
+        print(f"androguard AXMLPrinter unavailable: {error}")
+        try:
+            fallback_printer = _load_fallback_axml_printer()
+        except Exception as fallback_error:
+            print(f"ERROR: Dependency-free AXML fallback failed: {fallback_error}")
+            traceback.print_exc()
+            return False
+        if fallback_printer is None:
+            print("ERROR: Neither androguard nor the bundled AXML fallback is available.")
+            return False
+        AXMLPrinter_class_from_androguard = fallback_printer
+        androguard_axml_available = True
+        print("Using the bundled dependency-free AXML parser fallback.")
+        return True
 
 
 _load_axml_printer()
