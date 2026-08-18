@@ -2651,6 +2651,7 @@ HTML_TEMPLATE = """
                 <select id="build-check-preset" class="border border-gray-300 rounded-md px-3 py-2 text-sm bg-white min-w-[220px]">
                     <option value="">Manual input</option>
                 </select>
+                <button id="reload-build-check-presets" type="button" class="button button-secondary text-sm py-2 px-3">Reload</button>
                 <span id="build-check-preset-source" class="text-xs text-gray-500"></span>
             </div>
         </header>
@@ -2853,6 +2854,7 @@ HTML_TEMPLATE = """
 
         const messageArea = document.getElementById('message-area');
         const buildCheckPresetSelect = document.getElementById('build-check-preset');
+        const reloadBuildCheckPresetsButton = document.getElementById('reload-build-check-presets');
         const buildCheckPresetSource = document.getElementById('build-check-preset-source');
 
         const tabApkAnalyzer = document.getElementById('tab-apk-analyzer');
@@ -2920,10 +2922,14 @@ HTML_TEMPLATE = """
 
         async function loadBuildCheckPresets() {
             if (!buildCheckPresetSelect) return;
+            const selectedValue = buildCheckPresetSelect.value;
             try {
                 const response = await fetch('/api/build-check-presets?ts=' + Date.now(), { cache: 'no-store' });
                 const data = await response.json();
                 const presets = data.presets || {};
+                while (buildCheckPresetSelect.options.length > 1) {
+                    buildCheckPresetSelect.remove(1);
+                }
                 Object.entries(presets).forEach(([name, preset]) => {
                     const option = document.createElement('option');
                     option.value = name;
@@ -2935,11 +2941,23 @@ HTML_TEMPLATE = """
                     const option = buildCheckPresetSelect.options[buildCheckPresetSelect.selectedIndex];
                     applyBuildCheckPreset(option && option.dataset.preset ? JSON.parse(option.dataset.preset) : {});
                 });
+                if (selectedValue && presets[selectedValue]) {
+                    buildCheckPresetSelect.value = selectedValue;
+                    applyBuildCheckPreset(presets[selectedValue]);
+                }
                 if (data.source) buildCheckPresetSource.textContent = `Source: ${data.source}`;
             } catch (error) {
                 if (buildCheckPresetSource) buildCheckPresetSource.textContent = 'Preset list unavailable';
             }
         }
+
+        reloadBuildCheckPresetsButton?.addEventListener('click', async () => {
+            reloadBuildCheckPresetsButton.disabled = true;
+            reloadBuildCheckPresetsButton.textContent = 'Reloading...';
+            await loadBuildCheckPresets();
+            reloadBuildCheckPresetsButton.disabled = false;
+            reloadBuildCheckPresetsButton.textContent = 'Reload';
+        });
 
         // --- Tab Switching ---
         function switchTab(tabId) {

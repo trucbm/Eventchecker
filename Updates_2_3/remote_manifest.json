@@ -51,7 +51,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/app.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/app.py"
       ],
-      "sha256": "108f334630b469fa27af3f51d57fe21688ddb1f117e776703e1f1a29108d6ffa"
+      "sha256": "66f8d685b2f528440a13f2def53718a90118434d9199b9421c7e5a1a817f8d93"
     },
     {
       "path": "services_checker/my-key.keystore",
@@ -81,7 +81,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/build_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/build_check_presets.json"
       ],
-      "sha256": "d27acb2e22fff2ce359a603154261f888d4e925e1e5fa4b812a74ce0091643b4"
+      "sha256": "61dc04e74ba5f9bf7afb456ce9c4223157484b81f2cbaea0fda76f1b6ff0c5f8"
     }
   ]
 }
