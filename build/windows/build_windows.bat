@@ -26,6 +26,8 @@ pyinstaller --noconfirm --clean --windowed --icon assets\\app.ico --name "EventI
   --collect-submodules "socketio" ^
   --collect-submodules "webview" ^
   --collect-submodules "androguard.core" ^
+  --collect-data "androguard" ^
+  --hidden-import "androguard.core.axml" ^
   --hidden-import "qtpy" ^
   --hidden-import "qtpy.QtCore" ^
   --hidden-import "qtpy.QtGui" ^

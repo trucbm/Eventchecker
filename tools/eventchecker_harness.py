@@ -485,9 +485,11 @@ def test_sdk_check_preset_contract() -> None:
     _assert_equal(lines[0], "Ads Network\tAdapter\tNative", "C-190 preset header changed")
     _assert(all("http://" not in line and "https://" not in line for line in lines), "C-190 preset must not contain documentation links")
     _assert("CloudX\t4.5.0\t4.5.0" in lines, "C-190 CloudX entry changed")
+    _assert("Bigo Ads\t5.11.0\t6.0.0" in lines, "C-190 Bigo Ads versions changed")
     _assert(any(line.startswith("Digital Turbine (fyber) - Cloudx\t") for line in lines), "C-190 Cloudx entries are missing")
     _assert("Meta Audience Network\t5.4.0\t6.22.0" in lines, "C-190 Meta Audience Network adapter changed")
     _assert("Mintegral - Cloudx\t17.1.71.0\t17.1.71" in lines, "Mintegral Cloudx native version changed")
+    _assert("Ogury\t5.5.0\t6.3.1" in lines, "C-190 Ogury versions changed")
     _assert("Yandex\t5.12.0\t8.3.0" in lines, "C-190 Yandex versions changed")
     _assert("Adverty\t5.2.9\t" in lines, "C-190 Adverty version changed")
     _assert("Gadsme\t1.12.6\t" in lines, "C-190 Gadsme version changed")
@@ -554,12 +556,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(29)" in text, "Log_checker.py must be prepared for v2.5.0(29)")
+    _assert("v2.5.0(30)" in text, "Log_checker.py must be prepared for v2.5.0(30)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(29)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(30)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -666,6 +668,11 @@ def test_load_ads_provider_contract() -> None:
         _assert("Record Load Ads:" in rendered, "Load Ads recording label was not updated")
         _assert('>Provider</th>' in rendered, "Load Ads Provider column is missing")
         _assert('"provider": _normalize_load_ads_provider(provider)' in (ROOT / "Log_checker.py").read_text(encoding="utf-8"), "Sheet provider payload is missing")
+        compatibility_source = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+        _assert('>Load Ads</button>' in compatibility_source, "compatibility Load Ads tab label is stale")
+        _assert("Load Ads Ironsource" not in compatibility_source, "compatibility payload must not restore the old Load Ads label")
+        _assert('>Provider</th>' in compatibility_source, "compatibility Load Ads Provider column is missing")
+        _assert('"provider": _normalize_load_ads_provider(provider)' in compatibility_source, "compatibility sheet provider payload is missing")
     finally:
         lc.active_platform = original_platform
         lc.recording_states["LoadAdsExt"].clear()
@@ -687,11 +694,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-18-1-2.5.0-29", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-18-1-2.5.0-30", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(29\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(30\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -737,6 +744,10 @@ def test_update_candidate_does_not_downgrade() -> None:
 
 def test_services_checker_gradle_mapping_contract() -> None:
     service_source = (ROOT / "services_checker" / "app.py").read_text(encoding="utf-8")
+    gradle_presets = json.loads((ROOT / "services_checker" / "gradle_check_presets.json").read_text(encoding="utf-8"))
+    c190_gradle_lines = gradle_presets.get("C-190-Android", {}).get("lines") or []
+    _assert("Voodoo (ADN) Adapter\t5.7.0" in c190_gradle_lines, "C-190 Voodoo adapter version changed")
+    _assert("Voodoo (ADN) SDK\t4.29.2" in c190_gradle_lines, "C-190 Voodoo SDK version changed")
     _assert_equal(
         service_source.count("GRADLE_LIB_MAPPING ="),
         1,
@@ -845,9 +856,9 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-18-1-2.5.0-29", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-18-1-2.5.0-30", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 29, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 30, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
@@ -949,7 +960,9 @@ def test_build_scripts_clean_outputs() -> None:
     _assert('--exclude-module "markupsafe._speedups"' in mac_script, "macOS universal build must avoid the arm64-only MarkupSafe speedup")
     _assert('--add-data "Log_checker.py:."' in mac_script, "macOS build must package the bundled release marker")
     _assert('--add-data "sdk_check_presets.json:."' in mac_script, "macOS build must package SDK presets")
-    _assert('--collect-submodules "androguard.core"' in mac_script, "macOS build must package manifest parser dependencies")
+    _assert('--collect-submodules "androguard.core"' in mac_script, "macOS build must package manifest parser submodules")
+    _assert('--collect-data "androguard"' in mac_script, "macOS build must package manifest parser data")
+    _assert('--hidden-import "androguard.core.axml"' in mac_script, "macOS build must include AXMLPrinter explicitly")
     for service_asset in (
         "services_checker/app.py",
         "services_checker/bundletool-all-1.18.1.jar",
@@ -962,8 +975,12 @@ def test_build_scripts_clean_outputs() -> None:
         _assert(service_asset in mac_script, f"macOS build must package {service_asset}")
     _assert('--add-data "sdk_check_presets.json;."' in win_portable_script, "Windows portable build must package SDK presets")
     _assert('--add-data "sdk_check_presets.json;."' in win_installer_script, "Windows installer build must package SDK presets")
-    _assert('--collect-submodules "androguard.core"' in win_portable_script, "Windows portable build must package manifest parser dependencies")
-    _assert('--collect-submodules "androguard.core"' in win_installer_script, "Windows installer build must package manifest parser dependencies")
+    _assert('--collect-submodules "androguard.core"' in win_portable_script, "Windows portable build must package manifest parser submodules")
+    _assert('--collect-submodules "androguard.core"' in win_installer_script, "Windows installer build must package manifest parser submodules")
+    _assert('--collect-data "androguard"' in win_portable_script, "Windows portable build must package manifest parser data")
+    _assert('--collect-data "androguard"' in win_installer_script, "Windows installer build must package manifest parser data")
+    _assert('--hidden-import "androguard.core.axml"' in win_portable_script, "Windows portable build must include AXMLPrinter explicitly")
+    _assert('--hidden-import "androguard.core.axml"' in win_installer_script, "Windows installer build must include AXMLPrinter explicitly")
     for service_asset in (
         "services_checker\\app.py",
         "services_checker\\bundletool-all-1.18.1.jar",
@@ -977,7 +994,9 @@ def test_build_scripts_clean_outputs() -> None:
         _assert(service_asset in win_installer_script, f"Windows installer build must package {service_asset}")
     spec_text = (ROOT / "EventInspector.spec").read_text(encoding="utf-8", errors="ignore")
     _assert("('sdk_check_presets.json', '.')" in spec_text, "PyInstaller spec must package SDK presets")
+    _assert("collect_data_files('androguard')" in spec_text, "PyInstaller spec must collect manifest parser data")
     _assert("collect_submodules('androguard.core')" in spec_text, "PyInstaller spec must include manifest parser submodules")
+    _assert("'androguard.core.axml'" in spec_text, "PyInstaller spec must include AXMLPrinter explicitly")
     _assert("('services_checker', 'services_checker')" not in spec_text, "PyInstaller spec must not package runtime upload files")
     for service_asset in (
         "services_checker/app.py",
@@ -1002,7 +1021,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-18-1-2.5.0-29' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-18-1-2.5.0-30' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
@@ -1027,7 +1046,7 @@ def test_services_checker_bridge_contract() -> None:
         _assert("_services_checker_saved_host_path" in payload_source, "saved host override missing")
         _assert("/api/services-checker/host" in payload_source, "host replacement API missing")
         _assert("/api/services-checker/reload" in payload_source, "Services Checker reload API missing")
-        _assert("servicesCheckerReloadBtn" in payload_source, "Services Checker reload UI missing")
+        _assert("servicesCheckerReloadBtn" not in payload_source, "obsolete Services Checker reload button must stay removed")
         _assert('id="servicesCheckerStatus"' in payload_source, "Services Checker status UI missing")
         _assert('id="servicesCheckerError"' in payload_source, "Services Checker error UI missing")
         _assert("Source: bundled with Event Inspector" not in payload_source, "obsolete Services Checker source label must stay removed")

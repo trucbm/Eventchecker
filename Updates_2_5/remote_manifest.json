@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-18-1-2.5.0-29",
+  "version": "2026-08-18-1-2.5.0-30",
   "update_enabled": true,
   "update_message": "",
   "files": [
@@ -11,8 +11,8 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Log_checker.py"
       ],
-      "sha256": "8834c365f4ee82724b06f3f880199541d40c51e4433f1dc98fc7f6f08648a43f",
-      "compat_sha256": "4a0b1a20b4b26058a0da14a0f6063258c6d146673860b120c7ae718d44c980da"
+      "sha256": "2624fa5cd13eb43c7fef89151438d4887de2721c4dfae847791bb965d81e9dc8",
+      "compat_sha256": "db29b6e576625a43d05910aec01c43cd3c474ca7712abf174a78868ee1b86572"
     },
     {
       "path": "remote_update.py",
@@ -23,7 +23,7 @@
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/remote_update.py"
       ],
       "sha256": "cd49e7021b76d83127e24f4d173c953e70ecb72daaa479de4c594814d6f68bc2",
-      "compat_sha256": "ad373f8ff32a28acb7e009d4078999fd68e07353f8328e4973a4752fa34ab1be"
+      "compat_sha256": "cac37de31fcfedeeeddaa292ff55d37a2d029a45c1c339f6649f6d09cca0a170"
     },
     {
       "path": "sdk_check_presets.json",
@@ -33,7 +33,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/sdk_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/sdk_check_presets.json"
       ],
-      "sha256": "028a44e2e643d48268b16f7f6ec1a7c692ac2ac9466ff48222ed4e0c87249390"
+      "sha256": "3bb3d9cb3a1b4d18d0bdb0d609f9ff473ccfab97a53b5bb179a634f05e9f0b5c"
     },
     {
       "path": "remote_update_config_v250.json",
@@ -93,7 +93,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/gradle_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/gradle_check_presets.json"
       ],
-      "sha256": "aac5a1bdf8b7daef9c19fcaf083c42926ba42126c8721eb668fee79c8efae65a"
+      "sha256": "d0e29c2a480af8724e6a5594ea31fe9eaf9868656d251ed5ec6f71d4e6c2a09a"
     },
     {
       "path": "services_checker/podfile_check_presets.json",

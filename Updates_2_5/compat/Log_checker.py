@@ -32,7 +32,7 @@ from pathlib import Path
 from queue import Empty, Queue
 
 # Compatibility marker for the 2.4 desktop shell and the current handoff.
-LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(29)"
+LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(30)"
 
 # Khởi tạo ứng dụng Flask và SocketIO
 app = Flask(__name__)
@@ -2733,7 +2733,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(29)</title>
+    <title>Event Inspector v2.5.0(30)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -2810,7 +2810,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(29)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(30)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2865,7 +2865,7 @@ HTML_TEMPLATE = """
         <div class="mb-3 flex-shrink-0">
             <div class="flex justify-between items-end border-b border-gray-200">
                 <div class="flex flex-wrap">
-                    <button id="tabBtnLoadAdsExt" class="tab-btn active text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAdsExt')">Load Ads Ironsource</button>
+                    <button id="tabBtnLoadAdsExt" class="tab-btn active text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAdsExt')">Load Ads</button>
 
                     <button id="tabBtnValidator" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Validator')">Default Events/Params</button>
                     <button id="tabBtnSpecific" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Specific')">Specific Validator</button>
@@ -2913,11 +2913,11 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- TAB 2: Load Ads Ironsource -->
+            <!-- TAB 2: Load Ads -->
             <div id="tabContentLoadAdsExt">
                  <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border mb-3">
-                        <span class="text-sm font-semibold text-gray-700">Record Load Ads Ironsource:</span>
+                        <span class="text-sm font-semibold text-gray-700">Record Load Ads:</span>
                         <input type="text" id="sheetName_LoadAdsExt" placeholder="Tên Sheet..." class="border p-2 rounded text-sm w-48 outline-none">
                         <button id="btnRecord_LoadAdsExt" onclick="toggleRecord('LoadAdsExt')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-3 rounded shadow text-xs">Start Record</button>
                     </div>
@@ -2926,6 +2926,7 @@ HTML_TEMPLATE = """
                         <table class="min-w-full w-full bg-white table-fixed">
                             <colgroup>
                                 <col style="width:88px">
+                                <col style="width:100px">
                                 <col style="width:96px">
                                 <col style="width:112px">
                                 <col>
@@ -2933,6 +2934,7 @@ HTML_TEMPLATE = """
                             <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b">Provider</th>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b">Ad_network</th>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b">Format</th>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
@@ -3330,7 +3332,6 @@ HTML_TEMPLATE = """
                 <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="flex items-center justify-between gap-3 mb-3">
                         <span id="servicesCheckerStatus" class="text-sm text-slate-500" role="status">Ready to start.</span>
-                        <button id="servicesCheckerReloadBtn" type="button" class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">Reload</button>
                     </div>
                     <div id="servicesCheckerError" class="hidden mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert"></div>
                     <iframe id="servicesCheckerFrame" title="Services Checker" class="hidden w-full rounded-lg border border-slate-200 bg-white" style="height: 78vh; min-height: 620px;"></iframe>
@@ -3775,34 +3776,6 @@ HTML_TEMPLATE = """
             frame.classList.remove('hidden');
         }
 
-        async function reloadServicesChecker() {
-            const frame = document.getElementById('servicesCheckerFrame');
-            const button = document.getElementById('servicesCheckerReloadBtn');
-            if (!frame) return;
-            if (button) button.disabled = true;
-            setServicesCheckerError();
-            setServicesCheckerStatus('Reloading...', 'busy');
-            try {
-                const response = await fetch('/api/services-checker/reload', { method: 'POST' });
-                const data = await response.json();
-                if (!response.ok || !data.ok || !data.url) {
-                    throw new Error(data.error || 'services_checker_reload_failed');
-                }
-                showServicesCheckerFrame(data.url);
-                setServicesCheckerStatus(data.restarted
-                    ? 'Services Checker reloaded.'
-                    : 'Services Checker refreshed.');
-            } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                setServicesCheckerStatus('Services Checker unavailable.', 'error');
-                setServicesCheckerError(`Unable to reload Services Checker: ${message}`);
-            } finally {
-                if (button) button.disabled = false;
-            }
-        }
-
-        document.getElementById('servicesCheckerReloadBtn')?.addEventListener('click', reloadServicesChecker);
-
         async function openServicesChecker() {
             const frame = document.getElementById('servicesCheckerFrame');
             if (!frame) return;
@@ -4005,17 +3978,19 @@ HTML_TEMPLATE = """
             if (!tbody) return;
             const filtered = (selectedDevice === 'all') ? data : data.filter(e => e.device_id === selectedDevice);
 
+            const useAdNetwork = id === 'loadAdsExtTableBody';
+            const columnCount = useAdNetwork ? 5 : 4;
             if (filtered.length === 0) {
-                 tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-gray-400">Waiting for recording...</td></tr>';
+                 tbody.innerHTML = `<tr><td colspan="${columnCount}" class="text-center py-4 text-gray-400">Waiting for recording...</td></tr>`;
                  return;
             }
 
-            const useAdNetwork = id === 'loadAdsExtTableBody';
             tbody.innerHTML = filtered.map(e => `
                 <tr class="hover:bg-gray-50 border-b text-sm">
-                    <td class="py-2 px-2 text-purple-700 text-sm font-medium whitespace-nowrap">${e.device_name}</td>
-                    <td class="py-2 px-2 text-blue-600 text-sm font-medium whitespace-nowrap">${useAdNetwork ? (e.ad_network || e.ad_source || '') : (e.ad_source || e.ad_network || '')}</td>
-                    <td class="py-2 px-2 text-green-600 text-sm font-medium whitespace-nowrap">${e.ad_format}</td>
+                    <td class="py-2 px-2 text-purple-700 text-sm font-medium whitespace-nowrap">${escapeHTML(e.device_name || '')}</td>
+                    ${useAdNetwork ? `<td class="py-2 px-2 text-orange-600 text-sm font-medium whitespace-nowrap">${escapeHTML(e.provider || 'Unknown')}</td>` : ''}
+                    <td class="py-2 px-2 text-blue-600 text-sm font-medium whitespace-nowrap">${escapeHTML(useAdNetwork ? (e.ad_network || e.ad_source || '') : (e.ad_source || e.ad_network || ''))}</td>
+                    <td class="py-2 px-2 text-green-600 text-sm font-medium whitespace-nowrap">${escapeHTML(e.ad_format || '')}</td>
                     <td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${escapeHTML(e.raw_log || '')}</td>
                 </tr>
             `).join('');
@@ -6139,13 +6114,19 @@ def package_log_export_api():
 
 # --- BACKEND LOGIC ---
 
-def send_to_sheet(device_name, ad_source, ad_format, raw_log, log_type):
+def _normalize_load_ads_provider(value):
+    provider = str(value or "").strip().lower()
+    return provider or "Unknown"
+
+
+def send_to_sheet(device_name, ad_source, ad_format, raw_log, log_type, provider="Unknown"):
     """Gửi data lên Google Sheet nếu đang bật Recording cho loại Log cụ thể"""
     state = recording_states.get(log_type)
     if state and state["is_recording"] and state["current_sheet"]:
         payload = {
             "sheet_name": state["current_sheet"],
             "device_name": device_name,
+            "provider": _normalize_load_ads_provider(provider),
             "ad_source": ad_source,
             "ad_format": ad_format,
             "raw_log": raw_log
@@ -6208,6 +6189,9 @@ def process_load_ads_ext_log(line, device_id):
                 ad_revenue = data
             payload = ad_revenue.get("Payload") if isinstance(ad_revenue.get("Payload"), dict) else {}
 
+            provider = _normalize_load_ads_provider(
+                payload.get("ad_platform") or ad_revenue.get("ad_platform")
+            )
             ad_network = ad_revenue.get("AdNetwork") or payload.get("ad_network")
             fmt = payload.get("ad_format") or ad_revenue.get("AdFormat") or ad_revenue.get("AdType")
             if fmt and str(fmt).strip().lower() == "mrec":
@@ -6216,17 +6200,19 @@ def process_load_ads_ext_log(line, device_id):
             if ad_network and fmt:
                 d_name = get_ios_device_name(device_id)
                 with lock:
-                    if (device_id, ad_network, fmt, "ios_metrica") not in unique_load_ads_ext:
-                        unique_load_ads_ext.add((device_id, ad_network, fmt, "ios_metrica"))
+                    dedup_key = (device_id, provider, ad_network, fmt, "ios_metrica")
+                    if dedup_key not in unique_load_ads_ext:
+                        unique_load_ads_ext.add(dedup_key)
                         load_ads_ext_events.append({
                             "device_id": device_id,
                             "device_name": d_name,
+                            "provider": provider,
                             "ad_network": ad_network,
                             "ad_format": fmt,
                             "raw_log": raw_log or line.strip()
                         })
                         socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
-                        send_to_sheet(d_name, ad_network, fmt, raw_log or line.strip(), "LoadAdsExt")
+                        send_to_sheet(d_name, ad_network, fmt, raw_log or line.strip(), "LoadAdsExt", provider)
             return
         except:
             pass
@@ -6237,6 +6223,9 @@ def process_load_ads_ext_log(line, device_id):
             parsed = parse_appmetrica_adrevenue_text(f"AdRevenue{{{match.group(1)}}}") or {}
             payload = parsed.get("payload") if isinstance(parsed.get("payload"), dict) else {}
 
+            provider = _normalize_load_ads_provider(
+                payload.get("ad_platform") or parsed.get("ad_platform")
+            )
             ad_network = parsed.get("adNetwork") or payload.get("ad_network")
             fmt = parsed.get("adType") or payload.get("ad_format")
             if fmt and str(fmt).strip().lower() == "mrec":
@@ -6245,11 +6234,13 @@ def process_load_ads_ext_log(line, device_id):
             if ad_network and fmt:
                 d_name = get_device_name(device_id)
                 with lock:
-                    if (device_id, ad_network, fmt, "metrica") not in unique_load_ads_ext:
-                        unique_load_ads_ext.add((device_id, ad_network, fmt, "metrica"))
+                    dedup_key = (device_id, provider, ad_network, fmt, "metrica")
+                    if dedup_key not in unique_load_ads_ext:
+                        unique_load_ads_ext.add(dedup_key)
                         load_ads_ext_events.append({
                             "device_id": device_id,
                             "device_name": d_name,
+                            "provider": provider,
                             "ad_network": ad_network,
                             "ad_format": fmt,
                             "raw_log": line.strip()
@@ -6257,7 +6248,7 @@ def process_load_ads_ext_log(line, device_id):
                         socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
 
                         # Gửi với type "LoadAdsExt"
-                        send_to_sheet(d_name, ad_network, fmt, line.strip(), "LoadAdsExt")
+                        send_to_sheet(d_name, ad_network, fmt, line.strip(), "LoadAdsExt", provider)
         except: pass
 
 def find_and_parse_event(log_entry):

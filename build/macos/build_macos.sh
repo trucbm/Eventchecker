@@ -55,6 +55,8 @@ pyinstaller --noconfirm --clean --windowed \
   --exclude-module "markupsafe._speedups" \
   --hidden-import "engineio.async_drivers.threading" \
   --collect-submodules "androguard.core" \
+  --collect-data "androguard" \
+  --hidden-import "androguard.core.axml" \
   --add-data "Log_checker.py:." \
   --add-data "Default event + Default Params.xlsx:." \
   --add-data "sdk_check_presets.json:." \
