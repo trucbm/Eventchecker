@@ -564,6 +564,15 @@ HTML_TEMPLATE = """
         .results-section ul { list-style-type: disc; padding-left: 1.5rem; }
         .results-section .data-list ul { list-style-type: none; padding-left: 0; } /* Specific for metadata and attributes */
         .results-section .code { background-color: #f3f4f6; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-family: monospace; }
+        #apk-scan-results-section > h2,
+        #gradle-scan-results-section > h2,
+        #podfile-scan-results-section > h2,
+        #manifest-results-section > h2,
+        #aab-conversion-results-section > h2 { font-size: 1.05rem !important; line-height: 1.3; }
+        .results-section h3, .results-section h4 { font-size: 0.9rem !important; line-height: 1.3; padding-bottom: 0.35rem; margin-bottom: 0.5rem; }
+        .results-section h5 { font-size: 0.8rem !important; line-height: 1.3; }
+        .results-section p, .results-section li { font-size: 0.78rem; line-height: 1.35; }
+        .results-section .code { font-size: 0.74rem; padding: 0.15rem 0.35rem; }
         .error-message { color: #ef4444; background-color: #fee2e2; padding: 0.75rem; border-radius: 0.375rem; margin-bottom: 1rem; border: 1px solid #fca5a5; }
         .info-message { color: #059669; background-color: #d1fae5; padding: 0.75rem; border-radius: 0.375rem; margin-bottom: 1rem; border: 1px solid #6ee7b7;}
         .warning-message { color: #f59e0b; background-color: #fef3c7; padding: 0.75rem; border-radius: 0.375rem; margin-bottom: 1rem; border: 1px solid #fcd34d;}
