@@ -6,6 +6,7 @@ import secrets  # For session key
 import re  # For version string parsing in APK scan and Gradle scan
 import configparser  # To parse .properties files
 import subprocess # For running bundletool
+import shutil
 import logging
 import importlib
 import importlib.util
@@ -1198,8 +1199,35 @@ HTML_TEMPLATE = """
                         // Let the HTTP Content-Disposition header drive the native
                         // WebView save dialog. This also works on Windows Qt WebView.
                         downloadLink.href = downloadUrl;
+                        downloadLink.download = apkFilename;
                         downloadLink.className = 'button';
                         downloadLink.title = 'Download generated APK';
+
+                        // Native WebViews do not consistently implement the
+                        // browser download pipeline. Save through the local
+                        // Services Checker process first, with the direct
+                        // response kept as a browser fallback.
+                        downloadLink.addEventListener('click', async (event) => {
+                            event.preventDefault();
+                            try {
+                                const saveResponse = await fetch(
+                                    '/save_download/' + encodeURIComponent(apkFilename),
+                                    { method: 'POST' }
+                                );
+                                const saveData = await saveResponse.json();
+                                if (!saveResponse.ok || !saveData.success) {
+                                    throw new Error(saveData.error || 'Could not save the generated APK.');
+                                }
+                                showMessage(
+                                    'APK saved to Downloads: ' + escapeHtml(saveData.filename),
+                                    'info'
+                                );
+                            } catch (saveError) {
+                                // Keep the original HTTP download available
+                                // for regular browsers and older builds.
+                                window.location.assign(downloadUrl);
+                            }
+                        });
 
                         // Add a download icon (simple SVG example)
                         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -2285,6 +2313,57 @@ def download_file(filename):
     else:
         logger.warning(f"Filename '{filename}' not found as a key in session's downloadable_files.")
         return "File not found or access denied (invalid link or session expired).", 404
+
+
+@app.route('/save_download/<filename>', methods=['POST'])
+def save_download_file(filename):
+    """Copies a generated file to the current user's Downloads directory.
+
+    This avoids relying on native WebView download support, which differs
+    between WebKit on macOS and Qt WebEngine on Windows.
+    """
+    logger.info(f"Save-to-Downloads request received for filename: '{filename}'")
+
+    if '..' in filename or filename.startswith('/') or os.path.basename(filename) != filename:
+        return jsonify({'success': False, 'error': 'Invalid filename.'}), 400
+
+    downloadable_files = session.get('downloadable_files', {})
+    file_path_on_disk = downloadable_files.get(filename)
+    if not file_path_on_disk:
+        return jsonify({'success': False, 'error': 'File not found or the conversion session expired.'}), 404
+
+    upload_root = os.path.abspath(app.config['UPLOAD_FOLDER'])
+    source_path = os.path.abspath(file_path_on_disk)
+    try:
+        inside_upload_folder = os.path.commonpath([upload_root, source_path]) == upload_root
+    except ValueError:
+        inside_upload_folder = False
+    if not inside_upload_folder:
+        logger.error(f"Security Error: refusing to copy file outside UPLOAD_FOLDER: {source_path}")
+        return jsonify({'success': False, 'error': 'Invalid generated file path.'}), 403
+    if not os.path.isfile(source_path):
+        return jsonify({'success': False, 'error': 'Generated APK is no longer available on the server.'}), 404
+
+    downloads_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
+    try:
+        os.makedirs(downloads_dir, exist_ok=True)
+        destination = os.path.join(downloads_dir, filename)
+        stem, extension = os.path.splitext(filename)
+        suffix = 1
+        while os.path.exists(destination):
+            destination = os.path.join(downloads_dir, f'{stem} ({suffix}){extension}')
+            suffix += 1
+        shutil.copy2(source_path, destination)
+    except OSError as error:
+        logger.error(f"Failed to save generated file to Downloads: {error}", exc_info=True)
+        return jsonify({'success': False, 'error': f'Could not save APK to Downloads: {error}'}), 500
+
+    logger.info(f"Saved generated file to Downloads: {destination}")
+    return jsonify({
+        'success': True,
+        'filename': os.path.basename(destination),
+        'directory': downloads_dir,
+    })
 
 def cleanup_session_files():
     """Cleans up all files tracked via session keys."""

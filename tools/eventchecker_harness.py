@@ -556,12 +556,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(34)" in text, "Log_checker.py must be prepared for v2.5.0(34)")
+    _assert("v2.5.0(35)" in text, "Log_checker.py must be prepared for v2.5.0(35)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(34)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(35)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -694,11 +694,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-18-1-2.5.0-34", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-18-1-2.5.0-35", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(34\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(35\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -856,9 +856,9 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-18-1-2.5.0-34", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-18-1-2.5.0-35", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 34, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 35, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
@@ -1028,7 +1028,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-18-1-2.5.0-34' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-18-1-2.5.0-35' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
@@ -1111,6 +1111,18 @@ def test_native_download_contract() -> None:
     service_source = service_path.read_text(encoding="utf-8", errors="ignore")
     _assert("@app.route('/download/<filename>')" in service_source, "Services Checker download route is missing")
     _assert("as_attachment=True" in service_source, "Services Checker download route must return an attachment")
+    _assert(
+        "@app.route('/save_download/<filename>', methods=['POST'])" in service_source,
+        "Services Checker native save route is missing",
+    )
+    _assert(
+        "'/save_download/' + encodeURIComponent(apkFilename)" in service_source,
+        "AAB download button must use the native-safe save route",
+    )
+    _assert(
+        "downloadLink.addEventListener('click'" in service_source,
+        "AAB download button must handle native WebView clicks",
+    )
 
 
 TESTS: List[Callable[[], None]] = [
