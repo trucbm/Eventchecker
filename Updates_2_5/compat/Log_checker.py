@@ -32,7 +32,7 @@ from pathlib import Path
 from queue import Empty, Queue
 
 # Compatibility marker for the 2.4 desktop shell and the current handoff.
-LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(28)"
+LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(29)"
 
 # Khởi tạo ứng dụng Flask và SocketIO
 app = Flask(__name__)
@@ -2733,7 +2733,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(28)</title>
+    <title>Event Inspector v2.5.0(29)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -2810,7 +2810,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(28)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(29)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3328,6 +3328,11 @@ HTML_TEMPLATE = """
             <!-- TAB 8A: Services Checker -->
             <div id="tabContentServicesChecker" class="hidden">
                 <div class="bg-white rounded-xl shadow-md p-4">
+                    <div class="flex items-center justify-between gap-3 mb-3">
+                        <span id="servicesCheckerStatus" class="text-sm text-slate-500" role="status">Ready to start.</span>
+                        <button id="servicesCheckerReloadBtn" type="button" class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">Reload</button>
+                    </div>
+                    <div id="servicesCheckerError" class="hidden mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert"></div>
                     <iframe id="servicesCheckerFrame" title="Services Checker" class="hidden w-full rounded-lg border border-slate-200 bg-white" style="height: 78vh; min-height: 620px;"></iframe>
                 </div>
             </div>
@@ -3744,27 +3749,53 @@ HTML_TEMPLATE = """
         else showPlatformModal();
 
         // --- Tab Logic ---
-        async function reloadServicesChecker() {
+        function setServicesCheckerStatus(message, state = 'idle') {
             const status = document.getElementById('servicesCheckerStatus');
+            if (!status) return;
+            status.textContent = message;
+            status.className = state === 'error'
+                ? 'text-sm text-red-700'
+                : state === 'busy'
+                    ? 'text-sm text-amber-700'
+                    : 'text-sm text-slate-500';
+        }
+
+        function setServicesCheckerError(message = '') {
+            const errorBox = document.getElementById('servicesCheckerError');
+            if (!errorBox) return;
+            errorBox.textContent = message;
+            errorBox.classList.toggle('hidden', !message);
+        }
+
+        function showServicesCheckerFrame(url) {
+            const frame = document.getElementById('servicesCheckerFrame');
+            if (!frame) return;
+            frame.src = `${url}/?eventinspector=${Date.now()}`;
+            frame.dataset.started = 'true';
+            frame.classList.remove('hidden');
+        }
+
+        async function reloadServicesChecker() {
             const frame = document.getElementById('servicesCheckerFrame');
             const button = document.getElementById('servicesCheckerReloadBtn');
-            if (!status || !frame) return;
+            if (!frame) return;
             if (button) button.disabled = true;
-            status.textContent = 'Reloading Services Checker...';
+            setServicesCheckerError();
+            setServicesCheckerStatus('Reloading...', 'busy');
             try {
                 const response = await fetch('/api/services-checker/reload', { method: 'POST' });
                 const data = await response.json();
                 if (!response.ok || !data.ok || !data.url) {
                     throw new Error(data.error || 'services_checker_reload_failed');
                 }
-                frame.src = `${data.url}/?reload=${Date.now()}`;
-                frame.dataset.started = 'true';
-                frame.classList.remove('hidden');
-                status.textContent = data.restarted
+                showServicesCheckerFrame(data.url);
+                setServicesCheckerStatus(data.restarted
                     ? 'Services Checker reloaded.'
-                    : 'Services Checker refreshed.';
+                    : 'Services Checker refreshed.');
             } catch (error) {
-                status.textContent = 'Unable to reload Services Checker: ' + error;
+                const message = error instanceof Error ? error.message : String(error);
+                setServicesCheckerStatus('Services Checker unavailable.', 'error');
+                setServicesCheckerError(`Unable to reload Services Checker: ${message}`);
             } finally {
                 if (button) button.disabled = false;
             }
@@ -3773,24 +3804,24 @@ HTML_TEMPLATE = """
         document.getElementById('servicesCheckerReloadBtn')?.addEventListener('click', reloadServicesChecker);
 
         async function openServicesChecker() {
-            const status = document.getElementById('servicesCheckerStatus');
             const frame = document.getElementById('servicesCheckerFrame');
-            if (!status || !frame) return;
+            if (!frame) return;
             if (frame.dataset.started === 'true') return;
 
-            status.textContent = 'Starting Services Checker...';
+            setServicesCheckerError();
+            setServicesCheckerStatus('Starting...', 'busy');
             try {
                 const response = await fetch('/api/services-checker/start', { method: 'POST' });
                 const data = await response.json();
                 if (!response.ok || !data.ok || !data.url) {
                     throw new Error(data.error || 'services_checker_start_failed');
                 }
-                frame.src = data.url;
-                frame.dataset.started = 'true';
-                frame.classList.remove('hidden');
-                status.textContent = 'Services Checker is running locally.';
+                showServicesCheckerFrame(data.url);
+                setServicesCheckerStatus('Ready.');
             } catch (error) {
-                status.textContent = 'Unable to start Services Checker: ' + error;
+                const message = error instanceof Error ? error.message : String(error);
+                setServicesCheckerStatus('Services Checker unavailable.', 'error');
+                setServicesCheckerError(`Unable to start Services Checker: ${message}`);
                 frame.dataset.started = 'false';
             }
         }
