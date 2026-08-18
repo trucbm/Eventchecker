@@ -6,6 +6,7 @@ import time
 import requests
 import html
 import importlib.util
+import importlib
 from collections import deque
 from flask import Flask, render_template_string, request, jsonify, Response
 from flask_socketio import SocketIO
@@ -741,6 +742,22 @@ def _find_services_checker_port(preferred=SERVICES_CHECKER_DEFAULT_PORT):
         return int(probe.getsockname()[1])
 
 
+def _prepare_services_checker_runtime(app_path):
+    """Make bundled androguard importable before dynamically loading app.py."""
+    roots = [os.path.dirname(os.path.dirname(os.path.abspath(app_path)))]
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        roots.insert(0, meipass)
+    for root in roots:
+        if root and os.path.isdir(root) and root not in sys.path:
+            sys.path.insert(0, root)
+    try:
+        importlib.invalidate_caches()
+        importlib.import_module("androguard.core.axml")
+    except Exception as exc:
+        logging.debug("Services Checker androguard preload unavailable: %s", exc)
+
+
 def _start_services_checker():
     with _services_checker_lock:
         existing_url = _services_checker_state.get("url")
@@ -826,12 +843,18 @@ def _start_services_checker():
                 "Set EVENTINSPECTOR_SERVICES_COMMAND or install the bundled checker."
             )
 
+        _prepare_services_checker_runtime(app_path)
         module_name = f"eventinspector_services_checker_{os.getpid()}"
         spec = importlib.util.spec_from_file_location(module_name, app_path)
         if not spec or not spec.loader:
             raise RuntimeError(f"Cannot load Services Checker from {app_path}")
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            sys.modules.pop(module_name, None)
+            raise
         service_app = getattr(module, "app", None)
         if service_app is None:
             raise RuntimeError("Services Checker did not expose a Flask app")
@@ -2743,7 +2766,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(30)</title>
+    <title>Event Inspector v2.5.0(31)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -2820,7 +2843,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(30)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(31)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>

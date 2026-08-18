@@ -556,12 +556,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(30)" in text, "Log_checker.py must be prepared for v2.5.0(30)")
+    _assert("v2.5.0(31)" in text, "Log_checker.py must be prepared for v2.5.0(31)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(30)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(31)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -694,11 +694,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-18-1-2.5.0-30", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-18-1-2.5.0-31", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(30\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(31\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -856,9 +856,9 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-18-1-2.5.0-30", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-18-1-2.5.0-31", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 30, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 31, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
@@ -1021,7 +1021,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-18-1-2.5.0-30' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-18-1-2.5.0-31' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
@@ -1043,6 +1043,8 @@ def test_services_checker_bridge_contract() -> None:
         _assert("force_drive_import" in payload_source, "stale Services Checker source must be bypassed")
         _assert("subprocess.Popen" in payload_source, "Services Checker launcher missing")
         _assert("_services_checker_ready" in payload_source, "Services Checker readiness check missing")
+        _assert("_prepare_services_checker_runtime" in payload_source, "Services Checker bundle import preparation missing")
+        _assert('importlib.import_module("androguard.core.axml")' in payload_source, "Services Checker androguard preload missing")
         _assert("_services_checker_saved_host_path" in payload_source, "saved host override missing")
         _assert("/api/services-checker/host" in payload_source, "host replacement API missing")
         _assert("/api/services-checker/reload" in payload_source, "Services Checker reload API missing")
@@ -1072,6 +1074,9 @@ def test_services_checker_bridge_contract() -> None:
         _assert("SERVICE_APP_PATH" in launcher_source, "Windows launcher override missing")
 
     service_source = (ROOT / "services_checker" / "app.py").read_text(encoding="utf-8")
+    _assert("def _load_axml_printer()" in service_source, "Services Checker AXML retry loader is missing")
+    _assert('importlib.import_module("androguard.core.axml")' in service_source, "Services Checker AXML import is not explicit")
+    _assert(".container h2.text-xl" in service_source, "Services Checker typography override is missing")
     _assert("value.join('\\\\n')" in service_source, "bundled Services Checker newline escape is invalid")
     key_path = ROOT / "services_checker" / "my-key.keystore"
     _assert(key_path.is_file() and key_path.stat().st_size > 0, "bundled test keystore is missing")

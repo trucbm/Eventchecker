@@ -7,6 +7,7 @@ import re  # For version string parsing in APK scan and Gradle scan
 import configparser  # To parse .properties files
 import subprocess # For running bundletool
 import logging
+import importlib
 from pathlib import Path # For finding home directory
 from urllib.parse import quote
 import xml.etree.ElementTree as ET # Still needed for the object structure
@@ -46,21 +47,41 @@ except Exception as e_flask_other:
 # --- Try importing the required library for binary XML (androguard) ---
 androguard_axml_available = False
 AXMLPrinter_class_from_androguard = None
-print("--- Attempting to import AXMLPrinter from androguard.core.axml ---")
-try:
-    from androguard.core.axml import AXMLPrinter
-    AXMLPrinter_class_from_androguard = AXMLPrinter
-    androguard_axml_available = True
-    print("Successfully imported AXMLPrinter from androguard.core.axml.")
-except ImportError as e_androguard:
-    print(f"ERROR: Failed to import AXMLPrinter from androguard.core.axml. ImportError: {e_androguard}")
-    print("Please ensure androguard is installed (pip install androguard) and accessible.")
-    print("Full traceback for androguard import error:")
-    traceback.print_exc()
-except Exception as e_other_androguard:
-    print(f"ERROR: An unexpected error occurred while trying to import from androguard: {e_other_androguard}")
-    print("Full traceback for other androguard import error:")
-    traceback.print_exc()
+
+
+def _load_axml_printer():
+    """Load AXMLPrinter from source, update, or PyInstaller bundle paths."""
+    global androguard_axml_available, AXMLPrinter_class_from_androguard
+
+    roots = [os.path.dirname(os.path.dirname(os.path.abspath(__file__)))]
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        roots.insert(0, meipass)
+    for root in roots:
+        if root and os.path.isdir(root) and root not in sys.path:
+            sys.path.insert(0, root)
+
+    print("--- Attempting to import AXMLPrinter from androguard.core.axml ---")
+    try:
+        importlib.invalidate_caches()
+        axml_module = importlib.import_module("androguard.core.axml")
+        printer = getattr(axml_module, "AXMLPrinter", None)
+        if printer is None:
+            raise ImportError("androguard.core.axml does not expose AXMLPrinter")
+        AXMLPrinter_class_from_androguard = printer
+        androguard_axml_available = True
+        print("Successfully imported AXMLPrinter from androguard.core.axml.")
+        return True
+    except Exception as error:
+        androguard_axml_available = False
+        AXMLPrinter_class_from_androguard = None
+        print(f"ERROR: Failed to import AXMLPrinter from androguard.core.axml: {error}")
+        print("Please ensure androguard is installed and included in the application bundle.")
+        traceback.print_exc()
+        return False
+
+
+_load_axml_printer()
 print("--------------------------------------------------------------------")
 # --- End Import ---
 
@@ -375,6 +396,11 @@ def extract_manifest_data(apk_path):
     error_message = None
 
     if not androguard_axml_available or AXMLPrinter_class_from_androguard is None:
+        # A dynamically loaded app.py can run before the frozen import hook is
+        # ready. Retry once at request time instead of returning a false
+        # "install androguard" error permanently.
+        _load_axml_printer()
+    if not androguard_axml_available or AXMLPrinter_class_from_androguard is None:
         logger.error("AXMLPrinter from androguard.core.axml was not available/accessible at script startup.")
         return [], {}, {}, "Manifest parsing requires AXMLPrinter from 'androguard', which was not found/accessible. Please install `androguard` and restart the application."
 
@@ -485,6 +511,10 @@ HTML_TEMPLATE = """
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; }
+        .container h2.text-xl { font-size: 1.1rem !important; line-height: 1.35; }
+        .container h3.text-lg { font-size: 1rem !important; line-height: 1.35; }
+        .container > .mb-6 .tab-button { font-size: 0.8rem; padding: 0.45rem 0.85rem; }
+        .container .error-message, .container .info-message, .container .warning-message { font-size: 0.9rem; }
         .container { max-width: 900px; margin: 2rem auto; padding: 1.5rem; }
         .card { background-color: white; border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); padding: 1.5rem; margin-bottom: 1.5rem; }
         .button { background-color: #3b82f6; color: white; padding: 0.75rem 1.5rem; border-radius: 0.375rem; border: none; cursor: pointer; font-weight: 500; transition: background-color 0.2s; display: inline-flex; align-items: center; justify-content: center; }
