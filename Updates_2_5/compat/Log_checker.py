@@ -462,6 +462,7 @@ SERVICES_CHECKER_APP_RELATIVE_PATH = os.path.join(
     "app.py",
 )
 SERVICES_CHECKER_KEYSTORE_FILENAME = "my-key.keystore"
+SERVICES_CHECKER_EXTERNAL_ENV = "EVENTINSPECTOR_ALLOW_EXTERNAL_SERVICES_CHECKER"
 _services_checker_lock = threading.Lock()
 _services_checker_state = {
     "module": None,
@@ -472,6 +473,16 @@ _services_checker_state = {
     "source": "",
     "error": "",
 }
+
+
+def _services_checker_external_sources_enabled():
+    """Keep Drive/launcher hosts opt-in after the bundled migration."""
+    return os.getenv(SERVICES_CHECKER_EXTERNAL_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _services_checker_drive_app_candidates():
@@ -530,23 +541,29 @@ def _services_checker_launcher_is_drive_aware(path):
 
 
 def _services_checker_file_candidates():
-    candidates = _services_checker_drive_app_candidates()
+    candidates = []
     update_dir = os.getenv("EVENTINSPECTOR_UPDATE_DIR")
     if update_dir:
         candidates.append(os.path.join(update_dir, "services_checker", "app.py"))
-    candidates.append(os.path.join(SCRIPT_DIR, "services_checker", "app.py"))
 
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         candidates.append(os.path.join(meipass, "services_checker", "app.py"))
+    candidates.append(os.path.join(SCRIPT_DIR, "services_checker", "app.py"))
     if getattr(sys, "frozen", False):
         candidates.append(os.path.join(os.path.dirname(sys.executable), "services_checker", "app.py"))
+
+    if _services_checker_external_sources_enabled():
+        candidates.extend(_services_checker_drive_app_candidates())
 
     seen = set()
     return [path for path in candidates if path and not (path in seen or seen.add(path))]
 
 
 def _services_checker_command_candidates():
+    if not _services_checker_external_sources_enabled():
+        return []
+
     candidates = []
     configured = os.getenv("EVENTINSPECTOR_SERVICES_COMMAND", "").strip()
     if configured:
@@ -724,9 +741,10 @@ def _start_services_checker():
             return existing_url
 
         external_url = _services_checker_external_url()
-        drive_app_path = next(iter(_services_checker_drive_app_candidates()), "")
-        external_ready = _services_checker_ready(external_url)
-        if external_ready and (
+        external_enabled = _services_checker_external_sources_enabled()
+        drive_app_path = next(iter(_services_checker_drive_app_candidates()), "") if external_enabled else ""
+        external_ready = _services_checker_ready(external_url) if external_enabled else False
+        if external_enabled and external_ready and (
             not drive_app_path or _services_checker_uses_shared_keystore(external_url)
         ):
             _services_checker_state.update({
@@ -737,7 +755,7 @@ def _start_services_checker():
             })
             return external_url
 
-        force_drive_import = bool(external_ready and drive_app_path)
+        force_drive_import = bool(external_enabled and external_ready and drive_app_path)
 
         command_path = next(
             (path for path in _services_checker_command_candidates() if os.path.isfile(path)),
@@ -3313,12 +3331,10 @@ HTML_TEMPLATE = """
                     <div class="flex items-center justify-between gap-3 mb-3">
                         <div>
                             <h2 class="text-lg font-semibold">Services Checker</h2>
-                            <p id="servicesCheckerStatus" class="text-xs text-slate-500 mt-1">Ready to open the companion checker.</p>
-                            <p id="servicesCheckerHostStatus" class="text-[11px] text-slate-400 mt-1">Host file: auto-detect</p>
+                            <p id="servicesCheckerStatus" class="text-xs text-slate-500 mt-1">Ready to open the bundled checker.</p>
+                            <p id="servicesCheckerHostStatus" class="text-[11px] text-slate-400 mt-1">Source: bundled with Event Inspector</p>
                         </div>
                         <div class="flex items-center gap-2">
-                            <input id="servicesCheckerHostFileInput" type="file" accept=".command,.sh,.cmd,.bat" class="hidden">
-                            <button id="servicesCheckerReplaceHostBtn" type="button" class="text-xs font-semibold py-2 px-3 rounded-lg shadow-sm bg-slate-600 hover:bg-slate-700 text-white">Replace Host</button>
                             <button id="servicesCheckerReloadBtn" type="button" class="text-xs font-semibold py-2 px-3 rounded-lg shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white">Reload</button>
                         </div>
                     </div>
@@ -3741,16 +3757,7 @@ HTML_TEMPLATE = """
         async function loadServicesCheckerHostStatus() {
             const hostStatus = document.getElementById('servicesCheckerHostStatus');
             if (!hostStatus) return;
-            try {
-                const response = await fetch('/api/services-checker/host', { cache: 'no-store' });
-                const data = await response.json();
-                if (!response.ok || !data.ok) throw new Error(data.error || 'host_status_failed');
-                hostStatus.textContent = data.saved
-                    ? `Host file: ${data.filename} (saved override)`
-                    : 'Host file: auto-detect';
-            } catch (error) {
-                hostStatus.textContent = 'Host file: status unavailable';
-            }
+            hostStatus.textContent = 'Source: bundled with Event Inspector (no Drive dependency)';
         }
 
         async function reloadServicesChecker() {
@@ -3780,36 +3787,6 @@ HTML_TEMPLATE = """
             }
         }
 
-        async function replaceServicesCheckerHost(file) {
-            const status = document.getElementById('servicesCheckerStatus');
-            if (!file || !status) return;
-            const formData = new FormData();
-            formData.append('host_file', file);
-            status.textContent = 'Saving host file...';
-            try {
-                const response = await fetch('/api/services-checker/host', {
-                    method: 'POST',
-                    body: formData,
-                });
-                const data = await response.json();
-                if (!response.ok || !data.ok) {
-                    throw new Error(data.error || 'host_file_save_failed');
-                }
-                await loadServicesCheckerHostStatus();
-                await reloadServicesChecker();
-            } catch (error) {
-                status.textContent = 'Unable to save host file: ' + error;
-            }
-        }
-
-        document.getElementById('servicesCheckerReplaceHostBtn')?.addEventListener('click', () => {
-            document.getElementById('servicesCheckerHostFileInput')?.click();
-        });
-        document.getElementById('servicesCheckerHostFileInput')?.addEventListener('change', (event) => {
-            const file = event.target.files && event.target.files[0];
-            replaceServicesCheckerHost(file);
-            event.target.value = '';
-        });
         document.getElementById('servicesCheckerReloadBtn')?.addEventListener('click', reloadServicesChecker);
 
         async function openServicesChecker() {

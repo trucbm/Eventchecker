@@ -25,6 +25,7 @@ pyinstaller --noconfirm --clean --windowed --icon assets\\app.ico --name "EventI
   --collect-submodules "engineio" ^
   --collect-submodules "socketio" ^
   --collect-submodules "webview" ^
+  --collect-submodules "androguard.core" ^
   --hidden-import "qtpy" ^
   --hidden-import "qtpy.QtCore" ^
   --hidden-import "qtpy.QtGui" ^
@@ -44,7 +45,10 @@ pyinstaller --noconfirm --clean --windowed --icon assets\\app.ico --name "EventI
   --add-data "Default event + Default Params.xlsx;." ^
   --add-data "sdk_check_presets.json;." ^
   --add-data "remote_update_config_v250.json;." ^
-  --add-data "services_checker;services_checker" ^
+  --add-data "services_checker\app.py;services_checker" ^
+  --add-data "services_checker\bundletool-all-1.18.1.jar;services_checker" ^
+  --add-data "services_checker\build_check_presets.json;services_checker" ^
+  --add-data "services_checker\my-key.keystore;services_checker" ^
   desktop_app.py
 
 REM Build installer (requires Inno Setup installed and ISCC on PATH)

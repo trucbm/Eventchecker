@@ -1,5 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_submodules
+
+
+# The bundled Services Checker only needs binary-XML parsing. Collecting the
+# whole package also imports the optional pentest/frida modules and breaks
+# PyInstaller builds when frida is not installed.
+androguard_hiddenimports = collect_submodules('androguard.core')
+
+# Keep runtime-generated uploads and extracted files out of the packaged app.
+services_checker_datas = [
+    ('services_checker/app.py', 'services_checker'),
+    ('services_checker/bundletool-all-1.18.1.jar', 'services_checker'),
+    ('services_checker/build_check_presets.json', 'services_checker'),
+    ('services_checker/my-key.keystore', 'services_checker'),
+]
 
 a = Analysis(
     ['desktop_app.py'],
@@ -10,9 +25,9 @@ a = Analysis(
         ('Default event + Default Params.xlsx', '.'),
         ('sdk_check_presets.json', '.'),
         ('remote_update_config_v250.json', '.'),
-        ('services_checker', 'services_checker'),
+        *services_checker_datas,
     ],
-    hiddenimports=['engineio.async_drivers.threading'],
+    hiddenimports=['engineio.async_drivers.threading', *androguard_hiddenimports],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

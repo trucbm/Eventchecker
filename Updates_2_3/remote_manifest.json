@@ -11,7 +11,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/compat/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/compat/Log_checker.py"
       ],
-      "sha256": "5181883dfc6cb6a6b34809f3f265ae4a06ba2c2192378e997f7d154f12db3827"
+      "sha256": "a4bd152c1715293dd2dac82877442bb706d0f4d5272546c8c529906e8581a174"
     },
     {
       "path": "remote_update.py",
@@ -51,7 +51,17 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/app.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/app.py"
       ],
-      "sha256": "c1af6f1872170b8fa0a42896632f9ee08fac984116643f9579a3c59eecac4cf8"
+      "sha256": "108f334630b469fa27af3f51d57fe21688ddb1f117e776703e1f1a29108d6ffa"
+    },
+    {
+      "path": "services_checker/my-key.keystore",
+      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/my-key.keystore",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/my-key.keystore",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/my-key.keystore",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/my-key.keystore"
+      ],
+      "sha256": "48c751cdf0af6d6ed98b0111f852abb988bf27b1398d6ac309c98a95d4ba5d44"
     },
     {
       "path": "services_checker/bundletool-all-1.18.1.jar",

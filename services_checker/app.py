@@ -178,9 +178,9 @@ PODFILE_LIB_MAPPING = {
 # This is for convenience in a controlled environment.
 DEFAULT_KEYSTORE_FILENAME = "my-key.keystore"  # Assumed to be in the APP_ROOT directory
 DEFAULT_KEYSTORE_ALIAS = "alias_name"
-DEFAULT_KEYSTORE_PASS = ""
-DEFAULT_KEY_PASS = ""
-USE_HARDCODED_KEYSTORE = False # Never embed signing credentials in the desktop tool.
+DEFAULT_KEYSTORE_PASS = "112233"
+DEFAULT_KEY_PASS = "112233"
+USE_HARDCODED_KEYSTORE = True # This is a non-production test key bundled for AAB conversion.
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
@@ -2290,9 +2290,9 @@ PODFILE_LIB_MAPPING = {
 # This is for convenience in a controlled environment.
 DEFAULT_KEYSTORE_FILENAME = "my-key.keystore"  # Assumed to be in the APP_ROOT directory
 DEFAULT_KEYSTORE_ALIAS = "alias_name"
-DEFAULT_KEYSTORE_PASS = ""
-DEFAULT_KEY_PASS = ""
-USE_HARDCODED_KEYSTORE = False # Never embed signing credentials in the desktop tool.
+DEFAULT_KEYSTORE_PASS = "112233"
+DEFAULT_KEY_PASS = "112233"
+USE_HARDCODED_KEYSTORE = True # This is a non-production test key bundled for AAB conversion.
 
 # --- Flask App Initialization ---
 app = Flask(__name__)

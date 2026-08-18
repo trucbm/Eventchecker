@@ -54,11 +54,15 @@ pyinstaller --noconfirm --clean --windowed \
   --target-arch "$MACOS_TARGET_ARCH" \
   --exclude-module "markupsafe._speedups" \
   --hidden-import "engineio.async_drivers.threading" \
+  --collect-submodules "androguard.core" \
   --add-data "Log_checker.py:." \
   --add-data "Default event + Default Params.xlsx:." \
   --add-data "sdk_check_presets.json:." \
   --add-data "remote_update_config_v250.json:." \
-  --add-data "services_checker:services_checker" \
+  --add-data "services_checker/app.py:services_checker" \
+  --add-data "services_checker/bundletool-all-1.18.1.jar:services_checker" \
+  --add-data "services_checker/build_check_presets.json:services_checker" \
+  --add-data "services_checker/my-key.keystore:services_checker" \
   --icon assets/app.icns --name "EventInspector" desktop_app.py
 
 # Create DMG (simple)

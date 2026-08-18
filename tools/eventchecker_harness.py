@@ -823,10 +823,37 @@ def test_build_scripts_clean_outputs() -> None:
     _assert('--exclude-module "markupsafe._speedups"' in mac_script, "macOS universal build must avoid the arm64-only MarkupSafe speedup")
     _assert('--add-data "Log_checker.py:."' in mac_script, "macOS build must package the bundled release marker")
     _assert('--add-data "sdk_check_presets.json:."' in mac_script, "macOS build must package SDK presets")
+    _assert('--collect-submodules "androguard.core"' in mac_script, "macOS build must package manifest parser dependencies")
+    for service_asset in (
+        "services_checker/app.py",
+        "services_checker/bundletool-all-1.18.1.jar",
+        "services_checker/build_check_presets.json",
+        "services_checker/my-key.keystore",
+    ):
+        _assert(service_asset in mac_script, f"macOS build must package {service_asset}")
     _assert('--add-data "sdk_check_presets.json;."' in win_portable_script, "Windows portable build must package SDK presets")
     _assert('--add-data "sdk_check_presets.json;."' in win_installer_script, "Windows installer build must package SDK presets")
+    _assert('--collect-submodules "androguard.core"' in win_portable_script, "Windows portable build must package manifest parser dependencies")
+    _assert('--collect-submodules "androguard.core"' in win_installer_script, "Windows installer build must package manifest parser dependencies")
+    for service_asset in (
+        "services_checker\\app.py",
+        "services_checker\\bundletool-all-1.18.1.jar",
+        "services_checker\\build_check_presets.json",
+        "services_checker\\my-key.keystore",
+    ):
+        _assert(service_asset in win_portable_script, f"Windows portable build must package {service_asset}")
+        _assert(service_asset in win_installer_script, f"Windows installer build must package {service_asset}")
     spec_text = (ROOT / "EventInspector.spec").read_text(encoding="utf-8", errors="ignore")
     _assert("('sdk_check_presets.json', '.')" in spec_text, "PyInstaller spec must package SDK presets")
+    _assert("collect_submodules('androguard.core')" in spec_text, "PyInstaller spec must include manifest parser submodules")
+    _assert("('services_checker', 'services_checker')" not in spec_text, "PyInstaller spec must not package runtime upload files")
+    for service_asset in (
+        "services_checker/app.py",
+        "services_checker/bundletool-all-1.18.1.jar",
+        "services_checker/build_check_presets.json",
+        "services_checker/my-key.keystore",
+    ):
+        _assert(service_asset in spec_text, f"PyInstaller spec must package {service_asset}")
 
     win_expected = [
         'if exist "dist\\EventInspector" rmdir /s /q "dist\\EventInspector"',
@@ -852,6 +879,8 @@ def test_services_checker_bridge_contract() -> None:
     source = (ROOT / "Log_checker.py").read_text(encoding="utf-8")
     compat_source = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(encoding="utf-8")
     for payload_source in (source, compat_source):
+        _assert("EVENTINSPECTOR_ALLOW_EXTERNAL_SERVICES_CHECKER" in payload_source, "bundled Services Checker source switch missing")
+        _assert("_services_checker_external_sources_enabled" in payload_source, "bundled Services Checker source policy missing")
         _assert("EVENTINSPECTOR_SERVICES_COMMAND" in payload_source, "Services Checker command override missing")
         _assert("AndroidTool.command" in payload_source, "Drive launcher fallback missing")
         _assert("Androidchecker.cmd" in payload_source, "Windows Drive launcher fallback missing")
@@ -863,9 +892,22 @@ def test_services_checker_bridge_contract() -> None:
         _assert("_services_checker_saved_host_path" in payload_source, "saved host override missing")
         _assert("/api/services-checker/host" in payload_source, "host replacement API missing")
         _assert("/api/services-checker/reload" in payload_source, "Services Checker reload API missing")
-        _assert("servicesCheckerReplaceHostBtn" in payload_source, "host replacement UI missing")
         _assert("servicesCheckerReloadBtn" in payload_source, "Services Checker reload UI missing")
+        _assert("Source: bundled with Event Inspector" in payload_source, "bundled Services Checker source label missing")
+        _assert("servicesCheckerReplaceHostBtn" not in payload_source, "host replacement UI must not be exposed in bundled mode")
         _assert('"services_checker", "app.py"' in payload_source, "bundled Services Checker fallback missing")
+
+        file_candidates_start = payload_source.index("def _services_checker_file_candidates")
+        command_candidates_start = payload_source.index("def _services_checker_command_candidates")
+        file_candidates_source = payload_source[file_candidates_start:command_candidates_start]
+        bundled_marker = 'candidates.append(os.path.join(SCRIPT_DIR, "services_checker", "app.py"))'
+        external_marker = "if _services_checker_external_sources_enabled():"
+        _assert(bundled_marker in file_candidates_source, "bundled Services Checker candidate missing")
+        _assert(external_marker in file_candidates_source, "external Services Checker fallback must be opt-in")
+        _assert(
+            file_candidates_source.index(bundled_marker) < file_candidates_source.index(external_marker),
+            "bundled Services Checker must be preferred over external sources",
+        )
 
     windows_launcher = Path.home() / "Downloads" / "Androidchecker.cmd"
     if windows_launcher.exists():
@@ -875,6 +917,8 @@ def test_services_checker_bridge_contract() -> None:
 
     service_source = (ROOT / "services_checker" / "app.py").read_text(encoding="utf-8")
     _assert("value.join('\\\\n')" in service_source, "bundled Services Checker newline escape is invalid")
+    key_path = ROOT / "services_checker" / "my-key.keystore"
+    _assert(key_path.is_file() and key_path.stat().st_size > 0, "bundled test keystore is missing")
 
 
 def test_native_download_contract() -> None:
