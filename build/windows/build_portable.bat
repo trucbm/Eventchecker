@@ -47,7 +47,10 @@ pyinstaller --noconfirm --clean --windowed --icon assets\app.ico --name "EventIn
   --add-data "remote_update_config_v250.json;." ^
   --add-data "services_checker\app.py;services_checker" ^
   --add-data "services_checker\bundletool-all-1.18.1.jar;services_checker" ^
-  --add-data "services_checker\build_check_presets.json;services_checker" ^
+  --add-data "services_checker\apk_check_presets.json;services_checker" ^
+  --add-data "services_checker\gradle_check_presets.json;services_checker" ^
+  --add-data "services_checker\podfile_check_presets.json;services_checker" ^
+  --add-data "services_checker\manifest_check_presets.json;services_checker" ^
   --add-data "services_checker\my-key.keystore;services_checker" ^
   desktop_app.py
 

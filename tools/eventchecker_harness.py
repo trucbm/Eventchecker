@@ -554,12 +554,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(27)" in text, "Log_checker.py must be prepared for v2.5.0(27)")
+    _assert("v2.5.0(28)" in text, "Log_checker.py must be prepared for v2.5.0(28)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(27)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(28)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -614,6 +614,67 @@ def test_price_rotation_exact_parser() -> None:
     _assert(lc._parse_price_rotation_log(interstitial_raw.replace("[Ad,InterstitialBidding,", "[Ad,InterstitialBiddingX,"), "device-price") is None, "Interstitial marker must be exact")
 
 
+def test_load_ads_provider_contract() -> None:
+    original_platform = lc.active_platform
+    original_recording_state = dict(lc.recording_states["LoadAdsExt"])
+    original_emit = lc.socketio.emit
+    try:
+        lc.active_platform = "ios"
+        lc.recording_states["LoadAdsExt"].update({"is_recording": True, "current_sheet": None})
+        lc.load_ads_ext_events.clear()
+        lc.unique_load_ads_ext.clear()
+        emitted = []
+        lc.socketio.emit = lambda event, payload: emitted.append((event, payload))
+
+        ios_line = (
+            'Appmetrica TrackAdRevenueEvent: '
+            '{"AdRevenueValue":"0.01","Currency":"USD","AdNetwork":"unityads",'
+            '"AdType":2,"Payload":{"ad_platform":"cloudx",'
+            '"ad_network":"unityads","ad_format":"interstitial"},"Precision":null}'
+        )
+        lc.process_load_ads_ext_log(ios_line, "ios-load-ads")
+        _assert_equal(len(lc.load_ads_ext_events), 1, "iOS AppMetrica Load Ads row was not recorded")
+        _assert_equal(lc.load_ads_ext_events[0].get("provider"), "cloudx", "iOS provider was not extracted")
+
+        # Provider is not unique: the same provider may appear for another network.
+        second_ios_line = ios_line.replace('"AdNetwork":"unityads"', '"AdNetwork":"applovin"')
+        second_ios_line = second_ios_line.replace('"ad_network":"unityads"', '"ad_network":"applovin"')
+        lc.process_load_ads_ext_log(second_ios_line, "ios-load-ads")
+        _assert_equal(len(lc.load_ads_ext_events), 2, "duplicate Provider must remain visible for another network")
+        _assert(all(row.get("provider") == "cloudx" for row in lc.load_ads_ext_events), "provider values changed unexpectedly")
+
+        # Same network/format from another provider is a distinct record.
+        third_ios_line = ios_line.replace('"ad_platform":"cloudx"', '"ad_platform":"ascendx"')
+        lc.process_load_ads_ext_log(third_ios_line, "ios-load-ads")
+        _assert_equal(len(lc.load_ads_ext_events), 3, "different providers must not collide in dedup")
+        _assert_equal(lc.load_ads_ext_events[-1].get("provider"), "ascendx", "second provider was not extracted")
+
+        # Android's AdRevenue{...} parser must use the nested ad_platform too.
+        lc.active_platform = "android"
+        android_line = (
+            'AdRevenue Received: AdRevenue{adType=rewarded,adNetwork=ironsource,'
+            'payload={"ad_platform":"ironsource","ad_network":"ironsource",'
+            '"ad_format":"rewarded"}}'
+        )
+        lc.process_load_ads_ext_log(android_line, "android-load-ads")
+        android_rows = [row for row in lc.load_ads_ext_events if row.get("device_id") == "android-load-ads"]
+        _assert_equal(len(android_rows), 1, "Android AppMetrica Load Ads row was not recorded")
+        _assert_equal(android_rows[0].get("provider"), "ironsource", "Android provider was not extracted")
+
+        rendered = lc.app.test_client().get("/").get_data(as_text=True)
+        _assert('>Load Ads</button>' in rendered, "Load Ads tab label was not updated")
+        _assert("Record Load Ads:" in rendered, "Load Ads recording label was not updated")
+        _assert('>Provider</th>' in rendered, "Load Ads Provider column is missing")
+        _assert('"provider": _normalize_load_ads_provider(provider)' in (ROOT / "Log_checker.py").read_text(encoding="utf-8"), "Sheet provider payload is missing")
+    finally:
+        lc.active_platform = original_platform
+        lc.recording_states["LoadAdsExt"].clear()
+        lc.recording_states["LoadAdsExt"].update(original_recording_state)
+        lc.load_ads_ext_events.clear()
+        lc.unique_load_ads_ext.clear()
+        lc.socketio.emit = original_emit
+
+
 def test_release_payload_sync() -> None:
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
     manifest_path = ROOT / "Updates_2_5" / "remote_manifest.json"
@@ -626,11 +687,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-17-1-2.5.0-27", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-18-1-2.5.0-28", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(27\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(28\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -646,11 +707,12 @@ def test_update_candidate_does_not_downgrade() -> None:
     candidates = [
         {"update_dir": "/tmp/v15", "build": 15, "source": "old"},
         {"update_dir": "/tmp/v16", "build": 16, "source": "current"},
+        {"update_dir": "/tmp/v17", "build": 17, "source": "newer"},
     ]
     selected = desktop._select_prepared_update_candidate(candidates, bundled_build=16)
-    _assert_equal(selected["build"], 16, "bundled v16 must not load a v15 prepared update")
+    _assert_equal(selected["build"], 17, "bundled v16 must select only a newer prepared update")
     _assert_equal(
-        desktop._select_prepared_update_candidate(candidates[:1], bundled_build=16),
+        desktop._select_prepared_update_candidate(candidates[:2], bundled_build=16),
         None,
         "a stale prepared update must be ignored when no newer payload exists",
     )
@@ -659,12 +721,72 @@ def test_update_candidate_does_not_downgrade() -> None:
         15,
         "legacy clients without a detected bundled build must keep update compatibility",
     )
+    equal_build_candidate = [{"update_dir": "/tmp/v16-cache", "build": 16, "source": "same_build_cache"}]
+    _assert_equal(
+        desktop._select_prepared_update_candidate(equal_build_candidate, bundled_build=16),
+        None,
+        "a same-build prepared payload must not override the bundled source",
+    )
     compatibility_candidate = [{"update_dir": "/tmp/v25", "build": 55, "source": "channel_state"}]
     _assert_equal(
         desktop._select_prepared_update_candidate(compatibility_candidate, bundled_build=47)["build"],
         55,
         "legacy v2.3.0(47) clients must accept the v2.4.0(25) compatibility payload",
     )
+
+
+def test_services_checker_gradle_mapping_contract() -> None:
+    service_source = (ROOT / "services_checker" / "app.py").read_text(encoding="utf-8")
+    _assert_equal(
+        service_source.count("GRADLE_LIB_MAPPING ="),
+        1,
+        "Services Checker must have one authoritative Gradle mapping",
+    )
+    _assert_equal(
+        service_source.count("def scan_gradle_for_versions("),
+        1,
+        "Services Checker must have one authoritative Gradle scanner",
+    )
+    _assert("import json" in service_source.split("# --- Flask Routes ---", 1)[0], "Services Checker preset JSON import is missing")
+    _assert_equal(
+        service_source.count("def _load_build_check_presets("),
+        1,
+        "Services Checker preset loader must be defined in the active source block",
+    )
+    for loader_name in ("_load_gradle_check_presets", "_load_podfile_check_presets"):
+        _assert_equal(service_source.count(f"def {loader_name}("), 1, f"Services Checker loader missing: {loader_name}")
+    for preset_file in (
+        "apk_check_presets.json",
+        "gradle_check_presets.json",
+        "podfile_check_presets.json",
+    ):
+        _assert(preset_file in service_source, f"Services Checker preset file is missing: {preset_file}")
+    _assert("'gradle_presets': gradle_presets" in service_source, "Gradle preset API group is missing")
+    _assert("'podfile_presets': podfile_presets" in service_source, "Podfile preset API group is missing")
+    required_mappings = {
+        '"LINE Ads adapter": "com.unity3d.ads-mediation:line-adapter"',
+        '"Adjust Meta Referrer": "com.adjust.sdk:adjust-android-meta-referrer"',
+        '"Adjust Samsung Referrer": "com.adjust.sdk:adjust-android-samsung-referrer"',
+        '"Adjust Vivo Referrer": "com.adjust.sdk:adjust-android-vivo-referrer"',
+        '"Adjust Xiaomi Referrer": "com.adjust.sdk:adjust-android-xiaomi-referrer"',
+        '"Xiaomi Install Referrer": "com.miui.referrer:homereferrer"',
+        '"Samsung Install Referrer": "store.galaxy.samsung.installreferrer:samsung_galaxystore_install_referrer"',
+    }
+    for mapping in required_mappings:
+        _assert(mapping in service_source, f"Services Checker mapping missing: {mapping}")
+    for control_id in (
+        'id="apk-build-check-preset"',
+        'id="gradle-build-check-preset"',
+        'id="podfile-build-check-preset"',
+        'id="reload-apk-build-check-presets"',
+        'id="reload-gradle-build-check-presets"',
+        'id="reload-podfile-build-check-presets"',
+    ):
+        _assert(service_source.count(control_id) == 1, f"Services Checker preset control must exist once: {control_id}")
+    _assert('platform: \'android\'' in service_source, "Android build preset filtering is missing")
+    _assert('platform: \'ios\'' in service_source, "iOS build preset filtering is missing")
+    _assert('preset.platform === control.platform' in service_source, "build preset platform filtering is missing")
+    _assert('id="build-check-preset"' not in service_source, "legacy global build preset selector must be removed")
 
 
 def test_legacy_v24025_bridge_contract() -> None:
@@ -723,14 +845,18 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-17-1-2.5.0-27", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-18-1-2.5.0-28", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 27, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 28, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
                 os.path.exists(os.path.join(prepared["update_dir"], "services_checker", "bundletool-all-1.18.1.jar")),
                 "prepared bundletool payload missing",
+            )
+            _assert(
+                os.path.exists(os.path.join(prepared["update_dir"], "services_checker", "manifest_check_presets.json")),
+                "prepared manifest preset payload missing",
             )
 
             second = updater.check_for_updates()
@@ -827,7 +953,10 @@ def test_build_scripts_clean_outputs() -> None:
     for service_asset in (
         "services_checker/app.py",
         "services_checker/bundletool-all-1.18.1.jar",
-        "services_checker/build_check_presets.json",
+        "services_checker/apk_check_presets.json",
+        "services_checker/gradle_check_presets.json",
+        "services_checker/podfile_check_presets.json",
+        "services_checker/manifest_check_presets.json",
         "services_checker/my-key.keystore",
     ):
         _assert(service_asset in mac_script, f"macOS build must package {service_asset}")
@@ -838,7 +967,10 @@ def test_build_scripts_clean_outputs() -> None:
     for service_asset in (
         "services_checker\\app.py",
         "services_checker\\bundletool-all-1.18.1.jar",
-        "services_checker\\build_check_presets.json",
+        "services_checker\\apk_check_presets.json",
+        "services_checker\\gradle_check_presets.json",
+        "services_checker\\podfile_check_presets.json",
+        "services_checker\\manifest_check_presets.json",
         "services_checker\\my-key.keystore",
     ):
         _assert(service_asset in win_portable_script, f"Windows portable build must package {service_asset}")
@@ -850,7 +982,10 @@ def test_build_scripts_clean_outputs() -> None:
     for service_asset in (
         "services_checker/app.py",
         "services_checker/bundletool-all-1.18.1.jar",
-        "services_checker/build_check_presets.json",
+        "services_checker/apk_check_presets.json",
+        "services_checker/gradle_check_presets.json",
+        "services_checker/podfile_check_presets.json",
+        "services_checker/manifest_check_presets.json",
         "services_checker/my-key.keystore",
     ):
         _assert(service_asset in spec_text, f"PyInstaller spec must package {service_asset}")
@@ -867,7 +1002,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-17-1-2.5.0-27' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-18-1-2.5.0-28' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
@@ -893,7 +1028,7 @@ def test_services_checker_bridge_contract() -> None:
         _assert("/api/services-checker/host" in payload_source, "host replacement API missing")
         _assert("/api/services-checker/reload" in payload_source, "Services Checker reload API missing")
         _assert("servicesCheckerReloadBtn" in payload_source, "Services Checker reload UI missing")
-        _assert("Source: bundled with Event Inspector" in payload_source, "bundled Services Checker source label missing")
+        _assert("Source: bundled with Event Inspector" not in payload_source, "obsolete Services Checker source label must stay removed")
         _assert("servicesCheckerReplaceHostBtn" not in payload_source, "host replacement UI must not be exposed in bundled mode")
         _assert('"services_checker", "app.py"' in payload_source, "bundled Services Checker fallback missing")
 
@@ -949,8 +1084,10 @@ TESTS: List[Callable[[], None]] = [
     test_release_build_marker,
     test_rewarded_bidding_filter_contract,
     test_price_rotation_exact_parser,
+    test_load_ads_provider_contract,
     test_release_payload_sync,
     test_update_candidate_does_not_downgrade,
+    test_services_checker_gradle_mapping_contract,
     test_legacy_v24025_bridge_contract,
     test_update_flow_legacy_to_v25,
     test_build_scripts_clean_outputs,

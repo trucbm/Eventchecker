@@ -4,10 +4,10 @@ set -u
 
 APP_SUPPORT_DIR="${HOME}/Library/Application Support/EventInspector"
 MANIFEST_URL="https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/remote_manifest.json"
-TARGET_VERSION="2026-08-17-1-2.5.0-27"
+TARGET_VERSION="2026-08-18-1-2.5.0-28"
 
 echo "Event Inspector update reset (macOS)"
-echo "Target release: v2.5.0(27)"
+echo "Target release: v2.5.0(28)"
 echo "Target folder: ${APP_SUPPORT_DIR}"
 echo
 echo "Make sure Event Inspector is fully closed before continuing."
@@ -79,7 +79,10 @@ cat > "${STATE_FILE_V250}" <<JSON
     "remote_update_config_v250.json",
     "services_checker/app.py",
     "services_checker/bundletool-all-1.18.1.jar",
-    "services_checker/build_check_presets.json"
+    "services_checker/apk_check_presets.json",
+    "services_checker/gradle_check_presets.json",
+    "services_checker/podfile_check_presets.json",
+    "services_checker/manifest_check_presets.json"
   ]
 }
 JSON

@@ -12,7 +12,10 @@ androguard_hiddenimports = collect_submodules('androguard.core')
 services_checker_datas = [
     ('services_checker/app.py', 'services_checker'),
     ('services_checker/bundletool-all-1.18.1.jar', 'services_checker'),
-    ('services_checker/build_check_presets.json', 'services_checker'),
+    ('services_checker/apk_check_presets.json', 'services_checker'),
+    ('services_checker/gradle_check_presets.json', 'services_checker'),
+    ('services_checker/podfile_check_presets.json', 'services_checker'),
+    ('services_checker/manifest_check_presets.json', 'services_checker'),
     ('services_checker/my-key.keystore', 'services_checker'),
 ]
 

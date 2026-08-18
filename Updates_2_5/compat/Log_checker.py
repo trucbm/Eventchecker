@@ -32,7 +32,7 @@ from pathlib import Path
 from queue import Empty, Queue
 
 # Compatibility marker for the 2.4 desktop shell and the current handoff.
-LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(27)"
+LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(28)"
 
 # Khởi tạo ứng dụng Flask và SocketIO
 app = Flask(__name__)
@@ -2733,7 +2733,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(27)</title>
+    <title>Event Inspector v2.5.0(28)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -2810,7 +2810,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(27)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(28)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3328,16 +3328,6 @@ HTML_TEMPLATE = """
             <!-- TAB 8A: Services Checker -->
             <div id="tabContentServicesChecker" class="hidden">
                 <div class="bg-white rounded-xl shadow-md p-4">
-                    <div class="flex items-center justify-between gap-3 mb-3">
-                        <div>
-                            <h2 class="text-lg font-semibold">Services Checker</h2>
-                            <p id="servicesCheckerStatus" class="text-xs text-slate-500 mt-1">Ready to open the bundled checker.</p>
-                            <p id="servicesCheckerHostStatus" class="text-[11px] text-slate-400 mt-1">Source: bundled with Event Inspector</p>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <button id="servicesCheckerReloadBtn" type="button" class="text-xs font-semibold py-2 px-3 rounded-lg shadow-sm bg-indigo-600 hover:bg-indigo-700 text-white">Reload</button>
-                        </div>
-                    </div>
                     <iframe id="servicesCheckerFrame" title="Services Checker" class="hidden w-full rounded-lg border border-slate-200 bg-white" style="height: 78vh; min-height: 620px;"></iframe>
                 </div>
             </div>
@@ -3754,12 +3744,6 @@ HTML_TEMPLATE = """
         else showPlatformModal();
 
         // --- Tab Logic ---
-        async function loadServicesCheckerHostStatus() {
-            const hostStatus = document.getElementById('servicesCheckerHostStatus');
-            if (!hostStatus) return;
-            hostStatus.textContent = 'Source: bundled with Event Inspector (no Drive dependency)';
-        }
-
         async function reloadServicesChecker() {
             const status = document.getElementById('servicesCheckerStatus');
             const frame = document.getElementById('servicesCheckerFrame');
@@ -3779,7 +3763,6 @@ HTML_TEMPLATE = """
                 status.textContent = data.restarted
                     ? 'Services Checker reloaded.'
                     : 'Services Checker refreshed.';
-                await loadServicesCheckerHostStatus();
             } catch (error) {
                 status.textContent = 'Unable to reload Services Checker: ' + error;
             } finally {
@@ -3806,7 +3789,6 @@ HTML_TEMPLATE = """
                 frame.dataset.started = 'true';
                 frame.classList.remove('hidden');
                 status.textContent = 'Services Checker is running locally.';
-                loadServicesCheckerHostStatus();
             } catch (error) {
                 status.textContent = 'Unable to start Services Checker: ' + error;
                 frame.dataset.started = 'false';

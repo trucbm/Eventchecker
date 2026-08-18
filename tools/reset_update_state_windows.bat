@@ -6,11 +6,11 @@ rem Use this only while Event Inspector is fully closed.
 
 set "APP_SUPPORT_DIR=%LOCALAPPDATA%\EventInspector"
 set "MANIFEST_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/remote_manifest.json"
-set "TARGET_VERSION=2026-08-17-1-2.5.0-27"
+set "TARGET_VERSION=2026-08-18-1-2.5.0-28"
 set "UPDATES_DIR_V250=%APP_SUPPORT_DIR%\updates_v250"
 
 echo Event Inspector update reset (Windows)
-echo Target release: v2.5.0(27)
+echo Target release: v2.5.0(28)
 echo Target folder: %APP_SUPPORT_DIR%
 echo.
 echo Make sure Event Inspector is fully closed before continuing.
@@ -73,7 +73,10 @@ echo Wrote: %APP_SUPPORT_DIR%\remote_update_config_v250.json
   echo     "remote_update_config_v250.json",
   echo     "services_checker/app.py",
   echo     "services_checker/bundletool-all-1.18.1.jar",
-  echo     "services_checker/build_check_presets.json"
+  echo     "services_checker/apk_check_presets.json",
+  echo     "services_checker/gradle_check_presets.json",
+  echo     "services_checker/podfile_check_presets.json",
+  echo     "services_checker/manifest_check_presets.json"
   echo   ]
   echo }
 ) > "%APP_SUPPORT_DIR%\update_state_v250.json"

@@ -105,9 +105,9 @@ def _select_prepared_update_candidate(candidates, bundled_build=None):
         candidate_build = candidate.get("build")
         if candidate_build is None:
             continue
-        if bundled_build is not None and candidate_build < bundled_build:
+        if bundled_build is not None and candidate_build <= bundled_build:
             logging.info(
-                "Ignoring stale update candidate from %s: build %s < bundled %s",
+                "Ignoring stale/equal update candidate from %s: build %s <= bundled %s",
                 candidate.get("source"),
                 candidate_build,
                 bundled_build,
