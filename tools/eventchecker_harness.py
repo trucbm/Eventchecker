@@ -561,12 +561,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(37)" in text, "Log_checker.py must be prepared for v2.5.0(37)")
+    _assert("v2.5.0(38)" in text, "Log_checker.py must be prepared for v2.5.0(38)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(37)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(38)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -700,11 +700,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-19-1-2.5.0-37", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-19-1-2.5.0-38", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(37\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(38\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -820,6 +820,12 @@ def test_services_checker_gradle_mapping_contract() -> None:
         "forceRemote = false",
         "refreshQuery = forceRemote ? '&refresh=1'",
         "await loadBuildCheckPresets(true)",
+        "function presetMatchesControl(control, preset)",
+        "function syncBuildCheckPreset(control, select, clearManual = false)",
+        "function restoreSelectedBuildCheckPreset(selectId)",
+        "syncBuildCheckPreset(control, select)",
+        "select.onchange = () => syncBuildCheckPreset(control, select, true)",
+        "if (!response.ok) throw new Error('preset_request_failed:' + response.status)",
     ):
         _assert(remote_contract in service_source, f"Live Services Checker preset refresh is missing: {remote_contract}")
     _assert("'gradle_presets': gradle_presets" in service_source, "Gradle preset API group is missing")
@@ -848,7 +854,11 @@ def test_services_checker_gradle_mapping_contract() -> None:
         _assert(service_source.count(control_id) == 1, f"Services Checker preset control must exist once: {control_id}")
     _assert('platform: \'android\'' in service_source, "Android build preset filtering is missing")
     _assert('platform: \'ios\'' in service_source, "iOS build preset filtering is missing")
-    _assert('preset.platform === control.platform' in service_source, "build preset platform filtering is missing")
+    _assert('presetMatchesControl(control, preset)' in service_source, "build preset platform filtering is missing")
+    _assert('restoreSelectedBuildCheckPreset(\'apk-build-check-preset\')' in service_source, "APK preset must survive tab reset")
+    _assert('restoreSelectedBuildCheckPreset(\'gradle-build-check-preset\')' in service_source, "Gradle preset must survive tab reset")
+    _assert('restoreSelectedBuildCheckPreset(\'podfile-build-check-preset\')' in service_source, "Podfile preset must survive tab reset")
+    _assert('"main",\n    SERVICES_CHECKER_PRESET_BRANCH' in service_source, "editable main preset branch must be preferred")
     _assert('id="build-check-preset"' not in service_source, "legacy global build preset selector must be removed")
 
 
@@ -908,9 +918,9 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-19-1-2.5.0-37", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-19-1-2.5.0-38", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 37, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 38, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
@@ -1080,7 +1090,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-19-1-2.5.0-37' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-19-1-2.5.0-38' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")

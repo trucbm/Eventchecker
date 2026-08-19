@@ -894,10 +894,36 @@ HTML_TEMPLATE = """
             return typeof value === 'string' ? value : '';
         }
 
+        function presetMatchesControl(control, preset) {
+            const platform = String((preset || {}).platform || control.platform).trim().toLowerCase();
+            return platform === control.platform;
+        }
+
         function applyBuildCheckPreset(control, preset) {
             if (!control.inputId) return;
             const input = document.getElementById(control.inputId);
             if (input) input.value = presetLines((preset || {}).lines);
+        }
+
+        function syncBuildCheckPreset(control, select, clearManual = false) {
+            const option = select && select.options[select.selectedIndex];
+            if (!option || !option.value) {
+                if (clearManual) applyBuildCheckPreset(control, { lines: [] });
+                return;
+            }
+            try {
+                const preset = option.dataset.preset ? JSON.parse(option.dataset.preset) : {};
+                applyBuildCheckPreset(control, presetMatchesControl(control, preset) ? preset : { lines: [] });
+            } catch (error) {
+                console.warn('Unable to apply build check preset:', error);
+                applyBuildCheckPreset(control, { lines: [] });
+            }
+        }
+
+        function restoreSelectedBuildCheckPreset(selectId) {
+            const control = buildCheckPresetControls.find(item => item.selectId === selectId);
+            const select = document.getElementById(selectId);
+            if (control && select && select.value) syncBuildCheckPreset(control, select);
         }
 
         async function loadBuildCheckPresets(forceRemote = false) {
@@ -908,12 +934,15 @@ HTML_TEMPLATE = """
             try {
                 const refreshQuery = forceRemote ? '&refresh=1' : '';
                 const response = await fetch('/api/build-check-presets?ts=' + Date.now() + refreshQuery, { cache: 'no-store' });
+                if (!response.ok) throw new Error('preset_request_failed:' + response.status);
                 const data = await response.json();
                 if (data.refresh_errors && data.refresh_errors.length) {
                     console.warn('Some Services Checker presets could not be refreshed:', data.refresh_errors);
                     if (forceRemote) {
-                        showMessage('Some preset files could not be refreshed from GitHub. The previous local copy was kept.', 'warning');
+                        showMessage('Preset reload did not fetch every file from GitHub. The previous local copy was kept.', 'error');
                     }
+                } else if (forceRemote) {
+                    showMessage('Service Checker presets reloaded from GitHub.', 'info');
                 }
                 buildCheckPresetControls.forEach(control => {
                     const select = document.getElementById(control.selectId);
@@ -921,7 +950,7 @@ HTML_TEMPLATE = """
                     const presets = data[control.presetKey] || {};
                     while (select.options.length > 1) select.remove(1);
                     Object.entries(presets)
-                        .filter(([, preset]) => !preset.platform || preset.platform === control.platform)
+                        .filter(([, preset]) => presetMatchesControl(control, preset))
                         .forEach(([name, preset]) => {
                             const option = document.createElement('option');
                             option.value = name;
@@ -930,14 +959,18 @@ HTML_TEMPLATE = """
                             select.appendChild(option);
                         });
                     const selectedValue = selectedValues[control.selectId];
-                    if (selectedValue && presets[selectedValue] && presets[selectedValue].platform === control.platform) {
+                    if (selectedValue && presets[selectedValue] && presetMatchesControl(control, presets[selectedValue])) {
                         select.value = selectedValue;
-                        applyBuildCheckPreset(control, presets[selectedValue]);
                     } else if (selectedValue) {
                         select.value = '';
                     }
+                    // Re-apply the selected option after rebuilding the list. This
+                    // also handles a preset selected by the browser before the
+                    // async GitHub response arrives.
+                    syncBuildCheckPreset(control, select);
                 });
             } catch (error) {
+                if (forceRemote) showMessage('Unable to reload Service Checker presets from GitHub.', 'error');
                 console.warn('Unable to load build check presets:', error);
             }
         }
@@ -945,17 +978,17 @@ HTML_TEMPLATE = """
         buildCheckPresetControls.forEach(control => {
             const select = document.getElementById(control.selectId);
             const reloadButton = document.getElementById(control.reloadId);
-            select?.addEventListener('change', () => {
-                const option = select.options[select.selectedIndex];
-                applyBuildCheckPreset(control, option && option.dataset.preset ? JSON.parse(option.dataset.preset) : {});
-            });
-            reloadButton?.addEventListener('click', async () => {
+            if (select) select.onchange = () => syncBuildCheckPreset(control, select, true);
+            if (reloadButton) reloadButton.onclick = async () => {
                 reloadButton.disabled = true;
                 reloadButton.textContent = 'Reloading...';
-                await loadBuildCheckPresets(true);
-                reloadButton.disabled = false;
-                reloadButton.textContent = 'Reload';
-            });
+                try {
+                    await loadBuildCheckPresets(true);
+                } finally {
+                    reloadButton.disabled = false;
+                    reloadButton.textContent = 'Reload';
+                }
+            };
         });
 
         // --- Tab Switching ---
@@ -1645,6 +1678,7 @@ HTML_TEMPLATE = """
             if (mode === 'apk-analyzer') {
                 if(apkUploadForm) apkUploadForm.reset();
                 if(document.getElementById('apk_expected_versions')) document.getElementById('apk_expected_versions').value = '';
+                restoreSelectedBuildCheckPreset('apk-build-check-preset');
                 if(apkUploadSection) apkUploadSection.classList.remove('hidden');
                 if(apkScanResultsSection) apkScanResultsSection.classList.add('hidden');
                 if(apkScanOutputDiv) apkScanOutputDiv.innerHTML = '';
@@ -1653,11 +1687,13 @@ HTML_TEMPLATE = """
                 if(noBinaryLink) noBinaryLink.classList.add('hidden');
             } else if (mode === 'gradle-verifier') {
                 if(gradleUploadForm) gradleUploadForm.reset();
+                restoreSelectedBuildCheckPreset('gradle-build-check-preset');
                 if(gradleUploadSection) gradleUploadSection.classList.remove('hidden');
                 if(gradleScanResultsSection) gradleScanResultsSection.classList.add('hidden');
                 if(gradleVersionComparisonOutputDiv) gradleVersionComparisonOutputDiv.innerHTML = '';
             } else if (mode === 'podfile-verifier') {
                 if(podfileUploadForm) podfileUploadForm.reset();
+                restoreSelectedBuildCheckPreset('podfile-build-check-preset');
                 if(podfileUploadSection) podfileUploadSection.classList.remove('hidden');
                 if(podfileScanResultsSection) podfileScanResultsSection.classList.add('hidden');
                 if(podfileVersionComparisonOutputDiv) podfileVersionComparisonOutputDiv.innerHTML = '';
@@ -1726,8 +1762,8 @@ MANIFEST_CHECK_PRESETS_FILENAME = "manifest_check_presets.json"
 # source; the release branch remains a fallback for clients on a new build.
 SERVICES_CHECKER_PRESET_BRANCH = os.getenv("EVENTINSPECTOR_PRESET_BRANCH", "main").strip() or "main"
 SERVICES_CHECKER_PRESET_BRANCHES = tuple(dict.fromkeys((
-    SERVICES_CHECKER_PRESET_BRANCH,
     "main",
+    SERVICES_CHECKER_PRESET_BRANCH,
     "2.5.0",
 )))
 SERVICES_CHECKER_PRESET_FILENAMES = (
