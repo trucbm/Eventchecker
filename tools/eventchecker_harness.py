@@ -561,12 +561,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(40)" in text, "Log_checker.py must be prepared for v2.5.0(40)")
+    _assert("v2.5.0(41)" in text, "Log_checker.py must be prepared for v2.5.0(41)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(40)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(41)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -700,11 +700,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-19-1-2.5.0-40", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-19-1-2.5.0-41", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(40\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(41\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -816,7 +816,8 @@ def test_services_checker_gradle_mapping_contract() -> None:
         "eventinspector_refresh={cache_bust}",
         '"Accept-Encoding": "identity"',
         "def _refresh_remote_preset_files(",
-        "refresh_requested = request.args.get(\"refresh\"",
+        "explicit_refresh = request.args.get(\"refresh\"",
+        "refresh_requested = True",
         "forceRemote = false",
         "refreshQuery = forceRemote ? '&refresh=1'",
         "await loadBuildCheckPresets(true)",
@@ -858,10 +859,101 @@ def test_services_checker_gradle_mapping_contract() -> None:
     _assert('restoreSelectedBuildCheckPreset(\'apk-build-check-preset\')' in service_source, "APK preset must survive tab reset")
     _assert('restoreSelectedBuildCheckPreset(\'gradle-build-check-preset\')' in service_source, "Gradle preset must survive tab reset")
     _assert('restoreSelectedBuildCheckPreset(\'podfile-build-check-preset\')' in service_source, "Podfile preset must survive tab reset")
-    _assert('SERVICES_CHECKER_PRESET_BRANCH", "2.5.0"' not in service_source, "release preset branch must not default to main")
-    _assert('SERVICES_CHECKER_PRESET_BRANCH,\n    "2.5.0",\n    "main"' in service_source, "release preset branch must be preferred")
+    _assert(
+        'SERVICES_CHECKER_PRESET_BRANCH = os.getenv("EVENTINSPECTOR_PRESET_BRANCH", "main")' in service_source,
+        "editable main preset branch must be the default",
+    )
+    _assert('SERVICES_CHECKER_PRESET_BRANCH,\n    "main",\n    "2.5.0"' in service_source, "release preset branch must remain a fallback")
     _assert("'refreshed_sources': refreshed_sources" in service_source, "preset reload must report the GitHub branch used")
     _assert('id="build-check-preset"' not in service_source, "legacy global build preset selector must be removed")
+
+
+def test_services_checker_live_preset_refresh_after_restart() -> None:
+    """Catch the stale-cache regression with two fresh service imports."""
+    import requests as service_requests
+
+    service_path = ROOT / "services_checker" / "app.py"
+    original_get = service_requests.get
+    original_cache_dir = os.environ.get("EVENTINSPECTOR_PRESET_CACHE_DIR")
+    revision = {"value": "old"}
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.content = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return json.loads(self.content.decode("utf-8"))
+
+    def fake_get(url, **_kwargs):
+        calls.append(url)
+        _assert("/main/services_checker/" in url, f"preset refresh used a non-main source: {url}")
+        filename = url.split("/services_checker/", 1)[1].split("?", 1)[0]
+        payload = {
+            "C-190-Android": {
+                "platform": "ios" if filename == "podfile_check_presets.json" else "android",
+                "lines": [f"{filename}:{revision['value']}"],
+            }
+        }
+        return FakeResponse(payload)
+
+    module_names = []
+    try:
+        with tempfile.TemporaryDirectory(prefix="eventinspector_services_presets_") as cache_dir:
+            os.environ["EVENTINSPECTOR_PRESET_CACHE_DIR"] = cache_dir
+            service_requests.get = fake_get
+
+            def load_service_module(name):
+                spec = importlib.util.spec_from_file_location(name, service_path)
+                _assert(spec is not None and spec.loader is not None, "Services Checker module could not be loaded")
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[name] = module
+                module_names.append(name)
+                spec.loader.exec_module(module)
+                return module
+
+            first = load_service_module("eventinspector_services_checker_refresh_one")
+            first_response = first.app.test_client().get("/api/build-check-presets?ts=1")
+            _assert_equal(first_response.status_code, 200, "first Services Checker preset request failed")
+            first_data = first_response.get_json()
+            _assert_equal(
+                first_data["manifest_presets"]["C-190-Android"]["lines"],
+                ["manifest_check_presets.json:old"],
+                "first Service Checker start did not load the remote preset",
+            )
+
+            revision["value"] = "new"
+            second = load_service_module("eventinspector_services_checker_refresh_two")
+            second_response = second.app.test_client().get("/api/build-check-presets?ts=2")
+            _assert_equal(second_response.status_code, 200, "restart Services Checker preset request failed")
+            second_data = second_response.get_json()
+            _assert_equal(
+                second_data["manifest_presets"]["C-190-Android"]["lines"],
+                ["manifest_check_presets.json:new"],
+                "Services Checker restart kept the stale per-user preset cache",
+            )
+            _assert_equal(
+                set(second_data["refreshed_files"]),
+                {
+                    "apk_check_presets.json",
+                    "gradle_check_presets.json",
+                    "podfile_check_presets.json",
+                    "manifest_check_presets.json",
+                },
+                "restart did not refresh all Services Checker preset files",
+            )
+            _assert(calls and all("/main/services_checker/" in url for url in calls), "preset source was not main")
+    finally:
+        service_requests.get = original_get
+        for name in module_names:
+            sys.modules.pop(name, None)
+        if original_cache_dir is None:
+            os.environ.pop("EVENTINSPECTOR_PRESET_CACHE_DIR", None)
+        else:
+            os.environ["EVENTINSPECTOR_PRESET_CACHE_DIR"] = original_cache_dir
 
 
 def test_legacy_v24025_bridge_contract() -> None:
@@ -920,9 +1012,9 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-19-1-2.5.0-40", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-19-1-2.5.0-41", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 40, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 41, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
@@ -1092,7 +1184,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-19-1-2.5.0-40' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-19-1-2.5.0-41' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
@@ -1207,6 +1299,7 @@ TESTS: List[Callable[[], None]] = [
     test_release_payload_sync,
     test_update_candidate_does_not_downgrade,
     test_services_checker_gradle_mapping_contract,
+    test_services_checker_live_preset_refresh_after_restart,
     test_legacy_v24025_bridge_contract,
     test_update_flow_legacy_to_v25,
     test_build_scripts_clean_outputs,

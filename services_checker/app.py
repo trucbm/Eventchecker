@@ -1775,7 +1775,10 @@ HTML_TEMPLATE = """
                     }
                 });
 
-            loadBuildCheckPresets();
+            // Refresh on every Service Checker start. Previously only the
+            // per-control Reload buttons used refresh=1, so a restarted app
+            // could keep showing an old per-user preset cache indefinitely.
+            loadBuildCheckPresets(true);
             switchTab('apk-analyzer'); // Default to the first tab
         });
 
@@ -1790,15 +1793,15 @@ GRADLE_CHECK_PRESETS_FILENAME = "gradle_check_presets.json"
 PODFILE_CHECK_PRESETS_FILENAME = "podfile_check_presets.json"
 MANIFEST_CHECK_PRESETS_FILENAME = "manifest_check_presets.json"
 
-# Presets are live data. The Reload buttons fetch the GitHub copy so list
-# edits do not require rebuilding the desktop app. Keep the active release
-# branch first: the release branch is where the checked-in v2.5 presets are
-# maintained, while `main` remains a fallback for older repository layouts.
-SERVICES_CHECKER_PRESET_BRANCH = os.getenv("EVENTINSPECTOR_PRESET_BRANCH", "2.5.0").strip() or "2.5.0"
+# Presets are live data. The Service Checker always refreshes these files when
+# its page starts, and the Reload buttons repeat the same operation. `main` is
+# the editable source users see on GitHub; the release branch is a fallback so
+# an older branch layout cannot make the controls silently empty.
+SERVICES_CHECKER_PRESET_BRANCH = os.getenv("EVENTINSPECTOR_PRESET_BRANCH", "main").strip() or "main"
 SERVICES_CHECKER_PRESET_BRANCHES = tuple(dict.fromkeys((
     SERVICES_CHECKER_PRESET_BRANCH,
-    "2.5.0",
     "main",
+    "2.5.0",
 )))
 SERVICES_CHECKER_PRESET_FILENAMES = (
     APK_CHECK_PRESETS_FILENAME,
@@ -2040,7 +2043,12 @@ def index():
 
 @app.get('/api/build-check-presets')
 def get_build_check_presets_final():
-    refresh_requested = request.args.get("refresh", "").strip().lower() in {"1", "true", "yes"}
+    explicit_refresh = request.args.get("refresh", "").strip().lower() in {"1", "true", "yes"}
+    # Always refresh on the server before loading the response. The frontend
+    # still sends refresh=1 for its Reload buttons, but making this endpoint
+    # authoritative also fixes stale presets after an app restart or when an
+    # older embedded HTML page omits the query parameter.
+    refresh_requested = True
     refreshed = []
     refresh_errors = []
     refreshed_sources = {}
@@ -2062,6 +2070,7 @@ def get_build_check_presets_final():
         'refreshed_files': refreshed,
         'refreshed_sources': refreshed_sources,
         'refresh_errors': refresh_errors,
+        'refresh_requested': explicit_refresh,
         'presets': presets,
         'gradle_presets': gradle_presets,
         'podfile_presets': podfile_presets,
