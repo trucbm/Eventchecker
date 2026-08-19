@@ -93,7 +93,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/gradle_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/gradle_check_presets.json"
       ],
-      "sha256": "d0e29c2a480af8724e6a5594ea31fe9eaf9868656d251ed5ec6f71d4e6c2a09a"
+      "sha256": "d76cca935b1902106177c0b85d7a39a76d5becb0892cb33e3ed45b59a0e62139"
     },
     {
       "path": "services_checker/podfile_check_presets.json",
