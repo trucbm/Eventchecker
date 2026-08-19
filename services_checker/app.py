@@ -942,7 +942,9 @@ HTML_TEMPLATE = """
                         showMessage('Preset reload did not fetch every file from GitHub. The previous local copy was kept.', 'error');
                     }
                 } else if (forceRemote) {
-                    showMessage('Service Checker presets reloaded from GitHub.', 'info');
+                    const branches = [...new Set(Object.values(data.refreshed_sources || {}))].filter(Boolean);
+                    const sourceLabel = branches.length ? ` (GitHub ${escapeHtml(branches.join(', '))})` : '';
+                    showMessage(`Service Checker presets reloaded from GitHub${sourceLabel}.`, 'info');
                 }
                 buildCheckPresetControls.forEach(control => {
                     const select = document.getElementById(control.selectId);
@@ -1758,13 +1760,14 @@ PODFILE_CHECK_PRESETS_FILENAME = "podfile_check_presets.json"
 MANIFEST_CHECK_PRESETS_FILENAME = "manifest_check_presets.json"
 
 # Presets are live data. The Reload buttons fetch the GitHub copy so list
-# edits do not require rebuilding the desktop app. `main` is the editable
-# source; the release branch remains a fallback for clients on a new build.
-SERVICES_CHECKER_PRESET_BRANCH = os.getenv("EVENTINSPECTOR_PRESET_BRANCH", "main").strip() or "main"
+# edits do not require rebuilding the desktop app. Keep the active release
+# branch first: the release branch is where the checked-in v2.5 presets are
+# maintained, while `main` remains a fallback for older repository layouts.
+SERVICES_CHECKER_PRESET_BRANCH = os.getenv("EVENTINSPECTOR_PRESET_BRANCH", "2.5.0").strip() or "2.5.0"
 SERVICES_CHECKER_PRESET_BRANCHES = tuple(dict.fromkeys((
-    "main",
     SERVICES_CHECKER_PRESET_BRANCH,
     "2.5.0",
+    "main",
 )))
 SERVICES_CHECKER_PRESET_FILENAMES = (
     APK_CHECK_PRESETS_FILENAME,
@@ -1811,16 +1814,16 @@ def _preset_file_candidates(filename):
 
 def _remote_preset_urls(filename):
     for branch in SERVICES_CHECKER_PRESET_BRANCHES:
-        yield f"https://raw.githubusercontent.com/trucbm/Eventchecker/{branch}/services_checker/{filename}"
-        yield f"https://github.com/trucbm/Eventchecker/raw/{branch}/services_checker/{filename}"
-        yield f"https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@{branch}/services_checker/{filename}"
+        yield branch, f"https://raw.githubusercontent.com/trucbm/Eventchecker/{branch}/services_checker/{filename}"
+        yield branch, f"https://github.com/trucbm/Eventchecker/raw/{branch}/services_checker/{filename}"
+        yield branch, f"https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@{branch}/services_checker/{filename}"
 
 
 def _fetch_remote_preset(filename):
     """Fetch and validate one preset file, bypassing intermediary caches."""
     last_error = None
     cache_bust = time.time_ns()
-    for url in _remote_preset_urls(filename):
+    for branch, url in _remote_preset_urls(filename):
         separator = "&" if "?" in url else "?"
         try:
             response = requests.get(
@@ -1838,7 +1841,7 @@ def _fetch_remote_preset(filename):
             decoded = response.json()
             if not isinstance(decoded, dict) or not decoded:
                 raise ValueError("preset_root_must_be_object")
-            return payload
+            return payload, branch
         except Exception as exc:
             last_error = exc
     raise RuntimeError(f"remote_preset_unavailable:{filename}:{last_error}")
@@ -1849,14 +1852,16 @@ def _refresh_remote_preset_files():
     cache_dir = _services_checker_preset_cache_dir()
     refreshed = []
     errors = []
+    refreshed_sources = {}
     for filename in SERVICES_CHECKER_PRESET_FILENAMES:
         try:
-            payload = _fetch_remote_preset(filename)
+            payload, branch = _fetch_remote_preset(filename)
             temp_path = os.path.join(cache_dir, f".{filename}.{secrets.token_hex(4)}.tmp")
             with open(temp_path, "wb") as handle:
                 handle.write(payload)
             os.replace(temp_path, os.path.join(cache_dir, filename))
             refreshed.append(filename)
+            refreshed_sources[filename] = branch
         except Exception as exc:
             errors.append(str(exc))
             temp_path = os.path.join(cache_dir, f".{filename}.tmp")
@@ -1865,7 +1870,7 @@ def _refresh_remote_preset_files():
                     os.remove(temp_path)
             except OSError:
                 pass
-    return refreshed, errors
+    return refreshed, errors, refreshed_sources
 
 
 def _load_preset_file(filename, default_platform):
@@ -2007,8 +2012,9 @@ def get_build_check_presets_final():
     refresh_requested = request.args.get("refresh", "").strip().lower() in {"1", "true", "yes"}
     refreshed = []
     refresh_errors = []
+    refreshed_sources = {}
     if refresh_requested:
-        refreshed, refresh_errors = _refresh_remote_preset_files()
+        refreshed, refresh_errors, refreshed_sources = _refresh_remote_preset_files()
     presets = _load_build_check_presets()
     gradle_presets = _load_gradle_check_presets()
     podfile_presets = _load_podfile_check_presets()
@@ -2023,6 +2029,7 @@ def get_build_check_presets_final():
         'success': bool(presets or gradle_presets or podfile_presets or manifest_presets),
         'source': source,
         'refreshed_files': refreshed,
+        'refreshed_sources': refreshed_sources,
         'refresh_errors': refresh_errors,
         'presets': presets,
         'gradle_presets': gradle_presets,
