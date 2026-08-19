@@ -2,6 +2,12 @@ name: Build Windows
 
 on:
   workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Release ref to build"
+        required: true
+        type: string
+        default: "2.5.0"
 
 jobs:
   build-windows:
@@ -9,6 +15,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || '2.5.0' }}
+          fetch-depth: 0
+
+      - name: Validate release source
+        id: release
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File "build\windows\verify_release_source.ps1" -GithubEnvPath "$env:GITHUB_ENV" -GithubOutputPath "$env:GITHUB_OUTPUT"
+
+      - name: Clean Windows outputs
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force "dist\EventInspector", "build\EventInspector", "build\windows\Output" -ErrorAction SilentlyContinue
+          Remove-Item -Force "dist\EventInspector-portable.zip" -ErrorAction SilentlyContinue
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -25,6 +46,14 @@ jobs:
         run: |
           Compress-Archive -Path dist\EventInspector\* -DestinationPath dist\EventInspector-portable.zip -Force
 
+      - name: Verify Portable ZIP version
+        shell: pwsh
+        run: |
+          $verifyRoot = Join-Path $env:RUNNER_TEMP "eventinspector-portable-verify"
+          Remove-Item -Recurse -Force $verifyRoot -ErrorAction SilentlyContinue
+          Expand-Archive -LiteralPath "dist\EventInspector-portable.zip" -DestinationPath $verifyRoot -Force
+          powershell -NoProfile -ExecutionPolicy Bypass -File "build\windows\verify_bundle.ps1" -BundleRoot $verifyRoot -SourcePath "Log_checker.py"
+
       - name: Install Inno Setup
         shell: pwsh
         run: |
@@ -35,10 +64,19 @@ jobs:
         run: |
           build\windows\build_windows.bat
 
+      - name: Verify Installer output
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -LiteralPath "build\windows\Output" -Filter "*.exe" -File)
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one fresh installer, found $($installers.Count)"
+          }
+          Write-Host "Installer validated: $($installers[0].FullName)"
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: EventInspector-Windows
+          name: EventInspector-Windows-v${{ steps.release.outputs.release_version }}
           path: |
             dist/EventInspector-portable.zip
             build/windows/Output/*.exe

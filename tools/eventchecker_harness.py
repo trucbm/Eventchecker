@@ -1347,7 +1347,9 @@ def test_build_scripts_clean_outputs() -> None:
     for needle in mac_expected:
         _assert(needle in mac_script, f"build_macos.sh must clean stale artifact: {needle}")
 
-    _assert('MACOS_TARGET_ARCH="${MACOS_TARGET_ARCH:-universal2}"' in mac_script, "macOS build must default to universal2")
+    _assert('if [ -z "${MACOS_TARGET_ARCH:-}" ]; then' in mac_script, "macOS build must resolve a target architecture")
+    _assert('arm64) MACOS_TARGET_ARCH="arm64"' in mac_script, "macOS build must support Apple Silicon")
+    _assert('x86_64) MACOS_TARGET_ARCH="x86_64"' in mac_script, "macOS build must support Intel")
     _assert('--target-arch "$MACOS_TARGET_ARCH"' in mac_script, "macOS build must pass the target architecture")
     _assert('--exclude-module "markupsafe._speedups"' in mac_script, "macOS universal build must avoid the arm64-only MarkupSafe speedup")
     _assert('--add-data "Log_checker.py:."' in mac_script, "macOS build must package the bundled release marker")
@@ -1368,6 +1370,12 @@ def test_build_scripts_clean_outputs() -> None:
         _assert(service_asset in mac_script, f"macOS build must package {service_asset}")
     _assert('--add-data "sdk_check_presets.json;."' in win_portable_script, "Windows portable build must package SDK presets")
     _assert('--add-data "sdk_check_presets.json;."' in win_installer_script, "Windows installer build must package SDK presets")
+    _assert('--add-data "Log_checker.py;."' in win_portable_script, "Windows portable build must package the release source")
+    _assert('--add-data "Log_checker.py;."' in win_installer_script, "Windows installer build must package the release source")
+    _assert('verify_release_source.ps1' in win_portable_script, "Windows portable build must validate the release source")
+    _assert('verify_release_source.ps1' in win_installer_script, "Windows installer build must validate the release source")
+    _assert('verify_bundle.ps1' in win_portable_script, "Windows portable build must validate the built bundle")
+    _assert('verify_bundle.ps1' in win_installer_script, "Windows installer build must validate the built bundle")
     _assert('--collect-submodules "androguard.core"' in win_portable_script, "Windows portable build must package manifest parser submodules")
     _assert('--collect-submodules "androguard.core"' in win_installer_script, "Windows installer build must package manifest parser submodules")
     _assert('--collect-data "androguard"' in win_portable_script, "Windows portable build must package manifest parser data")
@@ -1411,6 +1419,31 @@ def test_build_scripts_clean_outputs() -> None:
     for needle in win_expected:
         _assert(needle in win_portable_script, f"build_portable.bat must clean stale artifact: {needle}")
         _assert(needle in win_installer_script, f"build_windows.bat must clean stale artifact: {needle}")
+    _assert(
+        'if exist "build\\windows\\Output" rmdir /s /q "build\\windows\\Output"' in win_installer_script,
+        "build_windows.bat must clean stale installer output",
+    )
+
+
+def test_windows_release_build_version_contract() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "windows-build.yml").read_text(encoding="utf-8", errors="ignore")
+    source_guard = (ROOT / "build" / "windows" / "verify_release_source.ps1").read_text(encoding="utf-8", errors="ignore")
+    bundle_guard = (ROOT / "build" / "windows" / "verify_bundle.ps1").read_text(encoding="utf-8", errors="ignore")
+    installer_script = (ROOT / "build" / "windows" / "build_windows.bat").read_text(encoding="utf-8", errors="ignore")
+    iss_script = (ROOT / "build" / "windows" / "EventChecker.iss").read_text(encoding="utf-8", errors="ignore")
+
+    _assert('default: "2.5.0"' in workflow, "Windows workflow must default to the v2.5 release ref")
+    _assert("ref: ${{ inputs.source_ref || '2.5.0' }}" in workflow, "Windows workflow must checkout the requested v2.5 ref")
+    _assert("Verify Portable ZIP version" in workflow, "Windows workflow must verify the portable ZIP")
+    _assert("EventInspector-Windows-v${{ steps.release.outputs.release_version }}" in workflow, "Windows artifacts must be versioned")
+    _assert('[switch]$PrintVersion' in source_guard, "Windows source guard must expose the resolved version")
+    _assert('ExpectedSeries = "2.5.0"' in source_guard, "Windows source guard must enforce the v2.5 series")
+    _assert("$match.Groups['build'].Value" in source_guard, "Windows source guard must derive the build number from source")
+    _assert("bundleMarker -ne $sourceMarker" in bundle_guard, "Windows bundle guard must reject stale bundled source")
+    _assert("EventInspector.exe" in bundle_guard, "Windows bundle guard must require the executable")
+    _assert("-PrintVersion" in installer_script, "Windows installer must derive its version from the source")
+    _assert("/DMyAppVersion=%EVENTINSPECTOR_RELEASE_VERSION%" in installer_script, "Inno Setup must receive the source version")
+    _assert('#define MyAppVersion "2.5.0.44"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
 
 
 def test_windows_update_recovery_script() -> None:
@@ -1541,6 +1574,7 @@ TESTS: List[Callable[[], None]] = [
     test_legacy_v24025_bridge_contract,
     test_update_flow_legacy_to_v25,
     test_build_scripts_clean_outputs,
+    test_windows_release_build_version_contract,
     test_windows_update_recovery_script,
     test_services_checker_bridge_contract,
     test_native_download_contract,
