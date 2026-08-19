@@ -33,7 +33,7 @@
       "{{PACKAGE_NAME}}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
       "{{PACKAGE_NAME}}.permission.C2D_MESSAGE"
     ],
-    "appmetrica_unity_version": "unity-6.10.0"
+    "appmetrica_unity_version": "unity-6.9.0"
   },
   "C-190-Android": {
     "platform": "android",
