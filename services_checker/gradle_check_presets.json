@@ -54,13 +54,13 @@
       "com.android.installreferrer:installreferrer\t2.2",
       "Voodoo (ADN) Adapter\t5.7.0",
       "Voodoo (ADN) SDK\t4.29.2",
-      "Adjust Xiaomi Referrer\t5.6.1",
+      "Adjust Xiaomi Referrer\t5.8.0",
       "Xiaomi Install Referrer\t1.0.0.6",
-      "Adjust Samsung Referrer\t5.6.1",
+      "Adjust Samsung Referrer\t5.8.0",
       "Samsung Install Referrer\t3.0.1",
-      "Adjust Vivo Referrer\t5.6.1",
-      "Adjust Meta Referrer\t5.6.1",
-      "Adjust Google LVL\t5.6.1",
+      "Adjust Vivo Referrer\t5.8.0",
+      "Adjust Meta Referrer\t5.8.0",
+      "Adjust Google LVL\t5.8.0",
       "Ascendx Prebid\t1.21.0"
     ]
   }
