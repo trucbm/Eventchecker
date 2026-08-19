@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-19-1-2.5.0-43",
+  "version": "2026-08-19-1-2.5.0-44",
   "update_enabled": true,
   "update_message": "",
   "files": [
@@ -11,8 +11,8 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Log_checker.py"
       ],
-      "sha256": "5856458fe734c37e4eed1b338f697613f7f852e6fd18b01d29a7b4eaeedbafd3",
-      "compat_sha256": "d8049195de77b7ce61c4e7f528134ece4895b18c2f10f3264612b4c2881f9fea"
+      "sha256": "479380c035bb3cb05428ede8a38b233cdbfb95532ed30007bdb9d7b1ecf86126",
+      "compat_sha256": "c58e29f5c355152ed3de55fbafe27f807c4df997216f42106d20f01e6244d33f"
     },
     {
       "path": "remote_update.py",
@@ -53,7 +53,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/app.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/app.py"
       ],
-      "sha256": "d66372d43033ce063f0d5eaddf21d7c40f49c0c3d8da9d46875b4d7bb2e8a179"
+      "sha256": "81246993fa61f9ae50b0043c0f4e3606a2b22a9c7c523b41692955d6e5e4af15"
     },
     {
       "path": "services_checker/axml_fallback.py",

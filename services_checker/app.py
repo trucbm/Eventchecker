@@ -14,11 +14,13 @@ import importlib.util
 import tempfile
 import time
 import hashlib
+import threading
 from pathlib import Path # For finding home directory
 from urllib.parse import quote
 import xml.etree.ElementTree as ET # Still needed for the object structure
 import sys # For printing sys.path for debugging
 import traceback # For printing full tracebacks
+from concurrent.futures import ThreadPoolExecutor
 
 # --- Enhanced Debugging Output at the Start ---
 print("--- Python sys.path (Interpreter's Search Path) ---")
@@ -901,7 +903,9 @@ HTML_TEMPLATE = """
             const messageDiv = document.createElement('div');
             messageDiv.className = alertClass;
             messageDiv.innerHTML = text; // Use innerHTML to allow basic HTML like <br> or <pre>
-            area.insertBefore(messageDiv, area.firstChild); // Prepend new messages
+            // Keep one current status message. Repeated reloads must not grow a
+            // stack of identical banners that pushes the active preset offscreen.
+            area.replaceChildren(messageDiv);
         }
         function clearMessages(area = messageArea) { area.innerHTML = ''; }
         function escapeHtml(unsafe) {
@@ -958,7 +962,10 @@ HTML_TEMPLATE = """
             if (control && select && select.value) syncBuildCheckPreset(control, select);
         }
 
+        let buildCheckPresetRequestSerial = 0;
+
         async function loadBuildCheckPresets(forceRemote = false) {
+            const requestSerial = ++buildCheckPresetRequestSerial;
             const selectedValues = Object.fromEntries(buildCheckPresetControls.map(control => {
                 const select = document.getElementById(control.selectId);
                 return [control.selectId, select ? select.value : ''];
@@ -968,6 +975,9 @@ HTML_TEMPLATE = """
                 const response = await fetch('/api/build-check-presets?ts=' + Date.now() + refreshQuery, { cache: 'no-store' });
                 if (!response.ok) throw new Error('preset_request_failed:' + response.status);
                 const data = await response.json();
+                // A slower request started before this one must never restore an
+                // older Git payload after the latest Reload has completed.
+                if (requestSerial !== buildCheckPresetRequestSerial) return;
                 if (data.refresh_errors && data.refresh_errors.length) {
                     console.warn('Some Services Checker presets could not be refreshed:', data.refresh_errors);
                     if (forceRemote) {
@@ -1813,6 +1823,7 @@ SERVICES_CHECKER_PRESET_FILENAMES = (
 # request must use the bytes it just downloaded instead of re-reading an
 # older copy from a different bundled/portable path.
 _live_remote_preset_payloads = {}
+_remote_preset_refresh_lock = threading.Lock()
 
 
 def _services_checker_preset_cache_dir():
@@ -1886,17 +1897,39 @@ def _fetch_remote_preset(filename):
 
 
 def _refresh_remote_preset_files():
+    """Serialize Git refreshes so an older request cannot overwrite a newer one."""
+    with _remote_preset_refresh_lock:
+        return _refresh_remote_preset_files_unlocked()
+
+
+def _refresh_remote_preset_files_unlocked():
     """Refresh every preset atomically; keep the previous copy on failures."""
     cache_dir = _services_checker_preset_cache_dir()
     refreshed = []
     errors = []
     refreshed_sources = {}
     refreshed_digests = {}
-    for filename in SERVICES_CHECKER_PRESET_FILENAMES:
+
+    def fetch_one(filename):
         try:
-            payload, branch = _fetch_remote_preset(filename)
-            refreshed_digests[filename] = hashlib.sha256(payload).hexdigest()
-            temp_path = os.path.join(cache_dir, f".{filename}.{secrets.token_hex(4)}.tmp")
+            return filename, _fetch_remote_preset(filename), None
+        except Exception as exc:
+            return filename, None, exc
+
+    # Each file has the same GitHub fallback chain. Fetching them concurrently
+    # keeps one slow/unreachable mirror from multiplying the total reload time.
+    with ThreadPoolExecutor(max_workers=len(SERVICES_CHECKER_PRESET_FILENAMES)) as executor:
+        results = list(executor.map(fetch_one, SERVICES_CHECKER_PRESET_FILENAMES))
+
+    for filename, result, error in results:
+        if error is not None:
+            errors.append(str(error))
+            continue
+
+        payload, branch = result
+        refreshed_digests[filename] = hashlib.sha256(payload).hexdigest()
+        temp_path = os.path.join(cache_dir, f".{filename}.{secrets.token_hex(4)}.tmp")
+        try:
             with open(temp_path, "wb") as handle:
                 handle.write(payload)
             os.replace(temp_path, os.path.join(cache_dir, filename))
@@ -1904,8 +1937,7 @@ def _refresh_remote_preset_files():
             refreshed.append(filename)
             refreshed_sources[filename] = branch
         except Exception as exc:
-            errors.append(str(exc))
-            temp_path = os.path.join(cache_dir, f".{filename}.tmp")
+            errors.append(f"{filename}:{exc}")
             try:
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
