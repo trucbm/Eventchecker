@@ -1,6 +1,7 @@
 import zipfile
 import os
 import json
+import requests
 # Flask import will be attempted below after sys.path printing
 import secrets  # For session key
 import re  # For version string parsing in APK scan and Gradle scan
@@ -14,7 +15,6 @@ import tempfile
 import time
 from pathlib import Path # For finding home directory
 from urllib.parse import quote
-from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET # Still needed for the object structure
 import sys # For printing sys.path for debugging
 import traceback # For printing full tracebacks
@@ -1783,16 +1783,23 @@ def _remote_preset_urls(filename):
 def _fetch_remote_preset(filename):
     """Fetch and validate one preset file, bypassing intermediary caches."""
     last_error = None
+    cache_bust = time.time_ns()
     for url in _remote_preset_urls(filename):
         separator = "&" if "?" in url else "?"
-        request = Request(
-            f"{url}{separator}eventinspector_refresh={int(time.time() * 1000)}",
-            headers={"Cache-Control": "no-cache", "Pragma": "no-cache"},
-        )
         try:
-            with urlopen(request, timeout=8) as response:
-                payload = response.read()
-            decoded = json.loads(payload.decode("utf-8"))
+            response = requests.get(
+                f"{url}{separator}eventinspector_refresh={cache_bust}",
+                headers={
+                    "Accept": "application/json",
+                    "Cache-Control": "no-cache, no-store, max-age=0",
+                    "Pragma": "no-cache",
+                    "Accept-Encoding": "identity",
+                },
+                timeout=8,
+            )
+            response.raise_for_status()
+            payload = response.content
+            decoded = response.json()
             if not isinstance(decoded, dict) or not decoded:
                 raise ValueError("preset_root_must_be_object")
             return payload
