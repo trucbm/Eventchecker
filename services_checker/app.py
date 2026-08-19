@@ -13,6 +13,7 @@ import importlib
 import importlib.util
 import tempfile
 import time
+import hashlib
 from pathlib import Path # For finding home directory
 from urllib.parse import quote
 import xml.etree.ElementTree as ET # Still needed for the object structure
@@ -1807,6 +1808,12 @@ SERVICES_CHECKER_PRESET_FILENAMES = (
     MANIFEST_CHECK_PRESETS_FILENAME,
 )
 
+# Keep the payload returned by the most recent successful Git refresh in
+# memory. The disk cache remains the cross-session fallback, but the same
+# request must use the bytes it just downloaded instead of re-reading an
+# older copy from a different bundled/portable path.
+_live_remote_preset_payloads = {}
+
 
 def _services_checker_preset_cache_dir():
     """Return a writable per-user cache shared by bundled and portable builds."""
@@ -1884,13 +1891,16 @@ def _refresh_remote_preset_files():
     refreshed = []
     errors = []
     refreshed_sources = {}
+    refreshed_digests = {}
     for filename in SERVICES_CHECKER_PRESET_FILENAMES:
         try:
             payload, branch = _fetch_remote_preset(filename)
+            refreshed_digests[filename] = hashlib.sha256(payload).hexdigest()
             temp_path = os.path.join(cache_dir, f".{filename}.{secrets.token_hex(4)}.tmp")
             with open(temp_path, "wb") as handle:
                 handle.write(payload)
             os.replace(temp_path, os.path.join(cache_dir, filename))
+            _live_remote_preset_payloads[filename] = payload
             refreshed.append(filename)
             refreshed_sources[filename] = branch
         except Exception as exc:
@@ -1901,30 +1911,81 @@ def _refresh_remote_preset_files():
                     os.remove(temp_path)
             except OSError:
                 pass
-    return refreshed, errors, refreshed_sources
+    return refreshed, errors, refreshed_sources, refreshed_digests
+
+
+def _preset_file_metadata():
+    """Describe the exact preset copy currently visible to the client."""
+    cache_dir = _services_checker_preset_cache_dir()
+    metadata = {}
+    for filename in SERVICES_CHECKER_PRESET_FILENAMES:
+        live_payload = _live_remote_preset_payloads.get(filename)
+        if live_payload is not None:
+            metadata[filename] = {
+                "source": "github-live",
+                "sha256": hashlib.sha256(live_payload).hexdigest(),
+                "size": len(live_payload),
+            }
+            continue
+        cache_path = os.path.join(cache_dir, filename)
+        bundled_path = os.path.join(APP_ROOT, filename)
+        for path, source in ((cache_path, "github-cache"), (bundled_path, "bundled")):
+            try:
+                with open(path, "rb") as handle:
+                    payload = handle.read()
+            except OSError:
+                continue
+            metadata[filename] = {
+                "source": source,
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "size": len(payload),
+            }
+            break
+    return metadata
+
+
+def _preset_revision(metadata):
+    digest_input = {
+        filename: (metadata.get(filename) or {}).get("sha256", "")
+        for filename in SERVICES_CHECKER_PRESET_FILENAMES
+    }
+    return hashlib.sha256(
+        json.dumps(digest_input, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def _load_preset_file(filename, default_platform):
+    payload_candidates = []
+    live_payload = _live_remote_preset_payloads.get(filename)
+    if live_payload is not None:
+        try:
+            payload_candidates.append(("<live-remote>", json.loads(live_payload.decode("utf-8"))))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            # Fall back to the atomic disk cache if a malformed payload ever
+            # reaches this point; _fetch_remote_preset already validates JSON.
+            pass
+
     for path in _preset_file_candidates(filename):
         try:
             with open(path, "r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-            if not isinstance(payload, dict):
-                continue
-            presets = {}
-            for name, preset in payload.items():
-                if isinstance(preset, list):
-                    preset = {"lines": preset}
-                if not isinstance(preset, dict):
-                    continue
-                normalized = dict(preset)
-                normalized.setdefault("platform", default_platform)
-                normalized.setdefault("lines", [])
-                presets[str(name)] = normalized
-            if presets:
-                return presets
+                payload_candidates.append((path, json.load(handle)))
         except Exception as exc:
             logger.warning("Preset file unavailable (%s): %s", path, exc)
+    for source, payload in payload_candidates:
+        if not isinstance(payload, dict):
+            continue
+        presets = {}
+        for name, preset in payload.items():
+            if isinstance(preset, list):
+                preset = {"lines": preset}
+            if not isinstance(preset, dict):
+                continue
+            normalized = dict(preset)
+            normalized.setdefault("platform", default_platform)
+            normalized.setdefault("lines", [])
+            presets[str(name)] = normalized
+        if presets:
+            return presets
     return {}
 
 
@@ -2049,12 +2110,14 @@ def get_build_check_presets_final():
     refreshed = []
     refresh_errors = []
     refreshed_sources = {}
+    refreshed_digests = {}
     if refresh_requested:
-        refreshed, refresh_errors, refreshed_sources = _refresh_remote_preset_files()
+        refreshed, refresh_errors, refreshed_sources, refreshed_digests = _refresh_remote_preset_files()
     presets = _load_build_check_presets()
     gradle_presets = _load_gradle_check_presets()
     podfile_presets = _load_podfile_check_presets()
     manifest_presets = _load_manifest_check_presets()
+    loaded_preset_files = _preset_file_metadata()
     if len(refreshed) == len(SERVICES_CHECKER_PRESET_FILENAMES):
         source = 'github'
     elif refreshed:
@@ -2066,6 +2129,9 @@ def get_build_check_presets_final():
         'source': source,
         'refreshed_files': refreshed,
         'refreshed_sources': refreshed_sources,
+        'refreshed_digests': refreshed_digests,
+        'loaded_preset_files': loaded_preset_files,
+        'preset_revision': _preset_revision(loaded_preset_files),
         'refresh_errors': refresh_errors,
         'refresh_requested': explicit_refresh,
         'presets': presets,

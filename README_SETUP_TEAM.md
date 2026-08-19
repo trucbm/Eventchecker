@@ -603,3 +603,17 @@ Nguyen tac su dung:
 - neu harness fail thi sua xong moi push
 - neu sua `Updates_2_3/` hoac manifest update thi harness la bat buoc
 - harness khong thay cho local run app, ma la them 1 lop chan loi
+
+Quy tac bat buoc cho du lieu lay tu Git:
+
+- Test upload/download preset phai tao hoac sua mot file da duoc commit trong
+  Git, roi cho client tai qua HTTP; khong duoc chi mock `requests.get` hoac
+  chi kiem tra chuoi trong source.
+- Test phai dung cung mot client/process cho hai lan tai: lan dau xac nhan gia
+  tri commit cu, sua sang commit moi, bam Reload, roi xac nhan gia tri moi va
+  `sha256`/`preset_revision` da thay doi.
+- Neu test chi kiem tra cau truc ma khong chung minh gia tri moi den duoc
+  client thi xem nhu chua dat, khong duoc push release.
+- Test bat buoc: `python3 tools/eventchecker_harness.py --only
+  test_services_checker_git_value_reload_from_real_commit
+  test_sdk_preset_git_value_reload_from_real_commit`.

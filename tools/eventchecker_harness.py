@@ -18,13 +18,17 @@ It does not start the UI or connect to devices.
 from __future__ import annotations
 
 import argparse
+import functools
+import http.server
 import importlib.util
 import json
 import os
 import re
 import hashlib
+import subprocess
 import sys
 import tempfile
+import threading
 import types
 from dataclasses import dataclass
 from pathlib import Path
@@ -561,12 +565,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(42)" in text, "Log_checker.py must be prepared for v2.5.0(42)")
+    _assert("v2.5.0(43)" in text, "Log_checker.py must be prepared for v2.5.0(43)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(42)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(43)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -700,11 +704,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-19-1-2.5.0-42", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-19-1-2.5.0-43", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(42\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(43\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -956,6 +960,228 @@ def test_services_checker_live_preset_refresh_after_restart() -> None:
             os.environ["EVENTINSPECTOR_PRESET_CACHE_DIR"] = original_cache_dir
 
 
+def test_services_checker_git_value_reload_from_real_commit() -> None:
+    """Require a real Git commit change to reach the same client process.
+
+    A mocked requests.get can prove only that code paths exist. This test
+    creates a temporary Git repository, serves its checked-in files over HTTP,
+    changes a committed preset value, and verifies that the already imported
+    Services Checker returns the new value after Reload.
+    """
+    service_path = ROOT / "services_checker" / "app.py"
+    preset_filenames = (
+        "apk_check_presets.json",
+        "gradle_check_presets.json",
+        "podfile_check_presets.json",
+        "manifest_check_presets.json",
+    )
+    original_cache_dir = os.environ.get("EVENTINSPECTOR_PRESET_CACHE_DIR")
+    module_name = "eventinspector_services_checker_real_git_reload"
+
+    def run_git(repo, *args):
+        return subprocess.run(
+            ["git", *args],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    class QuietHandler(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, _format, *_args):
+            return
+
+    server = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="eventinspector_git_presets_") as temp_dir:
+            repo = Path(temp_dir) / "remote"
+            cache_dir = Path(temp_dir) / "client-cache"
+            (repo / "services_checker").mkdir(parents=True)
+            run_git(repo, "init", "-q", "-b", "main")
+            run_git(repo, "config", "user.email", "harness@example.invalid")
+            run_git(repo, "config", "user.name", "EventInspector Harness")
+
+            def write_presets(revision):
+                for filename in preset_filenames:
+                    payload = {
+                        "C-190-Android": {
+                            "platform": "ios" if filename == "podfile_check_presets.json" else "android",
+                            "lines": [f"{filename}:{revision}"],
+                            "harness_marker": revision,
+                        }
+                    }
+                    (repo / "services_checker" / filename).write_text(
+                        json.dumps(payload, sort_keys=True),
+                        encoding="utf-8",
+                    )
+
+            write_presets("commit-one")
+            run_git(repo, "add", "services_checker")
+            run_git(repo, "commit", "-qm", "preset commit one")
+            first_commit = run_git(repo, "rev-parse", "HEAD")
+
+            server = http.server.ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                functools.partial(QuietHandler, directory=str(repo)),
+            )
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            base_url = f"http://127.0.0.1:{server.server_port}/services_checker"
+
+            os.environ["EVENTINSPECTOR_PRESET_CACHE_DIR"] = str(cache_dir)
+            spec = importlib.util.spec_from_file_location(module_name, service_path)
+            _assert(spec is not None and spec.loader is not None, "Services Checker module could not be loaded")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+            module._remote_preset_urls = lambda filename: (
+                ("git-fixture", f"{base_url}/{filename}")
+                for _ in (0,)
+            )
+
+            client = module.app.test_client()
+            first_response = client.get("/api/build-check-presets?refresh=1&ts=commit-one")
+            _assert_equal(first_response.status_code, 200, "real Git preset request failed")
+            first_data = first_response.get_json()
+            _assert_equal(
+                first_data["manifest_presets"]["C-190-Android"]["harness_marker"],
+                "commit-one",
+                "client did not receive the first committed Git value",
+            )
+            first_digest = first_data["loaded_preset_files"]["manifest_check_presets.json"]["sha256"]
+            _assert_equal(
+                first_data["refreshed_sources"]["manifest_check_presets.json"],
+                "git-fixture",
+                "wrong Git source",
+            )
+
+            write_presets("commit-two")
+            run_git(repo, "add", "services_checker")
+            run_git(repo, "commit", "-qm", "preset commit two")
+            second_commit = run_git(repo, "rev-parse", "HEAD")
+            _assert(first_commit != second_commit, "harness Git fixture did not create a new commit")
+
+            second_response = client.get("/api/build-check-presets?refresh=1&ts=commit-two")
+            _assert_equal(second_response.status_code, 200, "real Git reload request failed")
+            second_data = second_response.get_json()
+            _assert_equal(
+                second_data["manifest_presets"]["C-190-Android"]["harness_marker"],
+                "commit-two",
+                "client kept the old preset value after a real Git commit changed",
+            )
+            second_digest = second_data["loaded_preset_files"]["manifest_check_presets.json"]["sha256"]
+            _assert(first_digest != second_digest, "client preset hash did not change after Git commit")
+            _assert_equal(
+                set(second_data["refreshed_files"]),
+                set(preset_filenames),
+                "Reload did not download every Git-backed Service Checker preset",
+            )
+            _assert_equal(
+                second_data["preset_revision"] != first_data["preset_revision"],
+                True,
+                "client revision marker did not change after Git commit",
+            )
+    finally:
+        if server is not None:
+            server.shutdown()
+            server.server_close()
+        sys.modules.pop(module_name, None)
+        if original_cache_dir is None:
+            os.environ.pop("EVENTINSPECTOR_PRESET_CACHE_DIR", None)
+        else:
+            os.environ["EVENTINSPECTOR_PRESET_CACHE_DIR"] = original_cache_dir
+
+
+def test_sdk_preset_git_value_reload_from_real_commit() -> None:
+    """Require a real Git commit change to reach the SDK preset client.
+
+    This intentionally uses the real SDK endpoint and HTTP transport. The
+    temporary repository gives the test two actual committed revisions without
+    changing the production repository.
+    """
+    preset_filename = "sdk_check_presets.json"
+    original_urls = list(lc.SDK_CHECK_PRESETS_REMOTE_URLS)
+
+    def run_git(repo, *args):
+        return subprocess.run(
+            ["git", *args],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    class QuietHandler(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, _format, *_args):
+            return
+
+    server = None
+    try:
+        with tempfile.TemporaryDirectory(prefix="eventinspector_sdk_git_presets_") as temp_dir:
+            repo = Path(temp_dir) / "remote"
+            repo.mkdir()
+            run_git(repo, "init", "-q", "-b", "main")
+            run_git(repo, "config", "user.email", "harness@example.invalid")
+            run_git(repo, "config", "user.name", "EventInspector Harness")
+
+            def write_preset(revision):
+                payload = {
+                    "C-190-Android": {
+                        "platform": "android",
+                        "lines": [f"Ads Network\tHarness-{revision}"],
+                        "harness_marker": revision,
+                    }
+                }
+                (repo / preset_filename).write_text(
+                    json.dumps(payload, sort_keys=True),
+                    encoding="utf-8",
+                )
+
+            write_preset("commit-one")
+            run_git(repo, "add", preset_filename)
+            run_git(repo, "commit", "-qm", "SDK preset commit one")
+            first_commit = run_git(repo, "rev-parse", "HEAD")
+
+            server = http.server.ThreadingHTTPServer(
+                ("127.0.0.1", 0),
+                functools.partial(QuietHandler, directory=str(repo)),
+            )
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            lc.SDK_CHECK_PRESETS_REMOTE_URLS[:] = [
+                f"http://127.0.0.1:{server.server_port}/{preset_filename}"
+            ]
+
+            client = lc.app.test_client()
+            first_response = client.get("/api/sdk-check-presets?refresh=1&ts=commit-one")
+            _assert_equal(first_response.status_code, 200, "real SDK Git preset request failed")
+            first_data = first_response.get_json()
+            _assert_equal(first_data.get("source"), "github", "SDK preset did not come from Git HTTP")
+            _assert_equal(
+                first_data["presets"]["C-190-Android"]["lines"],
+                ["Ads Network\tHarness-commit-one"],
+                "client did not receive the first committed SDK preset value",
+            )
+
+            write_preset("commit-two")
+            run_git(repo, "add", preset_filename)
+            run_git(repo, "commit", "-qm", "SDK preset commit two")
+            second_commit = run_git(repo, "rev-parse", "HEAD")
+            _assert(first_commit != second_commit, "harness SDK Git fixture did not create a new commit")
+
+            second_response = client.get("/api/sdk-check-presets?refresh=1&ts=commit-two")
+            _assert_equal(second_response.status_code, 200, "real SDK Git reload request failed")
+            second_data = second_response.get_json()
+            _assert_equal(
+                second_data["presets"]["C-190-Android"]["lines"],
+                ["Ads Network\tHarness-commit-two"],
+                "client kept the old SDK preset value after a real Git commit changed",
+            )
+    finally:
+        if server is not None:
+            server.shutdown()
+            server.server_close()
+        lc.SDK_CHECK_PRESETS_REMOTE_URLS[:] = original_urls
+
+
 def test_legacy_v24025_bridge_contract() -> None:
     bridge_path = ROOT / "Updates_2_3" / "remote_manifest.json"
     bridge = json.loads(bridge_path.read_text(encoding="utf-8"))
@@ -1012,9 +1238,9 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-19-1-2.5.0-42", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-19-1-2.5.0-43", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 42, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 43, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
@@ -1184,7 +1410,7 @@ def test_build_scripts_clean_outputs() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-19-1-2.5.0-42' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-19-1-2.5.0-43' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
@@ -1241,6 +1467,10 @@ def test_services_checker_bridge_contract() -> None:
     _assert("def _load_axml_printer()" in service_source, "Services Checker AXML retry loader is missing")
     _assert("def _load_fallback_axml_printer()" in service_source, "Services Checker dependency-free fallback loader is missing")
     _assert('importlib.import_module("androguard.core.axml")' in service_source, "Services Checker AXML import is not explicit")
+    _assert("_live_remote_preset_payloads" in service_source, "Services Checker must keep the latest downloaded payload in memory")
+    _assert("refreshed_digests" in service_source, "Services Checker must expose downloaded preset hashes")
+    _assert("loaded_preset_files" in service_source, "Services Checker must expose the preset copy used by the response")
+    _assert("preset_revision" in service_source, "Services Checker must expose a client-visible preset revision")
     _assert("class AXMLPrinter" in fallback_source, "Services Checker dependency-free AXML fallback is missing")
     _assert((ROOT / "services_checker" / "axml_fallback.py").is_file(), "Services Checker fallback file is missing")
     _assert(".container h2.text-xl" in service_source, "Services Checker typography override is missing")
@@ -1300,6 +1530,8 @@ TESTS: List[Callable[[], None]] = [
     test_update_candidate_does_not_downgrade,
     test_services_checker_gradle_mapping_contract,
     test_services_checker_live_preset_refresh_after_restart,
+    test_services_checker_git_value_reload_from_real_commit,
+    test_sdk_preset_git_value_reload_from_real_commit,
     test_legacy_v24025_bridge_contract,
     test_update_flow_legacy_to_v25,
     test_build_scripts_clean_outputs,
