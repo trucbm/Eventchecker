@@ -132,7 +132,38 @@ UPLOAD_FOLDER_ABS_PATH = os.path.join(APP_ROOT, UPLOAD_FOLDER_NAME)
 if not os.path.exists(UPLOAD_FOLDER_ABS_PATH):
     os.makedirs(UPLOAD_FOLDER_ABS_PATH)
 
-BUNDLETOOL_PATH = os.getenv('EVENTINSPECTOR_BUNDLETOOL_PATH') or os.path.join(APP_ROOT, 'bundletool-all-1.18.1.jar')
+def _service_resource_path(filename):
+    """Resolve a Service Checker resource from update or bundled paths."""
+    filename = str(filename or '').strip()
+    roots = [APP_ROOT]
+    meipass = getattr(sys, '_MEIPASS', '')
+    if meipass:
+        roots.extend([
+            os.path.join(meipass, 'services_checker'),
+            meipass,
+        ])
+    executable = getattr(sys, 'executable', '')
+    if executable:
+        executable_dir = os.path.dirname(os.path.abspath(executable))
+        roots.extend([
+            os.path.join(executable_dir, 'services_checker'),
+            os.path.join(executable_dir, '..', 'Resources', 'services_checker'),
+        ])
+    candidates = []
+    seen = set()
+    for root in roots:
+        root = os.path.abspath(root) if root else ''
+        if not root or root in seen:
+            continue
+        seen.add(root)
+        candidates.append(os.path.join(root, filename))
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return candidates[0] if candidates else os.path.join(APP_ROOT, filename)
+
+
+BUNDLETOOL_PATH = os.getenv('EVENTINSPECTOR_BUNDLETOOL_PATH') or _service_resource_path('bundletool-all-1.18.1.jar')
 
 # Paths to files within APK/AAB that indicate library presence/version
 # Keys are paths in the archive, values are human-readable names for display.
@@ -2317,6 +2348,11 @@ def convert_aab_to_apk():
             else:
                 # Assume relative to APP_ROOT if not absolute
                 final_ks_path = os.path.join(APP_ROOT, ks_path_input)
+                if (
+                    os.path.basename(os.path.normpath(ks_path_input)) == DEFAULT_KEYSTORE_FILENAME
+                    and not os.path.exists(final_ks_path)
+                ):
+                    final_ks_path = _service_resource_path(DEFAULT_KEYSTORE_FILENAME)
             logger.info(f"Resolved final_ks_path: '{final_ks_path}'")
 
 

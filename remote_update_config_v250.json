@@ -6,6 +6,6 @@
     "https://github.com/trucbm/Eventchecker/raw/2.5.0/Updates_2_5/remote_manifest.json",
     "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/remote_manifest.json"
   ],
-  "timeout_sec": 10,
+  "timeout_sec": 120,
   "min_interval_sec": 0
 }

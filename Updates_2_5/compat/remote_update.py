@@ -53,7 +53,7 @@ def _load_config():
                 cfg.setdefault("enabled", True)
                 cfg.setdefault("manifest_url", DEFAULT_MANIFEST_URL)
                 cfg.setdefault("manifest_urls", DEFAULT_MANIFEST_URLS)
-                cfg.setdefault("timeout_sec", 10)
+                cfg.setdefault("timeout_sec", 120)
                 # Always prefer checking remote on launch. Existing user configs
                 # may still contain stale throttling values from older builds.
                 cfg["min_interval_sec"] = 0
@@ -62,7 +62,7 @@ def _load_config():
         "enabled": True,
         "manifest_url": DEFAULT_MANIFEST_URL,
         "manifest_urls": DEFAULT_MANIFEST_URLS,
-        "timeout_sec": 10,
+        "timeout_sec": 120,
         "min_interval_sec": 0,
     }
 
@@ -75,7 +75,7 @@ def _ensure_user_config_template():
         "enabled": True,
         "manifest_url": DEFAULT_MANIFEST_URL,
         "manifest_urls": DEFAULT_MANIFEST_URLS,
-        "timeout_sec": 10,
+        "timeout_sec": 120,
         "min_interval_sec": 0,
     }
     current = {}
@@ -346,7 +346,7 @@ def check_for_updates(force_refresh=False):
     if not manifest_urls:
         return None
 
-    timeout = float(cfg.get("timeout_sec", 10))
+    timeout = float(cfg.get("timeout_sec", 120))
     state = _load_state()
 
     try:

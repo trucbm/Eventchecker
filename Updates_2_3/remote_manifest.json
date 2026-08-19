@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-19-1-2.5.0-39",
+  "version": "2026-08-19-1-2.5.0-40",
   "update_enabled": true,
   "update_message": "",
   "files": [
@@ -11,7 +11,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/compat/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/compat/Log_checker.py"
       ],
-      "sha256": "07fdcd9edceb0007a70d2fcc5dc2f2689fd943131871149bf79838c70e568019"
+      "sha256": "f5a51b8f651e828c0f0a6285373441ab637068fccb744c9d5fa556ef3af42baf"
     },
     {
       "path": "remote_update.py",
@@ -21,7 +21,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/compat/remote_update.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/compat/remote_update.py"
       ],
-      "sha256": "f8cafa69fb69f0c287b30025f4ae1fea1de37d3b0ddce35bcfc4071886cc27b5"
+      "sha256": "a58828b39e3e3bb4e00cb6977da4f7ffd4bf3ca0eff2bcbaa4b1ea3fae1cde9b"
     },
     {
       "path": "sdk_check_presets.json",
@@ -41,7 +41,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/remote_update_config_v250.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/remote_update_config_v250.json"
       ],
-      "sha256": "8df25232804f15417c13db62ae2461436f06ca32fa944b1885a21b085355aef5"
+      "sha256": "5c8e36bf3a276b6696cce2ba92712f956964ea23201424147579fd69b3865e61"
     },
     {
       "path": "services_checker/app.py",
@@ -51,7 +51,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/app.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/app.py"
       ],
-      "sha256": "35efe2c59e60101b050e4d17fb2dcc69a4e8954fa273ebc866fea4353c2bd934"
+      "sha256": "0bcb76fd55576b702e974af50bbc091b55d6971fc346d83cad9e96e901cbb55e"
     },
     {
       "path": "services_checker/axml_fallback.py",
@@ -72,16 +72,6 @@
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/my-key.keystore"
       ],
       "sha256": "48c751cdf0af6d6ed98b0111f852abb988bf27b1398d6ac309c98a95d4ba5d44"
-    },
-    {
-      "path": "services_checker/bundletool-all-1.18.1.jar",
-      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/bundletool-all-1.18.1.jar",
-      "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/bundletool-all-1.18.1.jar",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/bundletool-all-1.18.1.jar",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/bundletool-all-1.18.1.jar"
-      ],
-      "sha256": "675786493983787ffa11550bdb7c0715679a44e1643f3ff980a529e9c822595c"
     },
     {
       "path": "services_checker/apk_check_presets.json",
