@@ -3,15 +3,38 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+# Read the release marker from the source that is being packaged.  This keeps
+# the visible app version, bundle metadata, and update channel in sync.
+APP_VERSION_LABEL="$(grep -Eo 'v[0-9]+\.[0-9]+\.[0-9]+\([0-9]+\)' Log_checker.py | head -n 1 || true)"
+if [[ ! "$APP_VERSION_LABEL" =~ ^v[0-9]+\.[0-9]+\.[0-9]+\([0-9]+\)$ ]]; then
+  echo "Could not find a release marker in Log_checker.py" >&2
+  exit 1
+fi
+APP_VERSION="${APP_VERSION_LABEL#v}"
+APP_SHORT_VERSION="${APP_VERSION%%(*}"
+APP_BUILD_NUMBER="${APP_VERSION#*(}"
+APP_BUILD_NUMBER="${APP_BUILD_NUMBER%)}"
+
 # Create venv if missing
-if [ ! -d ".venv" ]; then
-  python3 -m venv .venv
+VENV_DIR="${VENV_DIR:-.venv}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+if [ ! -d "$VENV_DIR" ]; then
+  "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
 
-source .venv/bin/activate
+source "$VENV_DIR/bin/activate"
 
-# Build one DMG that runs on both Intel Macs and Apple Silicon Macs.
-MACOS_TARGET_ARCH="${MACOS_TARGET_ARCH:-universal2}"
+# Build for the host architecture by default.  A universal2 build requires
+# universal native Python dependencies; callers can opt into another target.
+if [ -z "${MACOS_TARGET_ARCH:-}" ]; then
+  case "$(uname -m)" in
+    arm64) MACOS_TARGET_ARCH="arm64" ;;
+    x86_64) MACOS_TARGET_ARCH="x86_64" ;;
+    *) echo "Unsupported macOS host architecture: $(uname -m)" >&2; exit 1 ;;
+  esac
+else
+  MACOS_TARGET_ARCH="$MACOS_TARGET_ARCH"
+fi
 
 python -m pip install --upgrade pip
 pip install -r requirements.txt
@@ -75,5 +98,20 @@ pyinstaller --noconfirm --clean --windowed \
 APP_PATH="dist/EventInspector.app"
 DMG_PATH="dist/EventInspector.dmg"
 if [ -d "$APP_PATH" ]; then
-  hdiutil create -volname "Event Inspector" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_PATH"
+  PLIST_PATH="$APP_PATH/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Delete :CFBundleShortVersionString" "$PLIST_PATH" 2>/dev/null || true
+  /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $APP_SHORT_VERSION" "$PLIST_PATH"
+  /usr/libexec/PlistBuddy -c "Delete :CFBundleVersion" "$PLIST_PATH" 2>/dev/null || true
+  /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $APP_BUILD_NUMBER" "$PLIST_PATH"
+  codesign --deep --force --sign - "$APP_PATH" >/dev/null
+
+  ACTUAL_SHORT_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST_PATH")"
+  ACTUAL_BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST_PATH")"
+  if [ "$ACTUAL_SHORT_VERSION" != "$APP_SHORT_VERSION" ] || [ "$ACTUAL_BUILD_NUMBER" != "$APP_BUILD_NUMBER" ]; then
+    echo "Bundle metadata mismatch: expected $APP_SHORT_VERSION/$APP_BUILD_NUMBER, got $ACTUAL_SHORT_VERSION/$ACTUAL_BUILD_NUMBER" >&2
+    exit 1
+  fi
+
+  hdiutil create -volname "Event Inspector $APP_VERSION_LABEL" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_PATH"
+  echo "Built Event Inspector $APP_VERSION_LABEL for $MACOS_TARGET_ARCH: $DMG_PATH"
 fi
