@@ -33,7 +33,7 @@ from pathlib import Path
 from queue import Empty, Queue
 
 # Compatibility marker for the 2.4 desktop shell and the current handoff.
-LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(41)"
+LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(42)"
 
 # Khởi tạo ứng dụng Flask và SocketIO
 app = Flask(__name__)
@@ -46,6 +46,8 @@ except ValueError:
 
 # --- CẤU HÌNH LOAD ADS (GOOGLE SHEET) ---
 G_SHEET_URL = "https://script.google.com/macros/s/AKfycbyLMM9nLAjS9Zhwr4-J6ikjqBSpO7ZCNaNeHKTsfKltiIa0OniDBSrzjvqfvpg87Epl/exec"
+RECORD_SHEET_CONNECT_TIMEOUT_SEC = 3
+RECORD_SHEET_READ_TIMEOUT_SEC = 8
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SDK_CHECK_PRESETS_FILENAME = "sdk_check_presets.json"
 SDK_CHECK_PRESETS_REMOTE_URLS = [
@@ -973,8 +975,8 @@ unique_load_ads_ext = set()
 
 # Trạng thái Recording (Google Sheet) - RIÊNG BIỆT CHO TỪNG TAB
 recording_states = {
-    "LoadAds": {"is_recording": False, "current_sheet": None},
-    "LoadAdsExt": {"is_recording": False, "current_sheet": None}
+    "LoadAds": {"is_recording": False, "current_sheet": None, "record_request_id": None},
+    "LoadAdsExt": {"is_recording": False, "current_sheet": None, "record_request_id": None}
 }
 
 # 3. Dữ liệu cho Tab Validator
@@ -2758,7 +2760,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(41)</title>
+    <title>Event Inspector v2.5.0(42)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -2835,7 +2837,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(41)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(42)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3948,13 +3950,21 @@ HTML_TEMPLATE = """
             }
         }
 
+        function safeRecordSheetName(value) {
+            const text = String(value || 'Running').trim();
+            if (!text || text.length > 200 || /<!doctype|<html|<head/i.test(text)) {
+                return 'Running';
+            }
+            return text;
+        }
+
         socket.on('record_status', (s) => {
             // Update UI based on which tab triggered the status
             const tabName = s.tab_name;
             const btn = document.getElementById('btnRecord_' + tabName);
             if (btn) {
                 if (s.is_recording) {
-                    btn.textContent = 'Stop Recording: ' + (s.current_sheet || 'Running');
+                    btn.textContent = 'Stop Recording: ' + safeRecordSheetName(s.current_sheet);
                     btn.className = 'bg-red-600 text-white font-bold py-2 px-4 rounded animate-record shadow-lg text-sm';
                 } else {
                     btn.textContent = 'Start Record';
@@ -6158,7 +6168,71 @@ def send_to_sheet(device_name, ad_source, ad_format, raw_log, log_type, provider
             "ad_format": ad_format,
             "raw_log": raw_log
         }
-        threading.Thread(target=lambda: requests.post(G_SHEET_URL, json=payload, timeout=30)).start()
+        threading.Thread(
+            target=lambda: requests.post(
+                G_SHEET_URL,
+                json=payload,
+                timeout=(RECORD_SHEET_CONNECT_TIMEOUT_SEC, RECORD_SHEET_READ_TIMEOUT_SEC),
+            ),
+            daemon=True,
+        ).start()
+
+
+def _clean_record_sheet_name(response_text, fallback_name):
+    """Keep a failed Apps Script HTML response out of the recording button label."""
+    candidate = str(response_text or "").strip()
+    if not candidate:
+        return fallback_name
+
+    # Some deployments return JSON, while the current sheet script returns a plain name.
+    if candidate.startswith("{"):
+        try:
+            payload = json.loads(candidate)
+        except (TypeError, ValueError):
+            payload = None
+        if isinstance(payload, dict):
+            candidate = str(
+                payload.get("sheet_name")
+                or payload.get("name")
+                or payload.get("result")
+                or ""
+            ).strip()
+
+    # HTML means the deployment returned an error/login page, not a sheet name.
+    if (
+        not candidate
+        or len(candidate) > 200
+        or "<!doctype" in candidate[:200].lower()
+        or "<html" in candidate[:200].lower()
+        or "<head" in candidate[:200].lower()
+    ):
+        return fallback_name
+    return candidate
+
+
+def _create_record_sheet_in_background(tab_name, requested_name, request_id):
+    try:
+        response = requests.post(
+            G_SHEET_URL,
+            json={"action": "create_or_get_sheet", "sheet_name": requested_name},
+            timeout=(RECORD_SHEET_CONNECT_TIMEOUT_SEC, RECORD_SHEET_READ_TIMEOUT_SEC),
+        )
+        if response.status_code >= 400:
+            raise requests.RequestException(f"HTTP {response.status_code}")
+        resolved_name = _clean_record_sheet_name(response.text, requested_name)
+    except Exception as exc:
+        resolved_name = requested_name
+        logging.warning("Load Ads sheet setup failed; recording locally with %r: %s", requested_name, exc)
+
+    state = recording_states.get(tab_name)
+    if not state or not state.get("is_recording") or state.get("record_request_id") != request_id:
+        return
+    state["current_sheet"] = resolved_name
+    socketio.emit("record_status", {
+        "tab_name": tab_name,
+        "is_recording": True,
+        "current_sheet": resolved_name,
+    })
 
 def process_load_ads_unity_log(line, device_id):
     """Xử lý log cho Tab 1: Load Ads (Unity)"""
@@ -8007,6 +8081,7 @@ def _reset_runtime_for_platform_switch():
 
         for state in recording_states.values():
             state["is_recording"] = False
+            state["record_request_id"] = None
 
     socketio.emit('pause_status', {'is_paused': False})
     socketio.emit('validator_status', {'active': False})
@@ -8050,21 +8125,36 @@ def tr(data):
     current_state = recording_states[tab_name]
 
     if not current_state["is_recording"]:
-        name = data.get('sheet_name', 'Log_Default').strip()
-        try:
-            res = requests.post(G_SHEET_URL, json={"action": "create_or_get_sheet", "sheet_name": name}, timeout=30)
-            current_state.update({"is_recording": True, "current_sheet": res.text})
-        except:
-            current_state.update({"is_recording": True, "current_sheet": name}) # Fallback
+        name = str(data.get('sheet_name') or 'Log_Default').strip() or 'Log_Default'
+        request_id = uuid.uuid4().hex
+        # Start immediately. Sheet creation is best-effort and must never block the
+        # Socket.IO handler while Apps Script is slow or unavailable.
+        current_state.update({
+            "is_recording": True,
+            "current_sheet": name,
+            "record_request_id": request_id,
+        })
+        socketio.emit('record_status', {
+            "tab_name": tab_name,
+            "is_recording": True,
+            "current_sheet": name,
+        })
+        threading.Thread(
+            target=_create_record_sheet_in_background,
+            args=(tab_name, name, request_id),
+            daemon=True,
+        ).start()
     else:
         current_state["is_recording"] = False
+        current_state["record_request_id"] = None
 
     # Emit status back with tab_name so UI knows which button to update
-    socketio.emit('record_status', {
-        "tab_name": tab_name,
-        "is_recording": current_state["is_recording"],
-        "current_sheet": current_state["current_sheet"]
-    })
+    if not current_state["is_recording"]:
+        socketio.emit('record_status', {
+            "tab_name": tab_name,
+            "is_recording": False,
+            "current_sheet": current_state["current_sheet"]
+        })
 
 @socketio.on('toggle_pause')
 def tp():

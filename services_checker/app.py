@@ -1795,14 +1795,11 @@ MANIFEST_CHECK_PRESETS_FILENAME = "manifest_check_presets.json"
 
 # Presets are live data. The Service Checker always refreshes these files when
 # its page starts, and the Reload buttons repeat the same operation. `main` is
-# the editable source users see on GitHub; the release branch is a fallback so
-# an older branch layout cannot make the controls silently empty.
-SERVICES_CHECKER_PRESET_BRANCH = os.getenv("EVENTINSPECTOR_PRESET_BRANCH", "main").strip() or "main"
-SERVICES_CHECKER_PRESET_BRANCHES = tuple(dict.fromkeys((
-    SERVICES_CHECKER_PRESET_BRANCH,
-    "main",
-    "2.5.0",
-)))
+# the single editable source users see on GitHub. Do not let an inherited
+# release-build environment redirect this data to an older branch: that made
+# Reload report success while returning stale presets.
+SERVICES_CHECKER_PRESET_BRANCH = "main"
+SERVICES_CHECKER_PRESET_BRANCHES = (SERVICES_CHECKER_PRESET_BRANCH,)
 SERVICES_CHECKER_PRESET_FILENAMES = (
     APK_CHECK_PRESETS_FILENAME,
     GRADLE_CHECK_PRESETS_FILENAME,
