@@ -6,6 +6,7 @@ import time
 import requests
 import html
 import importlib.util
+import importlib
 from collections import deque
 from flask import Flask, render_template_string, request, jsonify, Response
 from flask_socketio import SocketIO
@@ -18,10 +19,12 @@ import logging
 import sqlite3
 import socket
 import platform
+import signal
 import uuid
 import plistlib
 import tempfile
 import zipfile
+import glob
 try:
     import webview
 except Exception:
@@ -40,11 +43,15 @@ except ValueError:
 
 # --- CẤU HÌNH LOAD ADS (GOOGLE SHEET) ---
 G_SHEET_URL = "https://script.google.com/macros/s/AKfycbyLMM9nLAjS9Zhwr4-J6ikjqBSpO7ZCNaNeHKTsfKltiIa0OniDBSrzjvqfvpg87Epl/exec"
+RECORD_SHEET_CONNECT_TIMEOUT_SEC = 3
+RECORD_SHEET_READ_TIMEOUT_SEC = 8
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SDK_CHECK_PRESETS_FILENAME = "sdk_check_presets.json"
 SDK_CHECK_PRESETS_REMOTE_URLS = [
     "https://raw.githubusercontent.com/trucbm/Eventchecker/main/sdk_check_presets.json",
     "https://github.com/trucbm/Eventchecker/raw/main/sdk_check_presets.json",
+    "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/sdk_check_presets.json",
+    "https://github.com/trucbm/Eventchecker/raw/2.5.0/sdk_check_presets.json",
 ]
 
 
@@ -97,8 +104,8 @@ def _load_sdk_check_presets():
     return {}
 
 
-def _fetch_sdk_check_presets():
-    if os.getenv("SDK_CHECK_PRESETS_PATH"):
+def _fetch_sdk_check_presets(force_remote=False):
+    if os.getenv("SDK_CHECK_PRESETS_PATH") and not force_remote:
         local_presets = _load_sdk_check_presets()
         if local_presets:
             return local_presets, "local"
@@ -183,12 +190,12 @@ def _resolve_default_params_path():
 
 DEFAULT_PARAMS_XLSX = _resolve_default_params_path()
 DEFAULT_PARAM_FILL = "FFFCE5CD"
-REMOTE_UPDATE_CONFIG_FILENAME = "remote_update_config_v230.json"
-DEFAULT_REMOTE_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json"
+REMOTE_UPDATE_CONFIG_FILENAME = "remote_update_config_v250.json"
+DEFAULT_REMOTE_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/remote_manifest.json"
 DEFAULT_REMOTE_MANIFEST_URLS = [
-    "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json",
-    "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_3/remote_manifest.json",
-    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json",
+    "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/remote_manifest.json",
+    "https://github.com/trucbm/Eventchecker/raw/2.5.0/Updates_2_5/remote_manifest.json",
+    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/remote_manifest.json",
 ]
 APP_AUDIT_CONFIG_FILENAME = "app_audit_config.json"
 DEFAULT_AUDIT_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzKzf7KAJvy3gu1vfaQ7wHR0tk2mzR_UapoVIfjjjO-aFG2NHKmJQKYLvfsBwgi7heY/exec"
@@ -415,7 +422,7 @@ def _normalize_remote_update_config():
         cfg["enabled"] = True
         cfg["manifest_url"] = DEFAULT_REMOTE_MANIFEST_URL
         cfg["manifest_urls"] = DEFAULT_REMOTE_MANIFEST_URLS
-        cfg["timeout_sec"] = 10
+        cfg["timeout_sec"] = 120
         cfg["min_interval_sec"] = 0
         with open(cfg_path, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2)
@@ -444,6 +451,455 @@ def _load_remote_update_module():
 
     import remote_update
     return remote_update
+
+
+SERVICES_CHECKER_DEFAULT_PORT = 5010
+SERVICES_CHECKER_EXTERNAL_URL_DEFAULT = "http://127.0.0.1:5000"
+SERVICES_CHECKER_APP_RELATIVE_PATH = os.path.join(
+    "Shared drives",
+    "IndieZ - Tester",
+    "Automation & Tools",
+    "Checker",
+    "Services checker",
+    "app.py",
+)
+SERVICES_CHECKER_KEYSTORE_FILENAME = "my-key.keystore"
+SERVICES_CHECKER_EXTERNAL_ENV = "EVENTINSPECTOR_ALLOW_EXTERNAL_SERVICES_CHECKER"
+_services_checker_lock = threading.Lock()
+_services_checker_state = {
+    "module": None,
+    "thread": None,
+    "port": None,
+    "url": None,
+    "process": None,
+    "source": "",
+    "error": "",
+}
+
+
+def _services_checker_external_sources_enabled():
+    """Keep Drive/launcher hosts opt-in after the bundled migration."""
+    return os.getenv(SERVICES_CHECKER_EXTERNAL_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _services_checker_drive_app_candidates():
+    """Find the shared Services Checker app.py before using the bundled copy.
+
+    The shared app owns the matching keystore and bundletool files.  Keep this
+    lookup here as a second line of defence in case a launcher is unavailable
+    on a portable client.
+    """
+    candidates = []
+    configured = os.getenv("EVENTINSPECTOR_SERVICES_APP_PATH", "").strip()
+    if configured:
+        candidates.append(os.path.expandvars(os.path.expanduser(configured)))
+
+    if os.name == "nt":
+        roots = [
+            os.getenv("GOOGLE_DRIVE_ROOT", ""),
+            os.getenv("GOOGLE_DRIVE_MOUNT", ""),
+            os.getenv("GDRIVE_ROOT", ""),
+        ]
+        roots.extend(f"{letter}:\\" for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ")
+        profile = os.path.expanduser("~")
+        roots.extend([
+            os.path.join(profile, "Google Drive"),
+            os.path.join(profile, "GoogleDrive"),
+        ])
+        for root in roots:
+            if not root:
+                continue
+            candidates.append(os.path.join(root, SERVICES_CHECKER_APP_RELATIVE_PATH))
+            candidates.append(os.path.join(root, "Google Drive", SERVICES_CHECKER_APP_RELATIVE_PATH))
+    else:
+        cloud_roots = glob.glob(os.path.expanduser("~/Library/CloudStorage/GoogleDrive-*"))
+        cloud_roots.extend([
+            os.path.expanduser("~/Google Drive"),
+            os.path.expanduser("~/GoogleDrive"),
+        ])
+        for root in cloud_roots:
+            candidates.append(os.path.join(root, SERVICES_CHECKER_APP_RELATIVE_PATH))
+
+    seen = set()
+    return [
+        path for path in candidates
+        if path and path not in seen and not seen.add(path) and os.path.isfile(path)
+    ]
+
+
+def _services_checker_launcher_is_drive_aware(path):
+    """Return whether a saved launcher resolves the shared Drive app."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+            source = handle.read(128 * 1024)
+        return (
+            "Shared drives" in source
+            and "IndieZ - Tester" in source
+            and "Services checker" in source
+            and "app.py" in source
+        )
+    except (OSError, UnicodeError):
+        return False
+
+
+def _services_checker_file_candidates():
+    candidates = []
+    update_dir = os.getenv("EVENTINSPECTOR_UPDATE_DIR")
+    if update_dir:
+        candidates.append(os.path.join(update_dir, "services_checker", "app.py"))
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(os.path.join(meipass, "services_checker", "app.py"))
+    candidates.append(os.path.join(SCRIPT_DIR, "services_checker", "app.py"))
+    if getattr(sys, "frozen", False):
+        candidates.append(os.path.join(os.path.dirname(sys.executable), "services_checker", "app.py"))
+
+    if _services_checker_external_sources_enabled():
+        candidates.extend(_services_checker_drive_app_candidates())
+
+    seen = set()
+    return [path for path in candidates if path and not (path in seen or seen.add(path))]
+
+
+def _services_checker_command_candidates():
+    if not _services_checker_external_sources_enabled():
+        return []
+
+    candidates = []
+    configured = os.getenv("EVENTINSPECTOR_SERVICES_COMMAND", "").strip()
+    if configured:
+        candidates.append(os.path.expanduser(configured))
+    if os.name == "nt":
+        candidates.extend([
+            os.path.expanduser("~/Desktop/Androidchecker.cmd"),
+            os.path.expanduser("~/Downloads/Androidchecker.cmd"),
+        ])
+    else:
+        candidates.append(os.path.expanduser("~/Desktop/AndroidTool.command"))
+
+    # A previously imported host may be stale and still launch the bundled
+    # checker. Prefer the current Drive-aware launchers; keep a saved host as
+    # a fallback only when it also points at the shared app.py.
+    saved_host = _services_checker_saved_host_path()
+    if os.path.isfile(saved_host) and (
+        _services_checker_launcher_is_drive_aware(saved_host)
+        or not _services_checker_drive_app_candidates()
+    ):
+        candidates.append(saved_host)
+
+    seen = set()
+    return [path for path in candidates if path and not (path in seen or seen.add(path))]
+
+
+def _services_checker_saved_host_path():
+    filename = "Androidchecker.cmd" if os.name == "nt" else "AndroidTool.command"
+    return os.path.join(_user_data_dir(), "services_checker_host", filename)
+
+
+def _services_checker_host_status():
+    path = _services_checker_saved_host_path()
+    return {
+        "saved": os.path.isfile(path),
+        "filename": os.path.basename(path),
+    }
+
+
+def _save_services_checker_host(upload):
+    filename = os.path.basename(upload.filename or "")
+    suffix = os.path.splitext(filename)[1].lower()
+    if suffix not in {".command", ".sh", ".cmd", ".bat"}:
+        raise ValueError("host_file_must_be_command_or_batch_script")
+
+    target_dir = os.path.dirname(_services_checker_saved_host_path())
+    os.makedirs(target_dir, exist_ok=True)
+    target = _services_checker_saved_host_path()
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="host_",
+            suffix=suffix,
+            dir=target_dir,
+            delete=False,
+        ) as temp_file:
+            temp_path = temp_file.name
+        upload.save(temp_path)
+        if os.path.getsize(temp_path) > 2 * 1024 * 1024:
+            raise ValueError("host_file_too_large")
+        if os.name != "nt":
+            os.chmod(temp_path, 0o755)
+        os.replace(temp_path, target)
+        return target
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
+def _stop_services_checker_process(process):
+    if not process or process.poll() is not None:
+        return
+
+    try:
+        if os.name == "nt":
+            process.terminate()
+        else:
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+    except (OSError, ProcessLookupError):
+        return
+
+    deadline = time.time() + 5
+    while time.time() < deadline and process.poll() is None:
+        time.sleep(0.1)
+
+    if process.poll() is None:
+        try:
+            if os.name == "nt":
+                process.kill()
+            else:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+
+
+def _reload_services_checker():
+    with _services_checker_lock:
+        owned_process = _services_checker_state.get("process")
+        _stop_services_checker_process(owned_process)
+        restarted = owned_process is not None
+        _services_checker_state.update({
+            "module": None,
+            "thread": None,
+            "port": None,
+            "url": None,
+            "process": None,
+            "source": "",
+            "error": "",
+        })
+
+    # Let the old Flask/debug-reloader process release port 5000 before
+    # launching the selected host script again.
+    if restarted:
+        deadline = time.time() + 8
+        external_url = _services_checker_external_url()
+        while time.time() < deadline and _services_checker_ready(external_url):
+            time.sleep(0.15)
+
+    return _start_services_checker(), restarted
+
+
+def _services_checker_external_url():
+    return os.getenv(
+        "EVENTINSPECTOR_SERVICES_CHECKER_URL",
+        SERVICES_CHECKER_EXTERNAL_URL_DEFAULT,
+    ).strip().rstrip("/")
+
+
+def _services_checker_ready(url):
+    try:
+        response = requests.get(f"{url.rstrip('/')}/", timeout=0.8)
+        if not response.ok:
+            return False
+        body = response.text.lower()
+        return any(marker in body for marker in (
+            "apk-upload-form",
+            "aab-converter-upload-form",
+            "services checker",
+        ))
+    except Exception:
+        return False
+
+
+def _services_checker_uses_shared_keystore(url):
+    """Identify the Drive-backed host without trusting a generic root page."""
+    try:
+        response = requests.get(f"{url.rstrip('/')}/get_keystore_config", timeout=0.8)
+        if not response.ok:
+            return False
+        payload = response.json()
+        return bool(
+            payload.get("use_hardcoded")
+            and payload.get("filename") == SERVICES_CHECKER_KEYSTORE_FILENAME
+        )
+    except Exception:
+        return False
+
+
+def _find_services_checker_port(preferred=SERVICES_CHECKER_DEFAULT_PORT):
+    for port in (preferred,):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                probe.bind(("127.0.0.1", port))
+            return port
+        except OSError:
+            continue
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def _prepare_services_checker_runtime(app_path):
+    """Make bundled androguard importable before dynamically loading app.py."""
+    roots = [os.path.dirname(os.path.dirname(os.path.abspath(app_path)))]
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        roots.insert(0, meipass)
+    for root in roots:
+        if root and os.path.isdir(root) and root not in sys.path:
+            sys.path.insert(0, root)
+    try:
+        importlib.invalidate_caches()
+        importlib.import_module("androguard.core.axml")
+    except Exception as exc:
+        logging.debug("Services Checker androguard preload unavailable: %s", exc)
+
+
+def _start_services_checker():
+    with _services_checker_lock:
+        existing_url = _services_checker_state.get("url")
+        if existing_url and _services_checker_ready(existing_url):
+            return existing_url
+
+        external_url = _services_checker_external_url()
+        external_enabled = _services_checker_external_sources_enabled()
+        drive_app_path = next(iter(_services_checker_drive_app_candidates()), "") if external_enabled else ""
+        external_ready = _services_checker_ready(external_url) if external_enabled else False
+        if external_enabled and external_ready and (
+            not drive_app_path or _services_checker_uses_shared_keystore(external_url)
+        ):
+            _services_checker_state.update({
+                "url": external_url,
+                "port": None,
+                "source": "external",
+                "error": "",
+            })
+            return external_url
+
+        # If port 5000 is occupied by the old bundled service, do not attach
+        # to it. Import the Drive app on the private local port below instead.
+        # This makes Reload self-healing without requiring a client-side shell.
+        force_drive_import = bool(external_enabled and external_ready and drive_app_path)
+
+        command_path = next(
+            (path for path in _services_checker_command_candidates() if os.path.isfile(path)),
+            "",
+        )
+        if command_path and not force_drive_import:
+            log_path = os.path.join(tempfile.gettempdir(), "eventinspector-services-checker.log")
+            try:
+                with open(log_path, "ab") as log_handle:
+                    launch_args = ["/bin/bash", command_path]
+                    launch_kwargs = {
+                        "cwd": os.path.dirname(command_path) or None,
+                        "stdin": subprocess.DEVNULL,
+                        "stdout": log_handle,
+                        "stderr": subprocess.STDOUT,
+                    }
+                    if os.name == "nt":
+                        launch_args = ["cmd.exe", "/d", "/c", command_path]
+                        launch_kwargs["creationflags"] = getattr(
+                            subprocess,
+                            "CREATE_NEW_PROCESS_GROUP",
+                            0,
+                        )
+                    else:
+                        launch_kwargs["start_new_session"] = True
+                    process = subprocess.Popen(
+                        launch_args,
+                        **launch_kwargs,
+                    )
+            except Exception as exc:
+                raise RuntimeError(f"Cannot start Services Checker command: {exc}") from exc
+
+            deadline = time.time() + 15
+            while time.time() < deadline:
+                if _services_checker_ready(external_url):
+                    _services_checker_state.update({
+                        "process": process,
+                        "url": external_url,
+                        "port": None,
+                        "source": command_path,
+                        "error": "",
+                    })
+                    return external_url
+                if process.poll() is not None:
+                    break
+                time.sleep(0.2)
+
+            _services_checker_state["error"] = f"command_not_ready:{command_path}"
+            raise RuntimeError(
+                f"Services Checker did not become ready at {external_url}; "
+                f"see {log_path}"
+            )
+
+        app_path = next((path for path in _services_checker_file_candidates() if os.path.exists(path)), "")
+        if not app_path:
+            raise FileNotFoundError(
+                "Services Checker command/app.py was not found. "
+                "Set EVENTINSPECTOR_SERVICES_COMMAND or install the bundled checker."
+            )
+
+        _prepare_services_checker_runtime(app_path)
+        module_name = f"eventinspector_services_checker_{os.getpid()}"
+        spec = importlib.util.spec_from_file_location(module_name, app_path)
+        if not spec or not spec.loader:
+            raise RuntimeError(f"Cannot load Services Checker from {app_path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            sys.modules.pop(module_name, None)
+            raise
+        service_app = getattr(module, "app", None)
+        if service_app is None:
+            raise RuntimeError("Services Checker did not expose a Flask app")
+
+        port = _find_services_checker_port()
+        os.environ["SERVICES_CHECKER_HOST"] = "127.0.0.1"
+        os.environ["SERVICES_CHECKER_PORT"] = str(port)
+
+        def serve():
+            try:
+                service_app.run(
+                    host="127.0.0.1",
+                    port=port,
+                    debug=False,
+                    use_reloader=False,
+                    threaded=True,
+                )
+            except Exception:
+                logging.exception("Services Checker stopped unexpectedly")
+
+        thread = threading.Thread(target=serve, name="services-checker", daemon=True)
+        thread.start()
+        deadline = time.time() + 12
+        service_url = f"http://127.0.0.1:{port}"
+        last_error = "service_start_timeout"
+        while time.time() < deadline:
+            if _services_checker_ready(service_url):
+                _services_checker_state.update({
+                    "module": module,
+                    "thread": thread,
+                    "port": port,
+                    "url": service_url,
+                    "source": app_path,
+                    "error": "",
+                })
+                return service_url
+            last_error = "service_root_not_ready"
+            time.sleep(0.15)
+
+        _services_checker_state["error"] = last_error
+        raise RuntimeError(last_error)
 
 def _resolve_adb():
     adb_env = os.getenv("ADB_PATH")
@@ -529,8 +985,8 @@ unique_load_ads_ext = set()
 
 # Trạng thái Recording (Google Sheet) - RIÊNG BIỆT CHO TỪNG TAB
 recording_states = {
-    "LoadAds": {"is_recording": False, "current_sheet": None},
-    "LoadAdsExt": {"is_recording": False, "current_sheet": None}
+    "LoadAds": {"is_recording": False, "current_sheet": None, "record_request_id": None},
+    "LoadAdsExt": {"is_recording": False, "current_sheet": None, "record_request_id": None}
 }
 
 # 3. Dữ liệu cho Tab Validator
@@ -568,6 +1024,10 @@ adrevenue_source_params = {}
 # 8. Dữ liệu cho Tab Price Rotation
 price_rotation_logs = deque(maxlen=MAX_PRICE_ROTATION_LOGS)
 PRICE_ROTATION_PREFIX = "[Ad,RewardedBidding"
+PRICE_ROTATION_PREFIXES = (
+    ("Rewarded", "[Ad,RewardedBidding"),
+    ("Interstitial", "[Ad,InterstitialBidding"),
+)
 
 # 9. Dữ liệu cho Tab SDK Check
 sdk_check_search_list = []
@@ -1779,15 +2239,25 @@ def extract_json_object_from_text(text):
 
 
 def _parse_price_rotation_log(log_entry, device_id):
-    """Parse only logs containing the exact Price Rotation marker."""
+    """Parse exact RewardedBidding and InterstitialBidding markers."""
     raw_log = str(log_entry or "").strip()
-    if not raw_log or PRICE_ROTATION_PREFIX not in raw_log:
+    if not raw_log:
         return None
 
-    marker_start = raw_log.find(PRICE_ROTATION_PREFIX)
-    type_start = marker_start + len(PRICE_ROTATION_PREFIX)
-    if type_start >= len(raw_log) or raw_log[type_start] not in ",]":
+    marker_candidates = []
+    for bidding_name, marker_prefix in PRICE_ROTATION_PREFIXES:
+        marker_start = raw_log.find(marker_prefix)
+        if marker_start == -1:
+            continue
+        type_start = marker_start + len(marker_prefix)
+        if type_start < len(raw_log) and raw_log[type_start] in ",]":
+            marker_candidates.append((marker_start, bidding_name, marker_prefix))
+
+    if not marker_candidates:
         return None
+
+    marker_start, bidding_name, marker_prefix = min(marker_candidates, key=lambda item: item[0])
+    type_start = marker_start + len(marker_prefix)
     marker_end = raw_log.find("]", type_start)
     if marker_end == -1:
         return None
@@ -1795,7 +2265,8 @@ def _parse_price_rotation_log(log_entry, device_id):
     rotation_type = raw_log[type_start:marker_end].strip().lstrip(",").strip()
     if not rotation_type:
         service_text = raw_log[marker_end + 1:].lstrip()
-        rotation_type = "RewardedCap" if service_text.startswith("RewardedCapService") else "RewardedBidding"
+        cap_service = f"{bidding_name}CapService"
+        rotation_type = f"{bidding_name}Cap" if service_text.startswith(cap_service) else f"{bidding_name}Bidding"
     payload_text = raw_log[marker_end + 1:].strip()
     json_text = extract_json_object_from_text(payload_text)
     parsed_json = None
@@ -1811,6 +2282,7 @@ def _parse_price_rotation_log(log_entry, device_id):
     return {
         "device_id": device_id,
         "device_name": get_device_name(device_id),
+        "bidding_name": bidding_name,
         "type": rotation_type,
         "details": details,
         "raw_log": raw_log,
@@ -2298,7 +2770,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector V2.0.0(52)</title>
+    <title>Event Inspector v2.5.0(44)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -2375,7 +2847,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.4.0(25)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(44)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -2430,16 +2902,17 @@ HTML_TEMPLATE = """
         <div class="mb-3 flex-shrink-0">
             <div class="flex justify-between items-end border-b border-gray-200">
                 <div class="flex flex-wrap">
-                    <button id="tabBtnLoadAdsExt" class="tab-btn active text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAdsExt')">Load Ads Ironsource</button>
+                    <button id="tabBtnLoadAdsExt" class="tab-btn active text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAdsExt')">Load Ads</button>
                     
                     <button id="tabBtnValidator" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Validator')">Default Events/Params</button>
                     <button id="tabBtnSpecific" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Specific')">Specific Validator</button>
                     <button id="tabBtnAdRevenue" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('AdRevenue')">Revenue</button>
                     <button id="tabBtnCallbackAd" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('CallbackAd')">CallBack & Ads</button>
-                    <button id="tabBtnPriceRotation" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('PriceRotation')">Rewarded Bidding</button>
+                    <button id="tabBtnPriceRotation" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('PriceRotation')">Bidding</button>
                     <button id="tabBtnSdkCheck" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('SdkCheck')">SDK Check</button>
                     <button id="tabBtnBrightSDK" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('BrightSDK')">BrightSDK</button>
                     <button id="tabBtnPackage" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Package')">Package Logcat</button>
+                    <button id="tabBtnServicesChecker" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('ServicesChecker')">Services Checker</button>
                 </div>
             </div>
         </div>
@@ -2477,11 +2950,11 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- TAB 2: Load Ads Ironsource -->
+            <!-- TAB 2: Load Ads -->
             <div id="tabContentLoadAdsExt">
                  <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border mb-3">
-                        <span class="text-sm font-semibold text-gray-700">Record Load Ads Ironsource:</span>
+                        <span class="text-sm font-semibold text-gray-700">Record Load Ads:</span>
                         <input type="text" id="sheetName_LoadAdsExt" placeholder="Tên Sheet..." class="border p-2 rounded text-sm w-48 outline-none">
                         <button id="btnRecord_LoadAdsExt" onclick="toggleRecord('LoadAdsExt')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-3 rounded shadow text-xs">Start Record</button>
                     </div>
@@ -2490,6 +2963,7 @@ HTML_TEMPLATE = """
                         <table class="min-w-full w-full bg-white table-fixed">
                             <colgroup>
                                 <col style="width:88px">
+                                <col style="width:100px">
                                 <col style="width:96px">
                                 <col style="width:112px">
                                 <col>
@@ -2497,6 +2971,7 @@ HTML_TEMPLATE = """
                             <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b">Provider</th>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b">Ad_network</th>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b">Format</th>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
@@ -2760,7 +3235,7 @@ HTML_TEMPLATE = """
                 </div>
             </div>
 
-            <!-- TAB 7: Price Rotation -->
+            <!-- TAB 7: Bidding -->
             <div id="tabContentPriceRotation" class="hidden">
                 <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="mb-3 grid grid-cols-1 lg:grid-cols-[1fr_minmax(320px,520px)] gap-4 items-end">
@@ -2794,6 +3269,25 @@ HTML_TEMPLATE = """
                                 <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="priceRotationTypeRewardedCap" name="priceRotationTypeFilter" type="checkbox" value="rewardedcap" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
                                     <span class="ml-2 text-sm text-gray-900">RewardedCap</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationTypeInterstitialCap" name="priceRotationTypeFilter" type="checkbox" value="interstitialcap" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">InterstitialCap</span>
+                                </label>
+                            </div>
+                            <label class="block text-xs font-medium text-gray-700 mt-3">Filter by Ad Type:</label>
+                            <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationAdTypeAll" name="priceRotationAdTypeFilter" type="checkbox" value="all" checked class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">All</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationAdTypeRewarded" name="priceRotationAdTypeFilter" type="checkbox" value="rewarded" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">Rewarded</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="priceRotationAdTypeInterstitial" name="priceRotationAdTypeFilter" type="checkbox" value="interstitial" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">Interstitial</span>
                                 </label>
                             </div>
                         </div>
@@ -2867,6 +3361,17 @@ HTML_TEMPLATE = """
                             </tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <!-- TAB 8A: Services Checker -->
+            <div id="tabContentServicesChecker" class="hidden">
+                <div class="bg-white rounded-xl shadow-md p-4">
+                    <div class="flex items-center justify-between gap-3 mb-3">
+                        <span id="servicesCheckerStatus" class="text-sm text-slate-500" role="status">Ready to start.</span>
+                    </div>
+                    <div id="servicesCheckerError" class="hidden mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert"></div>
+                    <iframe id="servicesCheckerFrame" title="Services Checker" class="hidden w-full rounded-lg border border-slate-200 bg-white" style="height: 78vh; min-height: 620px;"></iframe>
                 </div>
             </div>
             
@@ -3100,7 +3605,9 @@ HTML_TEMPLATE = """
 
     <!-- SCRIPTS -->
     <script>
-        const socket = io();
+        const socket = typeof window.io === 'function'
+            ? window.io()
+            : { on() { return this; }, emit() { return this; } };
         let currentTab = 'LoadAdsExt';
         let selectedDevice = 'all';
 
@@ -3280,10 +3787,59 @@ HTML_TEMPLATE = """
         else showPlatformModal();
 
         // --- Tab Logic ---
+        function setServicesCheckerStatus(message, state = 'idle') {
+            const status = document.getElementById('servicesCheckerStatus');
+            if (!status) return;
+            status.textContent = message;
+            status.className = state === 'error'
+                ? 'text-sm text-red-700'
+                : state === 'busy'
+                    ? 'text-sm text-amber-700'
+                    : 'text-sm text-slate-500';
+        }
+
+        function setServicesCheckerError(message = '') {
+            const errorBox = document.getElementById('servicesCheckerError');
+            if (!errorBox) return;
+            errorBox.textContent = message;
+            errorBox.classList.toggle('hidden', !message);
+        }
+
+        function showServicesCheckerFrame(url) {
+            const frame = document.getElementById('servicesCheckerFrame');
+            if (!frame) return;
+            frame.src = `${url}/?eventinspector=${Date.now()}`;
+            frame.dataset.started = 'true';
+            frame.classList.remove('hidden');
+        }
+
+        async function openServicesChecker() {
+            const frame = document.getElementById('servicesCheckerFrame');
+            if (!frame) return;
+            if (frame.dataset.started === 'true') return;
+
+            setServicesCheckerError();
+            setServicesCheckerStatus('Starting...', 'busy');
+            try {
+                const response = await fetch('/api/services-checker/start', { method: 'POST' });
+                const data = await response.json();
+                if (!response.ok || !data.ok || !data.url) {
+                    throw new Error(data.error || 'services_checker_start_failed');
+                }
+                showServicesCheckerFrame(data.url);
+                setServicesCheckerStatus('Ready.');
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                setServicesCheckerStatus('Services Checker unavailable.', 'error');
+                setServicesCheckerError(`Unable to start Services Checker: ${message}`);
+                frame.dataset.started = 'false';
+            }
+        }
+
         function switchTab(tabName) {
             currentTab = tabName;
             // Hide all contents with Safety Check
-            ['tabContentLoadAds', 'tabContentLoadAdsExt', 'tabContentValidator', 'tabContentBrightSDK', 'tabContentSpecific', 'tabContentAdRevenue', 'tabContentCallbackAd', 'tabContentPriceRotation', 'tabContentSdkCheck', 'tabContentPackage'].forEach(id => {
+            ['tabContentLoadAds', 'tabContentLoadAdsExt', 'tabContentValidator', 'tabContentBrightSDK', 'tabContentSpecific', 'tabContentAdRevenue', 'tabContentCallbackAd', 'tabContentPriceRotation', 'tabContentSdkCheck', 'tabContentServicesChecker', 'tabContentPackage'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.classList.add('hidden');
                 else console.warn('Missing element ID:', id);
@@ -3299,6 +3855,7 @@ HTML_TEMPLATE = """
             if (btnEl) btnEl.classList.add('active');
 
             if (tabName === 'SdkCheck') loadSdkCheckPresetsFromGit();
+            if (tabName === 'ServicesChecker') openServicesChecker();
             
             socket.emit('change_tab', { tab_name: tabName });
         }
@@ -3403,13 +3960,21 @@ HTML_TEMPLATE = """
             }
         }
 
+        function safeRecordSheetName(value) {
+            const text = String(value || 'Running').trim();
+            if (!text || text.length > 200 || /<!doctype|<html|<head/i.test(text)) {
+                return 'Running';
+            }
+            return text;
+        }
+
         socket.on('record_status', (s) => {
             // Update UI based on which tab triggered the status
             const tabName = s.tab_name;
             const btn = document.getElementById('btnRecord_' + tabName);
             if (btn) {
                 if (s.is_recording) {
-                    btn.textContent = 'Stop Recording: ' + (s.current_sheet || 'Running');
+                    btn.textContent = 'Stop Recording: ' + safeRecordSheetName(s.current_sheet);
                     btn.className = 'bg-red-600 text-white font-bold py-2 px-4 rounded animate-record shadow-lg text-sm';
                 } else {
                     btn.textContent = 'Start Record';
@@ -3458,17 +4023,19 @@ HTML_TEMPLATE = """
             if (!tbody) return;
             const filtered = (selectedDevice === 'all') ? data : data.filter(e => e.device_id === selectedDevice);
             
+            const useAdNetwork = id === 'loadAdsExtTableBody';
+            const columnCount = useAdNetwork ? 5 : 4;
             if (filtered.length === 0) {
-                 tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-gray-400">Waiting for recording...</td></tr>';
+                 tbody.innerHTML = `<tr><td colspan="${columnCount}" class="text-center py-4 text-gray-400">Waiting for recording...</td></tr>`;
                  return;
             }
 
-            const useAdNetwork = id === 'loadAdsExtTableBody';
             tbody.innerHTML = filtered.map(e => `
                 <tr class="hover:bg-gray-50 border-b text-sm">
-                    <td class="py-2 px-2 text-purple-700 text-sm font-medium whitespace-nowrap">${e.device_name}</td>
-                    <td class="py-2 px-2 text-blue-600 text-sm font-medium whitespace-nowrap">${useAdNetwork ? (e.ad_network || e.ad_source || '') : (e.ad_source || e.ad_network || '')}</td>
-                    <td class="py-2 px-2 text-green-600 text-sm font-medium whitespace-nowrap">${e.ad_format}</td>
+                    <td class="py-2 px-2 text-purple-700 text-sm font-medium whitespace-nowrap">${escapeHTML(e.device_name || '')}</td>
+                    ${useAdNetwork ? `<td class="py-2 px-2 text-orange-600 text-sm font-medium whitespace-nowrap">${escapeHTML(e.provider || 'Unknown')}</td>` : ''}
+                    <td class="py-2 px-2 text-blue-600 text-sm font-medium whitespace-nowrap">${escapeHTML(useAdNetwork ? (e.ad_network || e.ad_source || '') : (e.ad_source || e.ad_network || ''))}</td>
+                    <td class="py-2 px-2 text-green-600 text-sm font-medium whitespace-nowrap">${escapeHTML(e.ad_format || '')}</td>
                     <td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${escapeHTML(e.raw_log || '')}</td>
                 </tr>
             `).join('');
@@ -3858,10 +4425,14 @@ HTML_TEMPLATE = """
             lastPriceRotationData = [];
             const filterInput = document.getElementById('priceRotationFilterInput');
             const allTypeFilter = document.getElementById('priceRotationTypeAll');
+            const allAdTypeFilter = document.getElementById('priceRotationAdTypeAll');
             const tbody = document.getElementById('priceRotationTableBody');
             if (filterInput) filterInput.value = '';
             document.querySelectorAll('input[name="priceRotationTypeFilter"]').forEach(input => {
                 input.checked = input === allTypeFilter;
+            });
+            document.querySelectorAll('input[name="priceRotationAdTypeFilter"]').forEach(input => {
+                input.checked = input === allAdTypeFilter;
             });
             if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4">Waiting...</td></tr>';
         }
@@ -3878,11 +4449,16 @@ HTML_TEMPLATE = """
             const selectedTypeFilters = Array.from(document.querySelectorAll('input[name="priceRotationTypeFilter"]:checked'))
                 .map(input => input.value)
                 .filter(value => value !== 'all');
+            const selectedAdTypeFilters = Array.from(document.querySelectorAll('input[name="priceRotationAdTypeFilter"]:checked'))
+                .map(input => input.value)
+                .filter(value => value !== 'all');
             const textFilter = (filterInput?.value || '').toLowerCase();
             const filtered = lastPriceRotationData.filter(res => {
                 if (selectedDevice !== 'all' && res.device_id !== selectedDevice) return false;
                 if (selectedTypeFilters.length > 0 && !selectedTypeFilters.includes((res.type || '').trim().toLowerCase())) return false;
-                if (textFilter && !(res.raw_log || '').toLowerCase().includes(textFilter)) return false;
+                const rawLog = (res.raw_log || '').toLowerCase();
+                if (selectedAdTypeFilters.length > 0 && !selectedAdTypeFilters.some(value => rawLog.includes(value))) return false;
+                if (textFilter && !rawLog.includes(textFilter)) return false;
                 return true;
             });
 
@@ -3907,19 +4483,24 @@ HTML_TEMPLATE = """
         }
 
         document.getElementById('priceRotationFilterInput')?.addEventListener('input', renderPriceRotationTable);
-        document.querySelectorAll('input[name="priceRotationTypeFilter"]').forEach(input => input.addEventListener('change', (event) => {
-            const allInput = document.getElementById('priceRotationTypeAll');
-            const specificInputs = Array.from(document.querySelectorAll('input[name="priceRotationTypeFilter"]'))
-                .filter(item => item !== allInput);
-            if (event.target === allInput) {
-                if (allInput.checked) specificInputs.forEach(item => item.checked = false);
-            } else if (event.target.checked) {
-                allInput.checked = false;
-            } else if (!specificInputs.some(item => item.checked)) {
-                allInput.checked = true;
-            }
-            renderPriceRotationTable();
-        }));
+        function bindPriceRotationCheckboxGroup(inputName, allInputId) {
+            document.querySelectorAll(`input[name="${inputName}"]`).forEach(input => input.addEventListener('change', (event) => {
+                const allInput = document.getElementById(allInputId);
+                const specificInputs = Array.from(document.querySelectorAll(`input[name="${inputName}"]`))
+                    .filter(item => item !== allInput);
+                if (event.target === allInput) {
+                    if (allInput.checked) specificInputs.forEach(item => item.checked = false);
+                } else if (event.target.checked) {
+                    allInput.checked = false;
+                } else if (!specificInputs.some(item => item.checked)) {
+                    allInput.checked = true;
+                }
+                renderPriceRotationTable();
+            }));
+        }
+
+        bindPriceRotationCheckboxGroup('priceRotationTypeFilter', 'priceRotationTypeAll');
+        bindPriceRotationCheckboxGroup('priceRotationAdTypeFilter', 'priceRotationAdTypeAll');
 
         socket.on('update_sdk_check_table', (data) => {
             const tbody = document.getElementById(activePlatform === 'ios' ? 'sdkCheckIosTableBody' : 'sdkCheckTableBody');
@@ -4908,7 +5489,8 @@ HTML_TEMPLATE = """
             if (status) status.textContent = 'Đang tải danh sách từ GitHub...';
             sdkCheckPresetsLoadPromise = (async () => {
                 try {
-                    const response = await fetch(`/api/sdk-check-presets?ts=${Date.now()}`, {cache: 'no-store'});
+                    const refreshQuery = force ? '&refresh=1' : '';
+                    const response = await fetch(`/api/sdk-check-presets?ts=${Date.now()}${refreshQuery}`, {cache: 'no-store'});
                     const payload = await response.json();
                     if (!response.ok || !payload.ok || !payload.presets) throw new Error(payload.error || 'preset_load_failed');
                     sdkCheckPresets = payload.presets;
@@ -5171,13 +5753,56 @@ def index():
 
 @app.get('/api/sdk-check-presets')
 def get_sdk_check_presets():
-    presets, source = _fetch_sdk_check_presets()
+    refresh_requested = request.args.get("refresh", "").strip().lower() in {"1", "true", "yes"}
+    presets, source = _fetch_sdk_check_presets(force_remote=refresh_requested)
     return jsonify({
         'ok': bool(presets),
         'source': source,
         'presets': presets,
         'error': '' if presets else 'sdk_check_presets_unavailable',
     })
+
+
+@app.post('/api/services-checker/start')
+def start_services_checker():
+    try:
+        url = _start_services_checker()
+        return jsonify({'ok': True, 'url': url})
+    except Exception as exc:
+        logging.exception("Services Checker start failed")
+        return jsonify({'ok': False, 'error': str(exc)}), 500
+
+
+@app.get('/api/services-checker/host')
+def get_services_checker_host():
+    return jsonify({'ok': True, **_services_checker_host_status()})
+
+
+@app.post('/api/services-checker/host')
+def replace_services_checker_host():
+    upload = request.files.get('host_file')
+    if not upload or not upload.filename:
+        return jsonify({'ok': False, 'error': 'host_file_required'}), 400
+    try:
+        target = _save_services_checker_host(upload)
+        return jsonify({
+            'ok': True,
+            'filename': os.path.basename(target),
+            **_services_checker_host_status(),
+        })
+    except Exception as exc:
+        logging.exception("Services Checker host file save failed")
+        return jsonify({'ok': False, 'error': str(exc)}), 400
+
+
+@app.post('/api/services-checker/reload')
+def reload_services_checker():
+    try:
+        url, restarted = _reload_services_checker()
+        return jsonify({'ok': True, 'url': url, 'restarted': restarted})
+    except Exception as exc:
+        logging.exception("Services Checker reload failed")
+        return jsonify({'ok': False, 'error': str(exc)}), 500
 
 
 @app.get('/api/profiles')
@@ -5536,18 +6161,88 @@ def package_log_export_api():
 
 # --- BACKEND LOGIC ---
 
-def send_to_sheet(device_name, ad_source, ad_format, raw_log, log_type):
+def _normalize_load_ads_provider(value):
+    provider = str(value or "").strip().lower()
+    return provider or "Unknown"
+
+
+def send_to_sheet(device_name, ad_source, ad_format, raw_log, log_type, provider="Unknown"):
     """Gửi data lên Google Sheet nếu đang bật Recording cho loại Log cụ thể"""
     state = recording_states.get(log_type)
     if state and state["is_recording"] and state["current_sheet"]:
         payload = {
             "sheet_name": state["current_sheet"], 
             "device_name": device_name, 
+            "provider": _normalize_load_ads_provider(provider),
             "ad_source": ad_source, 
             "ad_format": ad_format, 
             "raw_log": raw_log
         }
-        threading.Thread(target=lambda: requests.post(G_SHEET_URL, json=payload, timeout=30)).start()
+        threading.Thread(
+            target=lambda: requests.post(
+                G_SHEET_URL,
+                json=payload,
+                timeout=(RECORD_SHEET_CONNECT_TIMEOUT_SEC, RECORD_SHEET_READ_TIMEOUT_SEC),
+            ),
+            daemon=True,
+        ).start()
+
+
+def _clean_record_sheet_name(response_text, fallback_name):
+    """Keep a failed Apps Script HTML response out of the recording button label."""
+    candidate = str(response_text or "").strip()
+    if not candidate:
+        return fallback_name
+
+    # Some deployments return JSON, while the current sheet script returns a plain name.
+    if candidate.startswith("{"):
+        try:
+            payload = json.loads(candidate)
+        except (TypeError, ValueError):
+            payload = None
+        if isinstance(payload, dict):
+            candidate = str(
+                payload.get("sheet_name")
+                or payload.get("name")
+                or payload.get("result")
+                or ""
+            ).strip()
+
+    # HTML means the deployment returned an error/login page, not a sheet name.
+    if (
+        not candidate
+        or len(candidate) > 200
+        or "<!doctype" in candidate[:200].lower()
+        or "<html" in candidate[:200].lower()
+        or "<head" in candidate[:200].lower()
+    ):
+        return fallback_name
+    return candidate
+
+
+def _create_record_sheet_in_background(tab_name, requested_name, request_id):
+    try:
+        response = requests.post(
+            G_SHEET_URL,
+            json={"action": "create_or_get_sheet", "sheet_name": requested_name},
+            timeout=(RECORD_SHEET_CONNECT_TIMEOUT_SEC, RECORD_SHEET_READ_TIMEOUT_SEC),
+        )
+        if response.status_code >= 400:
+            raise requests.RequestException(f"HTTP {response.status_code}")
+        resolved_name = _clean_record_sheet_name(response.text, requested_name)
+    except Exception as exc:
+        resolved_name = requested_name
+        logging.warning("Load Ads sheet setup failed; recording locally with %r: %s", requested_name, exc)
+
+    state = recording_states.get(tab_name)
+    if not state or not state.get("is_recording") or state.get("record_request_id") != request_id:
+        return
+    state["current_sheet"] = resolved_name
+    socketio.emit("record_status", {
+        "tab_name": tab_name,
+        "is_recording": True,
+        "current_sheet": resolved_name,
+    })
 
 def process_load_ads_unity_log(line, device_id):
     """Xử lý log cho Tab 1: Load Ads (Unity)"""
@@ -5605,6 +6300,9 @@ def process_load_ads_ext_log(line, device_id):
                 ad_revenue = data
             payload = ad_revenue.get("Payload") if isinstance(ad_revenue.get("Payload"), dict) else {}
 
+            provider = _normalize_load_ads_provider(
+                payload.get("ad_platform") or ad_revenue.get("ad_platform")
+            )
             ad_network = ad_revenue.get("AdNetwork") or payload.get("ad_network")
             fmt = payload.get("ad_format") or ad_revenue.get("AdFormat") or ad_revenue.get("AdType")
             if fmt and str(fmt).strip().lower() == "mrec":
@@ -5613,17 +6311,19 @@ def process_load_ads_ext_log(line, device_id):
             if ad_network and fmt:
                 d_name = get_ios_device_name(device_id)
                 with lock:
-                    if (device_id, ad_network, fmt, "ios_metrica") not in unique_load_ads_ext:
-                        unique_load_ads_ext.add((device_id, ad_network, fmt, "ios_metrica"))
+                    dedup_key = (device_id, provider, ad_network, fmt, "ios_metrica")
+                    if dedup_key not in unique_load_ads_ext:
+                        unique_load_ads_ext.add(dedup_key)
                         load_ads_ext_events.append({
                             "device_id": device_id,
                             "device_name": d_name,
+                            "provider": provider,
                             "ad_network": ad_network,
                             "ad_format": fmt,
                             "raw_log": raw_log or line.strip()
                         })
                         socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
-                        send_to_sheet(d_name, ad_network, fmt, raw_log or line.strip(), "LoadAdsExt")
+                        send_to_sheet(d_name, ad_network, fmt, raw_log or line.strip(), "LoadAdsExt", provider)
             return
         except:
             pass
@@ -5634,6 +6334,9 @@ def process_load_ads_ext_log(line, device_id):
             parsed = parse_appmetrica_adrevenue_text(f"AdRevenue{{{match.group(1)}}}") or {}
             payload = parsed.get("payload") if isinstance(parsed.get("payload"), dict) else {}
 
+            provider = _normalize_load_ads_provider(
+                payload.get("ad_platform") or parsed.get("ad_platform")
+            )
             ad_network = parsed.get("adNetwork") or payload.get("ad_network")
             fmt = parsed.get("adType") or payload.get("ad_format")
             if fmt and str(fmt).strip().lower() == "mrec":
@@ -5642,11 +6345,13 @@ def process_load_ads_ext_log(line, device_id):
             if ad_network and fmt:
                 d_name = get_device_name(device_id)
                 with lock:
-                    if (device_id, ad_network, fmt, "metrica") not in unique_load_ads_ext:
-                        unique_load_ads_ext.add((device_id, ad_network, fmt, "metrica"))
+                    dedup_key = (device_id, provider, ad_network, fmt, "metrica")
+                    if dedup_key not in unique_load_ads_ext:
+                        unique_load_ads_ext.add(dedup_key)
                         load_ads_ext_events.append({
                             "device_id": device_id,
                             "device_name": d_name, 
+                            "provider": provider,
                             "ad_network": ad_network,
                             "ad_format": fmt, 
                             "raw_log": line.strip()
@@ -5654,7 +6359,7 @@ def process_load_ads_ext_log(line, device_id):
                         socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
                         
                         # Gửi với type "LoadAdsExt"
-                        send_to_sheet(d_name, ad_network, fmt, line.strip(), "LoadAdsExt")
+                        send_to_sheet(d_name, ad_network, fmt, line.strip(), "LoadAdsExt", provider)
         except: pass
 
 def find_and_parse_event(log_entry):
@@ -7386,6 +8091,7 @@ def _reset_runtime_for_platform_switch():
 
         for state in recording_states.values():
             state["is_recording"] = False
+            state["record_request_id"] = None
 
     socketio.emit('pause_status', {'is_paused': False})
     socketio.emit('validator_status', {'active': False})
@@ -7429,21 +8135,36 @@ def tr(data):
     current_state = recording_states[tab_name]
     
     if not current_state["is_recording"]:
-        name = data.get('sheet_name', 'Log_Default').strip()
-        try:
-            res = requests.post(G_SHEET_URL, json={"action": "create_or_get_sheet", "sheet_name": name}, timeout=30)
-            current_state.update({"is_recording": True, "current_sheet": res.text})
-        except: 
-            current_state.update({"is_recording": True, "current_sheet": name}) # Fallback
+        name = str(data.get('sheet_name') or 'Log_Default').strip() or 'Log_Default'
+        request_id = uuid.uuid4().hex
+        # Start immediately. Sheet creation is best-effort and must never block the
+        # Socket.IO handler while Apps Script is slow or unavailable.
+        current_state.update({
+            "is_recording": True,
+            "current_sheet": name,
+            "record_request_id": request_id,
+        })
+        socketio.emit('record_status', {
+            "tab_name": tab_name,
+            "is_recording": True,
+            "current_sheet": name,
+        })
+        threading.Thread(
+            target=_create_record_sheet_in_background,
+            args=(tab_name, name, request_id),
+            daemon=True,
+        ).start()
     else:
         current_state["is_recording"] = False
+        current_state["record_request_id"] = None
     
     # Emit status back with tab_name so UI knows which button to update
-    socketio.emit('record_status', {
-        "tab_name": tab_name,
-        "is_recording": current_state["is_recording"],
-        "current_sheet": current_state["current_sheet"]
-    })
+    if not current_state["is_recording"]:
+        socketio.emit('record_status', {
+            "tab_name": tab_name,
+            "is_recording": False,
+            "current_sheet": current_state["current_sheet"]
+        })
 
 @socketio.on('toggle_pause')
 def tp(): 
@@ -7629,7 +8350,7 @@ def connect():
         })
 
 # --- MAIN ---
-def run_server(host="0.0.0.0", port=5001):
+def run_server(host="0.0.0.0", port=5008):
     _normalize_remote_update_config()
     threading.Thread(target=_record_app_open_audit_once, daemon=True).start()
     _set_active_profile()
@@ -7662,4 +8383,4 @@ def run_server(host="0.0.0.0", port=5001):
     )
 
 if __name__ == '__main__':
-    run_server(host="0.0.0.0", port=5001)
+    run_server(host="0.0.0.0", port=5008)

@@ -4,6 +4,14 @@ setlocal
 REM Go to project root (two levels up from this script)
 pushd "%~dp0\\..\\.."
 
+REM Refuse to build from a stale branch or mixed-version source tree.
+powershell -NoProfile -ExecutionPolicy Bypass -File "build\\windows\\verify_release_source.ps1"
+if errorlevel 1 (
+  echo Release source validation failed. Portable build stopped.
+  popd
+  exit /b 1
+)
+
 REM Create venv
 if not exist ".venv" (
   py -3 -m venv .venv
@@ -18,6 +26,7 @@ pip install -r requirements.txt
 REM Clean old build output (in case files are locked)
 if exist "dist\EventInspector" rmdir /s /q "dist\EventInspector"
 if exist "build\EventInspector" rmdir /s /q "build\EventInspector"
+if exist "dist\EventInspector-portable.zip" del /f /q "dist\EventInspector-portable.zip"
 
 REM Build portable EXE folder
 pip install pyinstaller PySide6 qtpy
@@ -25,6 +34,9 @@ pyinstaller --noconfirm --clean --windowed --icon assets\app.ico --name "EventIn
   --collect-submodules "engineio" ^
   --collect-submodules "socketio" ^
   --collect-submodules "webview" ^
+  --collect-submodules "androguard.core" ^
+  --collect-data "androguard" ^
+  --hidden-import "androguard.core.axml" ^
   --hidden-import "qtpy" ^
   --hidden-import "qtpy.QtCore" ^
   --hidden-import "qtpy.QtGui" ^
@@ -41,9 +53,32 @@ pyinstaller --noconfirm --clean --windowed --icon assets\app.ico --name "EventIn
   --hidden-import "PySide6.QtWebEngineCore" ^
   --hidden-import "PySide6.QtWebEngineWidgets" ^
   --hidden-import "shiboken6" ^
+  --add-data "Log_checker.py;." ^
   --add-data "Default event + Default Params.xlsx;." ^
-  --add-data "remote_update_config_v230.json;." ^
+  --add-data "sdk_check_presets.json;." ^
+  --add-data "remote_update_config_v250.json;." ^
+  --add-data "services_checker\app.py;services_checker" ^
+  --add-data "services_checker\axml_fallback.py;services_checker" ^
+  --add-data "services_checker\bundletool-all-1.18.1.jar;services_checker" ^
+  --add-data "services_checker\apk_check_presets.json;services_checker" ^
+  --add-data "services_checker\gradle_check_presets.json;services_checker" ^
+  --add-data "services_checker\podfile_check_presets.json;services_checker" ^
+  --add-data "services_checker\manifest_check_presets.json;services_checker" ^
+  --add-data "services_checker\my-key.keystore;services_checker" ^
   desktop_app.py
+
+if errorlevel 1 (
+  echo PyInstaller portable build failed.
+  popd
+  exit /b 1
+)
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "build\windows\verify_bundle.ps1" -BundleRoot "dist\EventInspector" -SourcePath "Log_checker.py"
+if errorlevel 1 (
+  echo Portable bundle validation failed.
+  popd
+  exit /b 1
+)
 
 REM Output: dist\EventInspector\EventInspector.exe
 endlocal

@@ -1,7 +1,9 @@
 ; Inno Setup script for EventChecker
 
 #define MyAppName "Event Inspector"
-#define MyAppVersion "1.0.0"
+#ifndef MyAppVersion
+#define MyAppVersion "2.5.0.44"
+#endif
 #define MyAppPublisher ""
 #define MyAppURL ""
 #define MyAppExeName "EventInspector.exe"

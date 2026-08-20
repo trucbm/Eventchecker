@@ -9,22 +9,22 @@ import shutil
 import requests
 
 APP_NAME = "EventInspector"
-CHANNEL_ID = "v230"
-CONFIG_FILENAME = "remote_update_config_v230.json"
-STATE_FILENAME = "update_state_v230.json"
-UPDATES_DIRNAME = "updates_v230"
+CHANNEL_ID = "v250"
+CONFIG_FILENAME = "remote_update_config_v250.json"
+STATE_FILENAME = "update_state_v250.json"
+UPDATES_DIRNAME = "updates_v250"
 DEFAULT_MANIFEST_URLS = [
-    "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_3/remote_manifest.json",
-    "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json",
-    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json",
+    "https://github.com/trucbm/Eventchecker/raw/2.5.0/Updates_2_5/remote_manifest.json",
+    "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/remote_manifest.json",
+    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/remote_manifest.json",
 ]
 DEFAULT_MANIFEST_URL = DEFAULT_MANIFEST_URLS[0]
 DEFAULT_FILE_URL_BASES = [
-    "https://github.com/trucbm/Eventchecker/raw/main",
-    "https://raw.githubusercontent.com/trucbm/Eventchecker/main",
-    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main",
+    "https://github.com/trucbm/Eventchecker/raw/2.5.0",
+    "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0",
+    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0",
 ]
-KNOWN_CHANNELS = ("v230", "v240")
+KNOWN_CHANNELS = ("v250",)
 
 
 def _user_data_dir():
@@ -39,7 +39,7 @@ def _user_data_dir():
 def _config_paths():
     user_dir = _user_data_dir()
     return [
-        os.getenv("EVENTINSPECTOR_UPDATE_CONFIG_V230"),
+        os.getenv("EVENTINSPECTOR_UPDATE_CONFIG_V250"),
         os.path.join(user_dir, CONFIG_FILENAME),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME),
     ]
@@ -53,7 +53,7 @@ def _load_config():
                 cfg.setdefault("enabled", True)
                 cfg.setdefault("manifest_url", DEFAULT_MANIFEST_URL)
                 cfg.setdefault("manifest_urls", DEFAULT_MANIFEST_URLS)
-                cfg.setdefault("timeout_sec", 10)
+                cfg.setdefault("timeout_sec", 120)
                 # Always prefer checking remote on launch. Existing user configs
                 # may still contain stale throttling values from older builds.
                 cfg["min_interval_sec"] = 0
@@ -62,7 +62,7 @@ def _load_config():
         "enabled": True,
         "manifest_url": DEFAULT_MANIFEST_URL,
         "manifest_urls": DEFAULT_MANIFEST_URLS,
-        "timeout_sec": 10,
+        "timeout_sec": 120,
         "min_interval_sec": 0,
     }
 
@@ -75,7 +75,7 @@ def _ensure_user_config_template():
         "enabled": True,
         "manifest_url": DEFAULT_MANIFEST_URL,
         "manifest_urls": DEFAULT_MANIFEST_URLS,
-        "timeout_sec": 10,
+        "timeout_sec": 120,
         "min_interval_sec": 0,
     }
     current = {}
@@ -346,7 +346,7 @@ def check_for_updates(force_refresh=False):
     if not manifest_urls:
         return None
 
-    timeout = float(cfg.get("timeout_sec", 10))
+    timeout = float(cfg.get("timeout_sec", 120))
     state = _load_state()
 
     try:

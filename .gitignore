@@ -12,3 +12,6 @@ dist/EventInspector.dmg
 
 package_log_history/
 profiles/
+services_checker/uploads/
+services_checker/airtest_scripts/
+services_checker/airtest_logs/

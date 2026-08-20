@@ -1,12 +1,19 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_data_files
+from PyInstaller.utils.hooks import collect_submodules
+
+datas = [('Log_checker.py', '.'), ('Default event + Default Params.xlsx', '.'), ('sdk_check_presets.json', '.'), ('remote_update_config_v250.json', '.'), ('services_checker/app.py', 'services_checker'), ('services_checker/axml_fallback.py', 'services_checker'), ('services_checker/bundletool-all-1.18.1.jar', 'services_checker'), ('services_checker/apk_check_presets.json', 'services_checker'), ('services_checker/gradle_check_presets.json', 'services_checker'), ('services_checker/podfile_check_presets.json', 'services_checker'), ('services_checker/manifest_check_presets.json', 'services_checker'), ('services_checker/my-key.keystore', 'services_checker')]
+hiddenimports = ['engineio.async_drivers.threading', 'androguard.core.axml']
+datas += collect_data_files('androguard')
+hiddenimports += collect_submodules('androguard.core')
 
 
 a = Analysis(
     ['desktop_app.py'],
     pathex=[],
     binaries=[],
-    datas=[('Log_checker.py', '.'), ('Default event + Default Params.xlsx', '.')],
-    hiddenimports=['engineio.async_drivers.threading'],
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -29,7 +36,7 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch='universal2',
+    target_arch='arm64',
     codesign_identity=None,
     entitlements_file=None,
     icon=['assets/app.icns'],

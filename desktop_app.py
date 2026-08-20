@@ -18,7 +18,7 @@ except Exception:
     remote_update = None
 
 HOST = "127.0.0.1"
-PORT = 5001
+PORT = 5008
 
 
 def _user_data_dir():
@@ -92,8 +92,7 @@ def _candidate_update_dirs():
             logging.exception("Failed to inspect channel prepared update")
 
     for dirname, source in (
-        ("updates_v230", "scan_v230"),
-        ("updates_v240", "scan_v240"),
+        ("updates_v250", "scan_v250"),
     ):
         add_candidate(os.path.join(user_dir, dirname), None, source)
 
@@ -106,9 +105,9 @@ def _select_prepared_update_candidate(candidates, bundled_build=None):
         candidate_build = candidate.get("build")
         if candidate_build is None:
             continue
-        if bundled_build is not None and candidate_build < bundled_build:
+        if bundled_build is not None and candidate_build <= bundled_build:
             logging.info(
-                "Ignoring stale update candidate from %s: build %s < bundled %s",
+                "Ignoring stale/equal update candidate from %s: build %s <= bundled %s",
                 candidate.get("source"),
                 candidate_build,
                 bundled_build,
@@ -162,6 +161,13 @@ def _pick_server_port(host, preferred_port):
         port,
     )
     return port
+
+
+def _configure_webview_downloads():
+    """Allow attachment responses such as generated APKs to open the save flow."""
+    # pywebview defaults this to False, which makes an <a download> link appear
+    # clickable but silently ignore the download in the native app window.
+    webview.settings['ALLOW_DOWNLOADS'] = True
 
 
 def main():
@@ -233,6 +239,7 @@ def main():
         logging.error(message)
         raise RuntimeError(message)
 
+    _configure_webview_downloads()
     webview.create_window(
         "Event Inspector",
         f"http://{HOST}:{port}",
