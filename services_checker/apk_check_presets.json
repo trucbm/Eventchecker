@@ -1,4 +1,18 @@
 {
+  "C-180-ASON-Android": {
+    "platform": "android",
+    "lines": [
+      "Google Play App Update\t2.1.0",
+      "Google Play In-App Review\t2.0.2",
+      "GMS Play Services AppSet\t16.1.0",
+      "GMS Play Services Ads Identifier\t18.3.0",
+      "AndroidX RecyclerView\t1.4.0",
+      "AndroidX Browser\t1.9.0",
+      "AndroidX Legacy Support v4\t1.0.0",
+      "Firebase Analytics\t23.2.0",
+      "UMP SDK version\t4.0.0"
+    ]
+  },
   "C-180-Android": {
     "platform": "android",
     "lines": [
