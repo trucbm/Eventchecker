@@ -24,8 +24,26 @@ function Get-ReleaseMarker([string]$Path) {
     return [string]$markers[0]
 }
 
+function Resolve-BundleFile([string]$Root, [string]$RelativePath) {
+    # PyInstaller 6 stores onedir support files under _internal; older builds
+    # placed the same files directly beside the executable.
+    $candidates = @(
+        (Join-Path $Root $RelativePath),
+        (Join-Path (Join-Path $Root "_internal") $RelativePath)
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
+    }
+
+    throw "Bundle file is missing: $RelativePath (checked root and _internal)"
+}
+
 $sourceMarker = Get-ReleaseMarker $SourcePath
-$bundleMarker = Get-ReleaseMarker (Join-Path $BundleRoot "Log_checker.py")
+$bundleSourcePath = Resolve-BundleFile $BundleRoot $SourcePath
+$bundleMarker = Get-ReleaseMarker $bundleSourcePath
 $expectedPattern = "^v$([regex]::Escape($ExpectedSeries))\(\d+\)$"
 
 if ($sourceMarker -notmatch $expectedPattern) {
