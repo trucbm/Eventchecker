@@ -200,8 +200,8 @@ TARGET_METADATA_KEYS_MAP = {
 GRADLE_LIB_MAPPING = {
     "Kidoz adapter": "net.kidoz.sdk:kidoz-android-ironsource-adapter",
     "Kidoz native": "net.kidoz.sdk:kidoz-android-native",
-    "LINE Ads adapter": "com.unity3d.ads-mediation:line-adapter",
-    "LINE Ads native": "com.linecorp.adsnetwork:fivead",
+    #"LINE Ads adapter": "com.unity3d.ads-mediation:line-adapter",
+    #"LINE Ads native": "com.linecorp.adsnetwork:fivead",
     "Maticoo adapter": "io.github.maticooads:maticoo-adapter-ironsource",
     "Maticoo sdk": "io.github.maticooads:maticoo-android-sdk",
     "TaurusX adapter": "com.ironsource.mediation:taurusXAdapters",
