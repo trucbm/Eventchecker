@@ -98,6 +98,22 @@ pyinstaller --noconfirm --clean --windowed \
 APP_PATH="dist/EventInspector.app"
 DMG_PATH="dist/EventInspector.dmg"
 if [ -d "$APP_PATH" ]; then
+  BUNDLETOOL_PATH="$(find "$APP_PATH/Contents" -type f -path "*/services_checker/bundletool-all-1.18.1.jar" -print -quit)"
+  KEYSTORE_PATH="$(find "$APP_PATH/Contents" -type f -path "*/services_checker/my-key.keystore" -print -quit)"
+  if [ -z "$BUNDLETOOL_PATH" ] || [ ! -s "$BUNDLETOOL_PATH" ]; then
+    echo "Build validation failed: bundletool-all-1.18.1.jar is missing from the macOS app bundle." >&2
+    exit 1
+  fi
+  if [ -z "$KEYSTORE_PATH" ] || [ ! -s "$KEYSTORE_PATH" ]; then
+    echo "Build validation failed: my-key.keystore is missing from the macOS app bundle." >&2
+    exit 1
+  fi
+  BUNDLETOOL_BYTES="$(stat -f%z "$BUNDLETOOL_PATH")"
+  if [ "$BUNDLETOOL_BYTES" -lt 1000000 ]; then
+    echo "Build validation failed: bundled bundletool is unexpectedly small (${BUNDLETOOL_BYTES} bytes)." >&2
+    exit 1
+  fi
+
   PLIST_PATH="$APP_PATH/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Delete :CFBundleShortVersionString" "$PLIST_PATH" 2>/dev/null || true
   /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $APP_SHORT_VERSION" "$PLIST_PATH"
@@ -114,4 +130,7 @@ if [ -d "$APP_PATH" ]; then
 
   hdiutil create -volname "Event Inspector $APP_VERSION_LABEL" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_PATH"
   echo "Built Event Inspector $APP_VERSION_LABEL for $MACOS_TARGET_ARCH: $DMG_PATH"
+else
+  echo "Build validation failed: $APP_PATH was not created." >&2
+  exit 1
 fi

@@ -132,41 +132,180 @@ UPLOAD_FOLDER_NAME = 'uploads'
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER_ABS_PATH = os.path.join(APP_ROOT, UPLOAD_FOLDER_NAME)
 
+# Conversion output is local and single-user. Keep generated files out of the
+# way of later bundletool runs, while never touching user-uploaded APK/AAB
+# files. A new conversion supersedes the previous generated result, so old
+# generated outputs can be removed before bundletool allocates more space.
+MIN_CONVERSION_FREE_SPACE_BYTES = 600 * 1024 * 1024
+
 if not os.path.exists(UPLOAD_FOLDER_ABS_PATH):
     os.makedirs(UPLOAD_FOLDER_ABS_PATH)
 
-def _service_resource_path(filename):
-    """Resolve a Service Checker resource from update or bundled paths."""
-    filename = str(filename or '').strip()
-    roots = [APP_ROOT]
-    meipass = getattr(sys, '_MEIPASS', '')
-    if meipass:
-        roots.extend([
-            os.path.join(meipass, 'services_checker'),
-            meipass,
-        ])
-    executable = getattr(sys, 'executable', '')
-    if executable:
-        executable_dir = os.path.dirname(os.path.abspath(executable))
-        roots.extend([
-            os.path.join(executable_dir, 'services_checker'),
-            os.path.join(executable_dir, '..', 'Resources', 'services_checker'),
-        ])
-    candidates = []
+
+def _is_generated_conversion_artifact(filename):
+    """Return whether *filename* is an APK/APKS created by this converter."""
+    filename = str(filename or '')
+    return bool(
+        re.fullmatch(r'output_convert_[0-9a-f]{16}\.apks', filename, re.IGNORECASE)
+        or re.fullmatch(r'temp_aab_convert_[0-9a-f]{16}_.+', filename, re.IGNORECASE)
+        or re.fullmatch(r'.+_universal_[0-9a-f]{4}\.apk', filename, re.IGNORECASE)
+        or filename == 'universal.apk'
+    )
+
+
+def _cleanup_stale_conversion_artifacts():
+    """Remove previous converter artefacts without touching user uploads."""
+    upload_root = os.path.abspath(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER_ABS_PATH))
+    removed = 0
+
+    try:
+        entries = os.scandir(upload_root)
+    except OSError as error:
+        logger.warning(f"Could not scan conversion upload directory '{upload_root}': {error}")
+        return removed
+
+    with entries:
+        for entry in entries:
+            if not entry.is_file(follow_symlinks=False):
+                continue
+            if not _is_generated_conversion_artifact(entry.name):
+                continue
+
+            path = os.path.abspath(entry.path)
+            try:
+                os.remove(path)
+                removed += 1
+            except OSError as error:
+                logger.warning(f"Could not remove previous conversion artefact '{path}': {error}")
+
+    if removed:
+        logger.info(f"Removed {removed} previous AAB conversion artefact(s) before conversion.")
+    return removed
+
+
+def _remove_generated_file(path):
+    """Delete one generated conversion file after a successful transfer."""
+    if not path:
+        return
+    path = os.path.abspath(path)
+    upload_root = os.path.abspath(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER_ABS_PATH))
+    try:
+        inside_upload_folder = os.path.commonpath([upload_root, path]) == upload_root
+    except ValueError:
+        inside_upload_folder = False
+    if not inside_upload_folder or not _is_generated_conversion_artifact(os.path.basename(path)):
+        logger.warning(f"Refusing to remove non-generated conversion file: {path}")
+        return
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+            logger.info(f"Removed generated conversion file after transfer: {path}")
+    except OSError as error:
+        logger.warning(f"Could not remove generated conversion file '{path}': {error}")
+
+
+def _downloads_directory():
+    """Return the current user's platform-native Downloads directory."""
+    return os.path.join(os.path.expanduser('~'), 'Downloads')
+
+
+def _copy_generated_file_to_downloads(source_path, filename):
+    """Copy a generated APK to Downloads and return its final path.
+
+    The converter is single-user, but filenames can collide with a previous
+    result that the user kept. Preserve the existing file and choose a
+    numbered name instead. The source is validated so this helper cannot be
+    used to copy arbitrary uploaded files.
+    """
+    source_path = os.path.abspath(source_path)
+    upload_root = os.path.abspath(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER_ABS_PATH))
+    try:
+        inside_upload_folder = os.path.commonpath([upload_root, source_path]) == upload_root
+    except ValueError:
+        inside_upload_folder = False
+    if not inside_upload_folder or not _is_generated_conversion_artifact(os.path.basename(source_path)):
+        raise ValueError('Only generated APK files can be saved to Downloads.')
+    if not os.path.isfile(source_path):
+        raise FileNotFoundError('The generated APK is no longer available.')
+
+    downloads_dir = _downloads_directory()
+    os.makedirs(downloads_dir, exist_ok=True)
+    safe_filename = os.path.basename(str(filename or 'generated.apk'))
+    stem, extension = os.path.splitext(safe_filename)
+    destination = os.path.join(downloads_dir, safe_filename)
+    suffix = 1
+    while os.path.exists(destination):
+        destination = os.path.join(downloads_dir, f'{stem} ({suffix}){extension}')
+        suffix += 1
+
+    shutil.copy2(source_path, destination)
+    logger.info(f"Saved generated file to Downloads: {destination}")
+    return destination
+
+def _service_resource_roots():
+    """Resolve the platform-neutral resource layouts packaged with the app."""
+    configured_root = os.getenv('EVENTINSPECTOR_BUNDLED_SERVICES_ROOT', '').strip()
+    meipass = getattr(sys, '_MEIPASS', '') or ''
+    executable = getattr(sys, 'executable', '') or ''
+    executable_dir = os.path.dirname(os.path.abspath(executable)) if executable else ''
+    roots = []
+    if configured_root:
+        roots.append(os.path.abspath(os.path.expanduser(configured_root)))
+    roots.extend([
+        APP_ROOT,
+        os.path.join(meipass, 'services_checker') if meipass else '',
+        meipass,
+        os.path.join(executable_dir, 'services_checker') if executable_dir else '',
+        os.path.join(executable_dir, '_internal', 'services_checker') if executable_dir else '',
+        os.path.join(executable_dir, '..', 'Resources', 'services_checker') if executable_dir else '',
+        os.path.join(executable_dir, '..', 'Frameworks', 'services_checker') if executable_dir else '',
+    ])
+    unique_roots = []
     seen = set()
     for root in roots:
         root = os.path.abspath(root) if root else ''
         if not root or root in seen:
             continue
         seen.add(root)
-        candidates.append(os.path.join(root, filename))
+        unique_roots.append(root)
+    return unique_roots
+
+
+def _service_resource_path(filename):
+    """Resolve a resource from the explicit artifact layouts."""
+    filename = str(filename or '').strip()
+    candidates = [os.path.join(root, filename) for root in _service_resource_roots()]
     for candidate in candidates:
         if os.path.isfile(candidate):
             return candidate
     return candidates[0] if candidates else os.path.join(APP_ROOT, filename)
 
+def _resolve_service_file(filename, env_var=None):
+    """Resolve a bundled service file at call time, not only at import time."""
+    configured = os.getenv(env_var, '').strip() if env_var else ''
+    if configured:
+        configured = os.path.expanduser(configured)
+        configured_path = os.path.abspath(configured)
+        if os.path.isfile(configured_path):
+            return configured_path
+        if not os.path.isabs(configured):
+            configured_resource = _service_resource_path(configured)
+            if os.path.isfile(configured_resource):
+                return configured_resource
+    return _service_resource_path(filename)
 
-BUNDLETOOL_PATH = os.getenv('EVENTINSPECTOR_BUNDLETOOL_PATH') or _service_resource_path('bundletool-all-1.18.1.jar')
+
+def _resolve_bundletool_path():
+    """Find bundletool in the active source/update/frozen app resource layout."""
+    return _resolve_service_file(
+        'bundletool-all-1.18.1.jar',
+        'EVENTINSPECTOR_BUNDLETOOL_PATH',
+    )
+
+
+# Kept for compatibility with diagnostics and older integrations. Conversion
+# resolves this again at request time through _resolve_bundletool_path().
+BUNDLETOOL_PATH = _resolve_bundletool_path()
 
 # Paths to files within APK/AAB that indicate library presence/version
 # Keys are paths in the archive, values are human-readable names for display.
@@ -263,6 +402,11 @@ DEFAULT_KEYSTORE_ALIAS = "alias_name"
 DEFAULT_KEYSTORE_PASS = "112233"
 DEFAULT_KEY_PASS = "112233"
 USE_HARDCODED_KEYSTORE = True # This is a non-production test key bundled for AAB conversion.
+
+
+def _resolve_keystore_path():
+    """Find the active bundled keystore, including frozen app resources."""
+    return _resolve_service_file(DEFAULT_KEYSTORE_FILENAME, 'EVENTINSPECTOR_KEYSTORE_PATH')
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
@@ -1279,62 +1423,29 @@ HTML_TEMPLATE = """
                             aabConversionOutputDiv.appendChild(warningP);
                         }
 
-                        const downloadUrl = String(data.apk_download_url || '');
                         const apkFilename = String(data.apk_filename || 'generated.apk');
-                        if (!downloadUrl) {
-                            throw new Error('The converted APK download URL is missing.');
-                        }
-
-                        const downloadLink = document.createElement('a');
-                        // Let the HTTP Content-Disposition header drive the native
-                        // WebView save dialog. This also works on Windows Qt WebView.
-                        downloadLink.href = downloadUrl;
-                        downloadLink.download = apkFilename;
-                        downloadLink.className = 'button';
-                        downloadLink.title = 'Download generated APK';
-
-                        // Native WebViews do not consistently implement the
-                        // browser download pipeline. Save through the local
-                        // Services Checker process first, with the direct
-                        // response kept as a browser fallback.
-                        downloadLink.addEventListener('click', async (event) => {
-                            event.preventDefault();
-                            try {
-                                const saveResponse = await fetch(
-                                    '/save_download/' + encodeURIComponent(apkFilename),
-                                    { method: 'POST' }
-                                );
-                                const saveData = await saveResponse.json();
-                                if (!saveResponse.ok || !saveData.success) {
-                                    throw new Error(saveData.error || 'Could not save the generated APK.');
-                                }
-                                showMessage(
-                                    'APK saved to Downloads: ' + escapeHtml(saveData.filename),
-                                    'info'
-                                );
-                            } catch (saveError) {
-                                // Keep the original HTTP download available
-                                // for regular browsers and older builds.
-                                window.location.assign(downloadUrl);
+                        const savedToDownloads = data.saved_to_downloads === true;
+                        if (savedToDownloads) {
+                            const savedP = document.createElement('p');
+                            savedP.className = 'info-message';
+                            savedP.textContent = 'APK saved to Downloads: ' + String(data.saved_filename || apkFilename);
+                            aabConversionOutputDiv.appendChild(savedP);
+                        } else {
+                            const downloadUrl = String(data.apk_download_url || '');
+                            if (!downloadUrl) {
+                                throw new Error('The converted APK could not be saved and no download fallback is available.');
                             }
-                        });
 
-                        // Add a download icon (simple SVG example)
-                        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-                        svg.setAttribute('viewBox', '0 0 20 20');
-                        svg.setAttribute('fill', 'currentColor');
-                        svg.classList.add('w-5', 'h-5', 'mr-2'); // Tailwind classes for size and margin
-
-                        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                        path.setAttribute('fill-rule', 'evenodd');
-                        path.setAttribute('d', 'M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm-.75-11.25a.75.75 0 0 0-1.5 0v4.59L6.3 9.72a.75.75 0 0 0-1.1 1.02l3.25 3.5a.75.75 0 0 0 1.1 0l3.25-3.5a.75.75 0 0 0-1.1-1.02l-1.45 1.53V6.75Z');
-                        path.setAttribute('clip-rule', 'evenodd');
-
-                        svg.appendChild(path);
-                        downloadLink.appendChild(svg);
-                        downloadLink.appendChild(document.createTextNode('Download Generated APK (' + apkFilename + ')'));
-
-                        aabConversionOutputDiv.appendChild(downloadLink);
+                            const downloadLink = document.createElement('a');
+                            // This direct attachment is only a fallback when
+                            // the local Downloads folder cannot be written.
+                            downloadLink.href = downloadUrl;
+                            downloadLink.download = apkFilename;
+                            downloadLink.className = 'button';
+                            downloadLink.title = 'Download generated APK';
+                            downloadLink.appendChild(document.createTextNode('Download Generated APK (' + apkFilename + ')'));
+                            aabConversionOutputDiv.appendChild(downloadLink);
+                        }
 
                         aabConversionResultsSection.classList.remove('hidden');
                         aabConverterUploadSection.classList.add('hidden');
@@ -2397,9 +2508,37 @@ def convert_aab_to_apk():
     if file.filename == '':
         return jsonify({'success': False, 'error': 'No selected AAB file'})
 
-    if not os.path.exists(BUNDLETOOL_PATH):
-        logger.error(f"Bundletool not found at {BUNDLETOOL_PATH}")
-        return jsonify({'success': False, 'error': f'Server configuration error: Bundletool not found. Please contact admin.'})
+    _cleanup_stale_conversion_artifacts()
+
+    # Resolve resources for this request. The service can be loaded from a
+    # downloaded update directory while its bundled assets remain in the
+    # frozen application, so import-time paths are not reliable here.
+    bundletool_path = _resolve_bundletool_path()
+    if not os.path.isfile(bundletool_path):
+        logger.error(f"Bundletool not found at {bundletool_path}")
+        return jsonify({
+            'success': False,
+            'error': (
+                'Server configuration error: bundletool is missing from the '
+                'installed app resources. Please update/reinstall the app.'
+            ),
+        })
+
+    try:
+        free_space = shutil.disk_usage(app.config['UPLOAD_FOLDER']).free
+    except OSError as error:
+        logger.error(f"Could not check free disk space before conversion: {error}")
+        free_space = None
+    if free_space is not None and free_space < MIN_CONVERSION_FREE_SPACE_BYTES:
+        free_space_mb = free_space // (1024 * 1024)
+        logger.error(f"Not enough free disk space for AAB conversion: {free_space_mb} MB")
+        return jsonify({
+            'success': False,
+            'error': (
+                f'Not enough free disk space to convert this AAB ({free_space_mb} MB free). '
+                'Remove old generated APKs and try again.'
+            ),
+        })
 
     if file and file.filename.endswith('.aab'):
         original_aab_name = file.filename
@@ -2449,14 +2588,12 @@ def convert_aab_to_apk():
         if ks_path_input: # Only proceed if ks_path_input is not None or empty
             if os.path.isabs(ks_path_input):
                 final_ks_path = ks_path_input
+            elif os.path.basename(os.path.normpath(ks_path_input)) == DEFAULT_KEYSTORE_FILENAME:
+                final_ks_path = _resolve_keystore_path()
             else:
-                # Assume relative to APP_ROOT if not absolute
+                # Custom relative keystores remain relative to the active
+                # service app directory.
                 final_ks_path = os.path.join(APP_ROOT, ks_path_input)
-                if (
-                    os.path.basename(os.path.normpath(ks_path_input)) == DEFAULT_KEYSTORE_FILENAME
-                    and not os.path.exists(final_ks_path)
-                ):
-                    final_ks_path = _service_resource_path(DEFAULT_KEYSTORE_FILENAME)
             logger.info(f"Resolved final_ks_path: '{final_ks_path}'")
 
 
@@ -2466,7 +2603,7 @@ def convert_aab_to_apk():
 
             # Construct bundletool command
             cmd = [
-                'java', '-jar', BUNDLETOOL_PATH,
+                'java', '-jar', bundletool_path,
                 'build-apks',
                 '--bundle=' + aab_savelocation,
                 '--output=' + apks_savelocation,
@@ -2539,17 +2676,43 @@ def convert_aab_to_apk():
                     logger.error(f"'universal.apk' not found in {apks_savelocation}")
                     return jsonify({'success': False, 'error': "'universal.apk' not found in the generated APKS file."})
 
-            # Add the final APK to downloadable files in session
+            # Register the result before attempting the native save so the
+            # browser fallback remains available when Downloads is unavailable.
             session.setdefault('downloadable_files', {})[final_apk_filename] = final_apk_savelocation
             logger.info(f"Added to session downloadable_files: {final_apk_filename} -> {final_apk_savelocation}")
 
+            saved_to_downloads = False
+            saved_filename = ''
+            saved_directory = ''
+            try:
+                saved_path = _copy_generated_file_to_downloads(
+                    final_apk_savelocation,
+                    final_apk_filename,
+                )
+                saved_to_downloads = True
+                saved_filename = os.path.basename(saved_path)
+                saved_directory = os.path.dirname(saved_path)
+                _remove_generated_file(final_apk_savelocation)
+                downloadable_files = dict(session.get('downloadable_files', {}))
+                downloadable_files.pop(final_apk_filename, None)
+                session['downloadable_files'] = downloadable_files
+            except (OSError, ValueError) as save_error:
+                # Keep the generated APK and browser download route as a
+                # fallback if the user's Downloads folder is unavailable.
+                logger.warning(f"Could not auto-save generated APK to Downloads: {save_error}")
+
             response_data = {
                 'success': True,
+                'apk_filename': final_apk_filename,
+                'saved_to_downloads': saved_to_downloads,
+            }
+            if saved_to_downloads:
+                response_data['saved_filename'] = saved_filename
+                response_data['saved_directory'] = saved_directory
+            else:
                 # Encode the filename so spaces, parentheses, ampersands, and
                 # other Windows-uploaded filename characters cannot break href.
-                'apk_download_url': f"/download/{quote(final_apk_filename, safe='')}",
-                'apk_filename': final_apk_filename
-            }
+                response_data['apk_download_url'] = f"/download/{quote(final_apk_filename, safe='')}"
             if warning_message_from_backend:
                 response_data['warning_message'] = warning_message_from_backend
             return jsonify(response_data)
@@ -2614,7 +2777,7 @@ def download_file(filename):
         if os.path.exists(file_path_on_disk):
             logger.info(f"File confirmed to exist at: '{file_path_on_disk}' using path from session.")
             try:
-                return send_file(
+                response = send_file(
                     file_path_on_disk,
                     mimetype=(
                         'application/vnd.android.package-archive'
@@ -2625,6 +2788,14 @@ def download_file(filename):
                     download_name=actual_filename_to_serve,
                     conditional=True,
                 )
+                # The native WebView path uses /save_download, but regular
+                # browsers use this route. Remove the generated APK after the
+                # response is sent so repeated conversions cannot fill disk.
+                response.call_on_close(lambda: _remove_generated_file(file_path_on_disk))
+                downloadable_files = dict(session.get('downloadable_files', {}))
+                downloadable_files.pop(filename, None)
+                session['downloadable_files'] = downloadable_files
+                return response
             except Exception as e:
                 logger.error(f"Error during send_file: {e}", exc_info=True)
                 return "Error serving file.", 500
@@ -2665,25 +2836,20 @@ def save_download_file(filename):
     if not os.path.isfile(source_path):
         return jsonify({'success': False, 'error': 'Generated APK is no longer available on the server.'}), 404
 
-    downloads_dir = os.path.join(os.path.expanduser('~'), 'Downloads')
     try:
-        os.makedirs(downloads_dir, exist_ok=True)
-        destination = os.path.join(downloads_dir, filename)
-        stem, extension = os.path.splitext(filename)
-        suffix = 1
-        while os.path.exists(destination):
-            destination = os.path.join(downloads_dir, f'{stem} ({suffix}){extension}')
-            suffix += 1
-        shutil.copy2(source_path, destination)
-    except OSError as error:
+        destination = _copy_generated_file_to_downloads(source_path, filename)
+    except (OSError, ValueError) as error:
         logger.error(f"Failed to save generated file to Downloads: {error}", exc_info=True)
         return jsonify({'success': False, 'error': f'Could not save APK to Downloads: {error}'}), 500
 
-    logger.info(f"Saved generated file to Downloads: {destination}")
+    _remove_generated_file(source_path)
+    downloadable_files = dict(session.get('downloadable_files', {}))
+    downloadable_files.pop(filename, None)
+    session['downloadable_files'] = downloadable_files
     return jsonify({
         'success': True,
         'filename': os.path.basename(destination),
-        'directory': downloads_dir,
+        'directory': os.path.dirname(destination),
     })
 
 def cleanup_session_files():
@@ -2763,10 +2929,19 @@ if __name__ == '__main__':
     # Ensure upload folder exists
     if not os.path.exists(UPLOAD_FOLDER_ABS_PATH):
         os.makedirs(UPLOAD_FOLDER_ABS_PATH)
-    # Check for bundletool
-    if not os.path.exists(BUNDLETOOL_PATH):
-        logger.critical(f"CRITICAL: bundletool.jar not found at '{BUNDLETOOL_PATH}'. AAB to APK conversion will FAIL.")
-        logger.critical("Please download bundletool.jar from https://github.com/google/bundletool/releases and place it correctly or update BUNDLETOOL_PATH in app.py.")
+    # Resolve again at startup so a frozen/update bundle cannot retain a stale
+    # path calculated during an earlier import.
+    runtime_bundletool_path = _resolve_bundletool_path()
+    if not os.path.exists(runtime_bundletool_path):
+        logger.critical(
+            f"CRITICAL: bundletool.jar not found at '{runtime_bundletool_path}'. "
+            "AAB to APK conversion will FAIL."
+        )
+        logger.critical(
+            "Please place bundletool-all-1.18.1.jar in the bundled "
+            "services_checker resource directory or set "
+            "EVENTINSPECTOR_BUNDLETOOL_PATH."
+        )
 
     # Reminder about androguard if it wasn't imported
     if not androguard_axml_available:

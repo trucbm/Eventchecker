@@ -565,12 +565,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(44)" in text, "Log_checker.py must be prepared for v2.5.0(44)")
+    _assert("v2.5.0(45)" in text, "Log_checker.py must be prepared for v2.5.0(45)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(44)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(45)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -704,11 +704,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-19-1-2.5.0-44", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-20-1-2.5.0-45", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(44\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(45\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -1244,9 +1244,9 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-19-1-2.5.0-44", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-20-1-2.5.0-45", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 44, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 45, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
@@ -1443,13 +1443,13 @@ def test_windows_release_build_version_contract() -> None:
     _assert("EventInspector.exe" in bundle_guard, "Windows bundle guard must require the executable")
     _assert("-PrintVersion" in installer_script, "Windows installer must derive its version from the source")
     _assert("/DMyAppVersion=%EVENTINSPECTOR_RELEASE_VERSION%" in installer_script, "Inno Setup must receive the source version")
-    _assert('#define MyAppVersion "2.5.0.44"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
+    _assert('#define MyAppVersion "2.5.0.45"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
 
 
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-19-1-2.5.0-44' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-20-1-2.5.0-45' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
@@ -1472,6 +1472,10 @@ def test_services_checker_bridge_contract() -> None:
         _assert("subprocess.Popen" in payload_source, "Services Checker launcher missing")
         _assert("_services_checker_ready" in payload_source, "Services Checker readiness check missing")
         _assert("_prepare_services_checker_runtime" in payload_source, "Services Checker bundle import preparation missing")
+        _assert("_services_checker_resource_roots" in payload_source, "Services Checker resource layout resolver missing")
+        _assert("_services_checker_bundled_resource_root" in payload_source, "Services Checker complete resource contract missing")
+        _assert("EVENTINSPECTOR_BUNDLETOOL_PATH" in payload_source, "Services Checker bundletool path pin missing")
+        _assert("SERVICES_CHECKER_REQUIRED_RESOURCES" in payload_source, "Services Checker required resource list missing")
         _assert('importlib.import_module("androguard.core.axml")' in payload_source, "Services Checker androguard preload missing")
         _assert("_services_checker_saved_host_path" in payload_source, "saved host override missing")
         _assert("/api/services-checker/host" in payload_source, "host replacement API missing")
@@ -1524,6 +1528,59 @@ def test_services_checker_bridge_contract() -> None:
     _assert(key_path.is_file() and key_path.stat().st_size > 0, "bundled test keystore is missing")
 
 
+def test_services_checker_resource_contract_is_platform_neutral() -> None:
+    source = (ROOT / "Log_checker.py").read_text(encoding="utf-8")
+    helper_start = source.index("def _services_checker_resource_roots")
+    helper_end = source.index("def _prepare_services_checker_runtime")
+    helper_source = source[helper_start:helper_end].lower()
+    for forbidden in ("sys.platform", "platform.system", "os.name", '"darwin"', '"windows"'):
+        _assert(forbidden not in helper_source, f"resource resolver must not infer platform from {forbidden}")
+
+    previous_root = os.environ.get("EVENTINSPECTOR_BUNDLED_SERVICES_ROOT")
+    previous_bundletool = os.environ.get("EVENTINSPECTOR_BUNDLETOOL_PATH")
+    try:
+        for layout in (
+            Path("mac-artifact") / "Contents" / "Resources" / "services_checker",
+            Path("windows-artifact") / "_internal" / "services_checker",
+        ):
+            with tempfile.TemporaryDirectory(prefix="eventchecker-resource-contract-") as temp_dir:
+                resource_root = Path(temp_dir) / layout
+                resource_root.mkdir(parents=True)
+                (resource_root / "bundletool-all-1.18.1.jar").write_bytes(b"bundletool")
+                (resource_root / "my-key.keystore").write_bytes(b"keystore")
+                app_path = resource_root / "app.py"
+                app_path.write_text("# test app\n", encoding="utf-8")
+                os.environ["EVENTINSPECTOR_BUNDLED_SERVICES_ROOT"] = str(resource_root)
+                os.environ.pop("EVENTINSPECTOR_BUNDLETOOL_PATH", None)
+
+                resolved_root = lc._services_checker_bundled_resource_root(str(app_path))
+                _assert_equal(
+                    Path(resolved_root).resolve(),
+                    resource_root.resolve(),
+                    f"resource resolver must use the declared {layout} layout",
+                )
+                lc._prepare_services_checker_runtime(str(app_path))
+                _assert_equal(
+                    Path(os.environ["EVENTINSPECTOR_BUNDLED_SERVICES_ROOT"]).resolve(),
+                    resource_root.resolve(),
+                    "runtime must pin the complete resource root",
+                )
+                _assert_equal(
+                    Path(os.environ["EVENTINSPECTOR_BUNDLETOOL_PATH"]).resolve(),
+                    (resource_root / "bundletool-all-1.18.1.jar").resolve(),
+                    "runtime must pin bundletool inside the same resource root",
+                )
+    finally:
+        if previous_root is None:
+            os.environ.pop("EVENTINSPECTOR_BUNDLED_SERVICES_ROOT", None)
+        else:
+            os.environ["EVENTINSPECTOR_BUNDLED_SERVICES_ROOT"] = previous_root
+        if previous_bundletool is None:
+            os.environ.pop("EVENTINSPECTOR_BUNDLETOOL_PATH", None)
+        else:
+            os.environ["EVENTINSPECTOR_BUNDLETOOL_PATH"] = previous_bundletool
+
+
 def test_native_download_contract() -> None:
     source = (ROOT / "desktop_app.py").read_text(encoding="utf-8")
     configure_marker = "webview.settings['ALLOW_DOWNLOADS'] = True"
@@ -1534,6 +1591,32 @@ def test_native_download_contract() -> None:
 
     service_path = ROOT / "services_checker" / "app.py"
     service_source = service_path.read_text(encoding="utf-8", errors="ignore")
+    _assert("def _resolve_bundletool_path()" in service_source, "AAB converter bundletool resolver is missing")
+    _assert("def _resolve_keystore_path()" in service_source, "AAB converter keystore resolver is missing")
+    _assert(
+        "bundletool_path = _resolve_bundletool_path()" in service_source,
+        "AAB conversion must resolve bundletool at request time",
+    )
+    _assert(
+        "final_ks_path = _resolve_keystore_path()" in service_source,
+        "AAB conversion must resolve the keystore at request time",
+    )
+    _assert(
+        "BUNDLETOOL_PATH" not in service_source[service_source.index("def convert_aab_to_apk"):service_source.index("@app.route('/download/<filename>')")],
+        "AAB conversion route must not use the import-time bundletool path",
+    )
+    _assert(
+        "def _cleanup_stale_conversion_artifacts()" in service_source,
+        "AAB conversion must clean abandoned generated artefacts",
+    )
+    _assert(
+        "_cleanup_stale_conversion_artifacts()" in service_source[service_source.index("def convert_aab_to_apk"):service_source.index("@app.route('/download/<filename>')")],
+        "AAB conversion must clean abandoned artefacts before bundletool runs",
+    )
+    _assert(
+        "_remove_generated_file(source_path)" in service_source,
+        "Native APK save must remove the generated source after copying",
+    )
     _assert("@app.route('/download/<filename>')" in service_source, "Services Checker download route is missing")
     _assert("as_attachment=True" in service_source, "Services Checker download route must return an attachment")
     _assert(
@@ -1541,12 +1624,20 @@ def test_native_download_contract() -> None:
         "Services Checker native save route is missing",
     )
     _assert(
-        "'/save_download/' + encodeURIComponent(apkFilename)" in service_source,
-        "AAB download button must use the native-safe save route",
+        "def _copy_generated_file_to_downloads" in service_source,
+        "AAB conversion must provide a platform-native Downloads save helper",
     )
     _assert(
-        "downloadLink.addEventListener('click'" in service_source,
-        "AAB download button must handle native WebView clicks",
+        "'saved_to_downloads': saved_to_downloads" in service_source,
+        "AAB conversion response must report whether auto-save succeeded",
+    )
+    _assert(
+        "const savedToDownloads = data.saved_to_downloads === true" in service_source,
+        "AAB conversion UI must consume the automatic Downloads save result",
+    )
+    _assert(
+        "APK saved to Downloads:" in service_source,
+        "AAB conversion UI must show the automatic Downloads save result",
     )
 
 
@@ -1577,6 +1668,7 @@ TESTS: List[Callable[[], None]] = [
     test_windows_release_build_version_contract,
     test_windows_update_recovery_script,
     test_services_checker_bridge_contract,
+    test_services_checker_resource_contract_is_platform_neutral,
     test_native_download_contract,
 ]
 

@@ -33,7 +33,7 @@ from pathlib import Path
 from queue import Empty, Queue
 
 # Compatibility marker for the 2.4 desktop shell and the current handoff.
-LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(44)"
+LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(45)"
 
 # Khởi tạo ứng dụng Flask và SocketIO
 app = Flask(__name__)
@@ -739,15 +739,88 @@ def _find_services_checker_port(preferred=SERVICES_CHECKER_DEFAULT_PORT):
         return int(probe.getsockname()[1])
 
 
+SERVICES_CHECKER_REQUIRED_RESOURCES = (
+    "bundletool-all-1.18.1.jar",
+    "my-key.keystore",
+)
+
+
+def _services_checker_resource_roots(app_path):
+    """Return the explicit resource roots used by every packaged artifact.
+
+    The layout is intentionally platform-neutral. Build targets may place the
+    same ``services_checker`` directory under different artifact roots, but
+    resource selection is based only on the declared layout and required files,
+    never on an inferred operating system.
+    """
+    app_path = os.path.abspath(app_path)
+    meipass = getattr(sys, "_MEIPASS", "") or ""
+    executable = getattr(sys, "executable", "") or ""
+    executable_dir = os.path.dirname(os.path.abspath(executable)) if executable else ""
+    configured_root = os.getenv("EVENTINSPECTOR_BUNDLED_SERVICES_ROOT", "").strip()
+
+    roots = []
+    if configured_root:
+        roots.append(os.path.abspath(os.path.expanduser(configured_root)))
+    roots.extend([
+        os.path.dirname(app_path),
+        os.path.join(meipass, "services_checker") if meipass else "",
+        meipass,
+        os.path.join(executable_dir, "services_checker") if executable_dir else "",
+        os.path.join(executable_dir, "_internal", "services_checker") if executable_dir else "",
+        os.path.join(executable_dir, "..", "Resources", "services_checker") if executable_dir else "",
+        os.path.join(executable_dir, "..", "Frameworks", "services_checker") if executable_dir else "",
+        os.path.join(SCRIPT_DIR, "services_checker"),
+    ])
+    unique_roots = []
+    seen = set()
+    for root in roots:
+        root = os.path.abspath(root) if root else ""
+        if not root or root in seen:
+            continue
+        seen.add(root)
+        unique_roots.append(root)
+    return unique_roots
+
+
+def _services_checker_bundled_resource_root(app_path):
+    """Find a complete Services Checker resource set for this artifact."""
+    for resource_root in _services_checker_resource_roots(app_path):
+        if all(
+            os.path.isfile(os.path.join(resource_root, filename))
+            for filename in SERVICES_CHECKER_REQUIRED_RESOURCES
+        ):
+            return resource_root
+    return ""
+
+
 def _prepare_services_checker_runtime(app_path):
-    """Make bundled androguard importable before dynamically loading app.py."""
-    roots = [os.path.dirname(os.path.dirname(os.path.abspath(app_path)))]
-    meipass = getattr(sys, "_MEIPASS", "")
+    """Make bundled dependencies importable before dynamically loading app.py."""
+    app_path = os.path.abspath(app_path)
+    roots = [os.path.dirname(os.path.dirname(app_path))]
+    meipass = getattr(sys, "_MEIPASS", "") or ""
     if meipass:
         roots.insert(0, meipass)
     for root in roots:
         if root and os.path.isdir(root) and root not in sys.path:
             sys.path.insert(0, root)
+
+    # An update may replace Python code without carrying large binary assets.
+    # Pin the updated module to the complete resource set from this artifact.
+    resource_root = _services_checker_bundled_resource_root(app_path)
+    if resource_root:
+        os.environ["EVENTINSPECTOR_BUNDLED_SERVICES_ROOT"] = resource_root
+        os.environ["EVENTINSPECTOR_BUNDLETOOL_PATH"] = os.path.join(
+            resource_root, "bundletool-all-1.18.1.jar"
+        )
+        logging.debug("Services Checker bundled resource root: %s", resource_root)
+    else:
+        os.environ.pop("EVENTINSPECTOR_BUNDLED_SERVICES_ROOT", None)
+        os.environ.pop("EVENTINSPECTOR_BUNDLETOOL_PATH", None)
+        logging.error(
+            "Services Checker resource contract is incomplete for artifact: %s",
+            app_path,
+        )
     try:
         importlib.invalidate_caches()
         importlib.import_module("androguard.core.axml")
@@ -2760,7 +2833,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(44)</title>
+    <title>Event Inspector v2.5.0(45)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -2837,7 +2910,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(44)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(45)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
