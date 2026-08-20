@@ -565,12 +565,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(45)" in text, "Log_checker.py must be prepared for v2.5.0(45)")
+    _assert("v2.5.0(46)" in text, "Log_checker.py must be prepared for v2.5.0(46)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(45)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(46)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -704,11 +704,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-20-1-2.5.0-45", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-20-1-2.5.0-46", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(45\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(46\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -1244,14 +1244,14 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-20-1-2.5.0-45", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-20-1-2.5.0-46", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 45, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 46, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
-                not os.path.exists(os.path.join(prepared["update_dir"], "services_checker", "bundletool-all-1.18.1.jar")),
-                "large bundletool asset must not be required in the remote update payload",
+                os.path.exists(os.path.join(prepared["update_dir"], "services_checker", "bundletool-all-1.18.1.jar")),
+                "prepared bundletool asset missing from the remote update payload",
             )
             _assert(
                 os.path.exists(os.path.join(prepared["update_dir"], "services_checker", "manifest_check_presets.json")),
@@ -1443,13 +1443,13 @@ def test_windows_release_build_version_contract() -> None:
     _assert("EventInspector.exe" in bundle_guard, "Windows bundle guard must require the executable")
     _assert("-PrintVersion" in installer_script, "Windows installer must derive its version from the source")
     _assert("/DMyAppVersion=%EVENTINSPECTOR_RELEASE_VERSION%" in installer_script, "Inno Setup must receive the source version")
-    _assert('#define MyAppVersion "2.5.0.45"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
+    _assert('#define MyAppVersion "2.5.0.46"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
 
 
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-20-1-2.5.0-45' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-20-1-2.5.0-46' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
@@ -1627,17 +1627,40 @@ def test_native_download_contract() -> None:
         "def _copy_generated_file_to_downloads" in service_source,
         "AAB conversion must provide a platform-native Downloads save helper",
     )
+    conversion_start = service_source.index("def convert_aab_to_apk()")
+    download_route_start = service_source.index("@app.route('/download/<filename>')")
+    conversion_source = service_source[conversion_start:download_route_start]
     _assert(
-        "'saved_to_downloads': saved_to_downloads" in service_source,
-        "AAB conversion response must report whether auto-save succeeded",
+        "def _write_zip_member_to_downloads" in service_source,
+        "AAB conversion must have a direct Downloads writer",
     )
     _assert(
-        "const savedToDownloads = data.saved_to_downloads === true" in service_source,
-        "AAB conversion UI must consume the automatic Downloads save result",
+        "download_apk_path, saved_filename = _write_zip_member_to_downloads(" in conversion_source,
+        "AAB conversion must write universal.apk directly to Downloads",
     )
     _assert(
-        "APK saved to Downloads:" in service_source,
-        "AAB conversion UI must show the automatic Downloads save result",
+        "'saved_to_downloads': True" in conversion_source,
+        "AAB conversion response must confirm the direct Downloads save",
+    )
+    _assert(
+        "session.setdefault('downloadable_files', {})[final_apk_filename]" not in conversion_source,
+        "Final APK must not be staged in the Flask session download cache",
+    )
+    _assert(
+        "final_apk_savelocation" not in conversion_source,
+        "Final APK must not be staged in UPLOAD_FOLDER",
+    )
+    _assert(
+        "'apk_download_url'" not in conversion_source,
+        "AAB conversion must not fall back to a temporary browser download URL",
+    )
+    _assert(
+        "const saved_to_downloads" not in service_source,
+        "AAB conversion UI must require the direct Downloads result",
+    )
+    _assert(
+        "APK saved directly to Downloads:" in service_source,
+        "AAB conversion UI must show the direct Downloads result",
     )
 
 

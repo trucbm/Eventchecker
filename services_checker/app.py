@@ -16,7 +16,6 @@ import time
 import hashlib
 import threading
 from pathlib import Path # For finding home directory
-from urllib.parse import quote
 import xml.etree.ElementTree as ET # Still needed for the object structure
 import sys # For printing sys.path for debugging
 import traceback # For printing full tracebacks
@@ -205,8 +204,97 @@ def _remove_generated_file(path):
 
 
 def _downloads_directory():
-    """Return the current user's platform-native Downloads directory."""
+    """Return the current user's platform-native Downloads directory.
+
+    The Services Checker process runs locally inside the desktop app, so the
+    user's home directory is the same one used by the native platform.  Using
+    ``expanduser`` keeps this path correct for macOS, Windows, and Linux
+    without depending on the process working directory.
+    """
     return os.path.join(os.path.expanduser('~'), 'Downloads')
+
+
+def _safe_download_filename(filename, fallback='generated.apk'):
+    """Return a single safe filename for a file written to Downloads."""
+    candidate = str(filename or '').replace('\\', '/')
+    candidate = os.path.basename(candidate).strip()
+    # Keep filenames valid on Windows even when the same source AAB is
+    # converted on macOS or Linux. This also prevents control characters from
+    # reaching the native filesystem APIs.
+    candidate = re.sub(r'[<>:"/|?*\x00-\x1f]', '_', candidate).rstrip(' .')
+    if not candidate or candidate in {'.', '..'}:
+        candidate = fallback
+    if candidate.upper().split('.')[0] in {
+        'CON', 'PRN', 'AUX', 'NUL',
+        *(f'COM{index}' for index in range(1, 10)),
+        *(f'LPT{index}' for index in range(1, 10)),
+    }:
+        candidate = f'_{candidate}'
+    return candidate
+
+
+def _open_unique_download_file(filename):
+    """Reserve a new file in Downloads and return ``(path, handle, name)``.
+
+    ``O_EXCL`` makes the collision check atomic across platforms.  The caller
+    owns the returned binary handle and must close it; on write failure the
+    partially written destination must be removed.
+    """
+    downloads_dir = _downloads_directory()
+    os.makedirs(downloads_dir, exist_ok=True)
+    safe_filename = _safe_download_filename(filename)
+    stem, extension = os.path.splitext(safe_filename)
+    binary_flag = getattr(os, 'O_BINARY', 0)
+
+    for suffix in range(10000):
+        if suffix == 0:
+            candidate_name = safe_filename
+        else:
+            candidate_name = f'{stem} ({suffix}){extension}'
+        destination = os.path.join(downloads_dir, candidate_name)
+        try:
+            descriptor = os.open(
+                destination,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | binary_flag,
+                0o644,
+            )
+        except FileExistsError:
+            continue
+        return destination, os.fdopen(descriptor, 'wb'), candidate_name
+
+    raise FileExistsError(f'Could not reserve a unique filename in {downloads_dir}.')
+
+
+def _remove_download_file(path):
+    """Remove a partially written file owned by the current conversion."""
+    if not path:
+        return
+    path = os.path.abspath(path)
+    downloads_root = os.path.abspath(_downloads_directory())
+    try:
+        inside_downloads = os.path.commonpath([downloads_root, path]) == downloads_root
+    except ValueError:
+        inside_downloads = False
+    if not inside_downloads:
+        logger.warning(f"Refusing to remove file outside Downloads: {path}")
+        return
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+    except OSError as error:
+        logger.warning(f"Could not remove partial Downloads file '{path}': {error}")
+
+
+def _write_zip_member_to_downloads(apks_zip, member_name, filename):
+    """Write one generated APK member directly to Downloads."""
+    destination, output, saved_filename = _open_unique_download_file(filename)
+    try:
+        with apks_zip.open(member_name, 'r') as source, output:
+            shutil.copyfileobj(source, output)
+    except Exception:
+        _remove_download_file(destination)
+        raise
+    return destination, saved_filename
 
 
 def _copy_generated_file_to_downloads(source_path, filename):
@@ -228,17 +316,13 @@ def _copy_generated_file_to_downloads(source_path, filename):
     if not os.path.isfile(source_path):
         raise FileNotFoundError('The generated APK is no longer available.')
 
-    downloads_dir = _downloads_directory()
-    os.makedirs(downloads_dir, exist_ok=True)
-    safe_filename = os.path.basename(str(filename or 'generated.apk'))
-    stem, extension = os.path.splitext(safe_filename)
-    destination = os.path.join(downloads_dir, safe_filename)
-    suffix = 1
-    while os.path.exists(destination):
-        destination = os.path.join(downloads_dir, f'{stem} ({suffix}){extension}')
-        suffix += 1
-
-    shutil.copy2(source_path, destination)
+    destination, output, _saved_filename = _open_unique_download_file(filename)
+    try:
+        with open(source_path, 'rb') as source, output:
+            shutil.copyfileobj(source, output)
+    except Exception:
+        _remove_download_file(destination)
+        raise
     logger.info(f"Saved generated file to Downloads: {destination}")
     return destination
 
@@ -1424,28 +1508,14 @@ HTML_TEMPLATE = """
                         }
 
                         const apkFilename = String(data.apk_filename || 'generated.apk');
-                        const savedToDownloads = data.saved_to_downloads === true;
-                        if (savedToDownloads) {
-                            const savedP = document.createElement('p');
-                            savedP.className = 'info-message';
-                            savedP.textContent = 'APK saved to Downloads: ' + String(data.saved_filename || apkFilename);
-                            aabConversionOutputDiv.appendChild(savedP);
-                        } else {
-                            const downloadUrl = String(data.apk_download_url || '');
-                            if (!downloadUrl) {
-                                throw new Error('The converted APK could not be saved and no download fallback is available.');
-                            }
-
-                            const downloadLink = document.createElement('a');
-                            // This direct attachment is only a fallback when
-                            // the local Downloads folder cannot be written.
-                            downloadLink.href = downloadUrl;
-                            downloadLink.download = apkFilename;
-                            downloadLink.className = 'button';
-                            downloadLink.title = 'Download generated APK';
-                            downloadLink.appendChild(document.createTextNode('Download Generated APK (' + apkFilename + ')'));
-                            aabConversionOutputDiv.appendChild(downloadLink);
+                        if (data.saved_to_downloads !== true) {
+                            throw new Error(data.error || 'The converted APK was not saved to Downloads.');
                         }
+
+                        const savedP = document.createElement('p');
+                        savedP.className = 'info-message';
+                        savedP.textContent = 'APK saved directly to Downloads: ' + String(data.saved_filename || apkFilename);
+                        aabConversionOutputDiv.appendChild(savedP);
 
                         aabConversionResultsSection.classList.remove('hidden');
                         aabConverterUploadSection.classList.add('hidden');
@@ -2540,8 +2610,8 @@ def convert_aab_to_apk():
             ),
         })
 
-    if file and file.filename.endswith('.aab'):
-        original_aab_name = file.filename
+    if file and str(file.filename).lower().endswith('.aab'):
+        original_aab_name = _safe_download_filename(file.filename, 'uploaded.aab')
         token = secrets.token_hex(8) # Unique token for this conversion
 
         # Define temporary file names using the token
@@ -2551,10 +2621,12 @@ def convert_aab_to_apk():
         apks_filename = f"output_convert_{token}.apks" # Intermediate .apks file
         apks_savelocation = os.path.join(app.config['UPLOAD_FOLDER'], apks_filename)
 
-        # Define final APK filename
-        base_aab_name = os.path.splitext(original_aab_name)[0]
+        # Define the final APK filename. The APK itself is reserved and
+        # written in Downloads after bundletool succeeds; it is never staged
+        # as a generated file in UPLOAD_FOLDER.
+        base_aab_name = os.path.splitext(original_aab_name)[0] or 'converted'
+        base_aab_name = _safe_download_filename(base_aab_name, 'converted')
         final_apk_filename = f"{base_aab_name}_universal_{token[:4]}.apk" # Shortened token for readability
-        final_apk_savelocation = os.path.join(app.config['UPLOAD_FOLDER'], final_apk_filename)
 
         # Track files for cleanup in session (though some are cleaned immediately in finally)
         session['temp_aab_for_convert_path'] = aab_savelocation
@@ -2562,6 +2634,9 @@ def convert_aab_to_apk():
 
         bundletool_stderr_output = ""
         warning_message_from_backend = None
+        download_apk_path = None
+        saved_filename = ''
+        download_succeeded = False
 
         # Keystore details
         ks_path_input = None
@@ -2661,58 +2736,30 @@ def convert_aab_to_apk():
 
             logger.info(f"APKS file generated successfully: {apks_savelocation}")
 
-            # Extract the universal.apk from the .apks archive
+            # Extract universal.apk directly into the user's Downloads folder.
+            # The .aab upload and .apks archive remain short-lived conversion
+            # intermediates, but the final APK never touches UPLOAD_FOLDER or
+            # the Flask session download cache.
             with zipfile.ZipFile(apks_savelocation, 'r') as apks_zip:
                 if 'universal.apk' in apks_zip.namelist():
-                    apks_zip.extract('universal.apk', app.config['UPLOAD_FOLDER'])
-                    extracted_universal_path_default = os.path.join(app.config['UPLOAD_FOLDER'], 'universal.apk')
-
-                    # Rename to the final desired APK name
-                    if os.path.exists(final_apk_savelocation): # Should not happen due to unique name, but good practice
-                        os.remove(final_apk_savelocation)
-                    os.rename(extracted_universal_path_default, final_apk_savelocation)
-                    logger.info(f"Universal APK extracted and renamed to: {final_apk_savelocation}")
+                    download_apk_path, saved_filename = _write_zip_member_to_downloads(
+                        apks_zip,
+                        'universal.apk',
+                        final_apk_filename,
+                    )
+                    logger.info(f"Universal APK written directly to Downloads: {download_apk_path}")
                 else:
                     logger.error(f"'universal.apk' not found in {apks_savelocation}")
                     return jsonify({'success': False, 'error': "'universal.apk' not found in the generated APKS file."})
 
-            # Register the result before attempting the native save so the
-            # browser fallback remains available when Downloads is unavailable.
-            session.setdefault('downloadable_files', {})[final_apk_filename] = final_apk_savelocation
-            logger.info(f"Added to session downloadable_files: {final_apk_filename} -> {final_apk_savelocation}")
-
-            saved_to_downloads = False
-            saved_filename = ''
-            saved_directory = ''
-            try:
-                saved_path = _copy_generated_file_to_downloads(
-                    final_apk_savelocation,
-                    final_apk_filename,
-                )
-                saved_to_downloads = True
-                saved_filename = os.path.basename(saved_path)
-                saved_directory = os.path.dirname(saved_path)
-                _remove_generated_file(final_apk_savelocation)
-                downloadable_files = dict(session.get('downloadable_files', {}))
-                downloadable_files.pop(final_apk_filename, None)
-                session['downloadable_files'] = downloadable_files
-            except (OSError, ValueError) as save_error:
-                # Keep the generated APK and browser download route as a
-                # fallback if the user's Downloads folder is unavailable.
-                logger.warning(f"Could not auto-save generated APK to Downloads: {save_error}")
-
+            download_succeeded = True
             response_data = {
                 'success': True,
                 'apk_filename': final_apk_filename,
-                'saved_to_downloads': saved_to_downloads,
+                'saved_to_downloads': True,
+                'saved_filename': saved_filename,
+                'saved_directory': os.path.dirname(download_apk_path),
             }
-            if saved_to_downloads:
-                response_data['saved_filename'] = saved_filename
-                response_data['saved_directory'] = saved_directory
-            else:
-                # Encode the filename so spaces, parentheses, ampersands, and
-                # other Windows-uploaded filename characters cannot break href.
-                response_data['apk_download_url'] = f"/download/{quote(final_apk_filename, safe='')}"
             if warning_message_from_backend:
                 response_data['warning_message'] = warning_message_from_backend
             return jsonify(response_data)
@@ -2720,10 +2767,15 @@ def convert_aab_to_apk():
         except subprocess.TimeoutExpired:
             logger.error("Bundletool command timed out.")
             return jsonify({'success': False, 'error': 'AAB to APK conversion timed out. The AAB might be too large or complex.'})
+        except (OSError, ValueError) as error:
+            logger.error(f"Could not save the converted APK directly to Downloads: {error}", exc_info=True)
+            return jsonify({'success': False, 'error': f'Could not save the converted APK directly to Downloads: {error}'})
         except Exception as e:
             logger.error(f"Error during AAB to APK conversion: {e}", exc_info=True)
             return jsonify({'success': False, 'error': f'An unexpected error occurred: {str(e)}'})
         finally:
+            if not download_succeeded:
+                _remove_download_file(download_apk_path)
             # Clean up temporary AAB and APKS files immediately after conversion attempt
             aab_path_to_clean = session.pop('temp_aab_for_convert_path', None)
             apks_path_to_clean = session.pop('temp_apks_for_convert_path', None)

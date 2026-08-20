@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-20-1-2.5.0-45",
+  "version": "2026-08-20-1-2.5.0-46",
   "update_enabled": true,
   "update_message": "",
   "files": [
@@ -11,8 +11,8 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Log_checker.py"
       ],
-      "sha256": "c5e1959d60863c1fd6f7d515e1f06505a9dbb9233e02a4e0b947d328e0c6b3ac",
-      "compat_sha256": "0c99eb73fe912aa88bb91d766c7a2ec4f42bec112333ae5ed30c93a6c162a902"
+      "sha256": "5c2f61361738e9092205168bad7d0a2fc29549ec8095b6b47bf1c01668c1bf48",
+      "compat_sha256": "b9813443d3799778d4128d96e596654f178a40c1b33c3439541c468f645bf2b6"
     },
     {
       "path": "remote_update.py",
@@ -53,7 +53,17 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/app.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/app.py"
       ],
-      "sha256": "d61854cf5b457d00540d6bb83a51a5ec782d40846fd7f6a2da30df0e9107e562"
+      "sha256": "296aa2db59eabba1c74449558dd9c886a2adf3d88f31b9e287d8b33550a5a037"
+    },
+    {
+      "path": "services_checker/bundletool-all-1.18.1.jar",
+      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/bundletool-all-1.18.1.jar",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/bundletool-all-1.18.1.jar",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/bundletool-all-1.18.1.jar",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/bundletool-all-1.18.1.jar"
+      ],
+      "sha256": "675786493983787ffa11550bdb7c0715679a44e1643f3ff980a529e9c822595c"
     },
     {
       "path": "services_checker/axml_fallback.py",
