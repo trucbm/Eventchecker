@@ -56,4 +56,15 @@ if (-not (Test-Path -LiteralPath (Join-Path $BundleRoot "EventInspector.exe") -P
     throw "Built bundle is missing EventInspector.exe"
 }
 
+$bundletoolPath = Resolve-BundleFile $BundleRoot "services_checker\bundletool-all-1.18.1.jar"
+$keystorePath = Resolve-BundleFile $BundleRoot "services_checker\my-key.keystore"
+$bundletoolLength = (Get-Item -LiteralPath $bundletoolPath).Length
+$keystoreLength = (Get-Item -LiteralPath $keystorePath).Length
+if ($bundletoolLength -lt 1000000) {
+    throw "Bundled bundletool is unexpectedly small: $bundletoolLength bytes"
+}
+if ($keystoreLength -lt 1) {
+    throw "Bundled keystore is empty: $keystorePath"
+}
+
 Write-Host "Bundle validated: $bundleMarker"

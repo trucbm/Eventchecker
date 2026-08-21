@@ -14,15 +14,15 @@ CONFIG_FILENAME = "remote_update_config_v250.json"
 STATE_FILENAME = "update_state_v250.json"
 UPDATES_DIRNAME = "updates_v250"
 DEFAULT_MANIFEST_URLS = [
-    "https://github.com/trucbm/Eventchecker/raw/2.5.0/Updates_2_5/remote_manifest.json",
-    "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/remote_manifest.json",
-    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/remote_manifest.json",
+    "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/remote_manifest.json",
+    "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/remote_manifest.json",
+    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_5/remote_manifest.json",
 ]
 DEFAULT_MANIFEST_URL = DEFAULT_MANIFEST_URLS[0]
 DEFAULT_FILE_URL_BASES = [
-    "https://github.com/trucbm/Eventchecker/raw/2.5.0",
-    "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0",
-    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0",
+    "https://github.com/trucbm/Eventchecker/raw/main",
+    "https://raw.githubusercontent.com/trucbm/Eventchecker/main",
+    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main",
 ]
 KNOWN_CHANNELS = ("v250",)
 

@@ -7,7 +7,7 @@ on:
         description: "Release ref to build"
         required: true
         type: string
-        default: "2.5.0"
+        default: "main"
 
 jobs:
   build-windows:
@@ -16,7 +16,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.source_ref || '2.5.0' }}
+          ref: ${{ inputs.source_ref || 'main' }}
           fetch-depth: 0
 
       - name: Validate release source

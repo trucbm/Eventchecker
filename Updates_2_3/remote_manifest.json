@@ -1,117 +1,137 @@
 {
-  "version": "2026-08-19-1-2.5.0-44",
+  "version": "2026-08-20-1-2.5.0-47",
   "update_enabled": true,
   "update_message": "",
   "files": [
     {
       "path": "Log_checker.py",
-      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/Updates_2_5/compat/Log_checker.py",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/compat/Log_checker.py",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/2.5.0/Updates_2_5/compat/Log_checker.py",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/compat/Log_checker.py",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/compat/Log_checker.py"
+        "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/compat/Log_checker.py",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/compat/Log_checker.py",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_5/compat/Log_checker.py"
       ],
-      "sha256": "c58e29f5c355152ed3de55fbafe27f807c4df997216f42106d20f01e6244d33f"
+      "sha256": "72b45932a55bc37346af154a0efaf3e6ee7aabb5397f71859f1e182651fc4621"
     },
     {
       "path": "remote_update.py",
-      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/Updates_2_5/compat/remote_update.py",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/compat/remote_update.py",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/2.5.0/Updates_2_5/compat/remote_update.py",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/compat/remote_update.py",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/compat/remote_update.py"
+        "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/compat/remote_update.py",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/compat/remote_update.py",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_5/compat/remote_update.py"
       ],
-      "sha256": "a58828b39e3e3bb4e00cb6977da4f7ffd4bf3ca0eff2bcbaa4b1ea3fae1cde9b"
+      "sha256": "060fc628ef891d91ac9c7174719e0809a31e8e637e91f83ab49a719a126a6aa6"
     },
     {
       "path": "sdk_check_presets.json",
-      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/sdk_check_presets.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/sdk_check_presets.json",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/2.5.0/sdk_check_presets.json",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/sdk_check_presets.json",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/sdk_check_presets.json"
+        "https://github.com/trucbm/Eventchecker/raw/main/sdk_check_presets.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/sdk_check_presets.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/sdk_check_presets.json"
       ],
       "sha256": "3bb3d9cb3a1b4d18d0bdb0d609f9ff473ccfab97a53b5bb179a634f05e9f0b5c"
     },
     {
       "path": "remote_update_config_v250.json",
-      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/remote_update_config_v250.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/remote_update_config_v250.json",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/2.5.0/remote_update_config_v250.json",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/remote_update_config_v250.json",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/remote_update_config_v250.json"
+        "https://github.com/trucbm/Eventchecker/raw/main/remote_update_config_v250.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/remote_update_config_v250.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/remote_update_config_v250.json"
       ],
-      "sha256": "5c8e36bf3a276b6696cce2ba92712f956964ea23201424147579fd69b3865e61"
+      "sha256": "10eb7518f13031f335303894dbcb4e7f7a9c4da0da3d5959a1423b442f482f44"
     },
     {
       "path": "services_checker/app.py",
-      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/app.py",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/services_checker/app.py",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/app.py",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/app.py",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/app.py"
+        "https://github.com/trucbm/Eventchecker/raw/main/services_checker/app.py",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/app.py",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/app.py"
       ],
-      "sha256": "81246993fa61f9ae50b0043c0f4e3606a2b22a9c7c523b41692955d6e5e4af15"
+      "sha256": "e30afa3d66ce9a705016f7e987af51fa5cdc3a03e9aa8b69ca1d137212bcfe0d"
+    },
+    {
+      "path": "services_checker/bundletool-all-1.18.1.jar",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/services_checker/bundletool-all-1.18.1.jar",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/main/services_checker/bundletool-all-1.18.1.jar",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/bundletool-all-1.18.1.jar",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/bundletool-all-1.18.1.jar"
+      ],
+      "sha256": "675786493983787ffa11550bdb7c0715679a44e1643f3ff980a529e9c822595c"
     },
     {
       "path": "services_checker/axml_fallback.py",
-      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/axml_fallback.py",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/services_checker/axml_fallback.py",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/axml_fallback.py",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/axml_fallback.py",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/axml_fallback.py"
+        "https://github.com/trucbm/Eventchecker/raw/main/services_checker/axml_fallback.py",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/axml_fallback.py",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/axml_fallback.py"
       ],
       "sha256": "39f16591b4ff34bd5c8beb71bb0633a2bdeb2fdd0a3c3309376f91c1c5ad03bf"
     },
     {
       "path": "services_checker/my-key.keystore",
-      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/my-key.keystore",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/services_checker/my-key.keystore",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/my-key.keystore",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/my-key.keystore",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/my-key.keystore"
+        "https://github.com/trucbm/Eventchecker/raw/main/services_checker/my-key.keystore",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/my-key.keystore",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/my-key.keystore"
       ],
       "sha256": "48c751cdf0af6d6ed98b0111f852abb988bf27b1398d6ac309c98a95d4ba5d44"
     },
     {
       "path": "services_checker/apk_check_presets.json",
-      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/apk_check_presets.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/services_checker/apk_check_presets.json",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/apk_check_presets.json",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/apk_check_presets.json",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/apk_check_presets.json"
+        "https://github.com/trucbm/Eventchecker/raw/main/services_checker/apk_check_presets.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/apk_check_presets.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/apk_check_presets.json"
       ],
-      "sha256": "4ce1d45248739efe6603d5521576f297174460283bb86279978118da46984371"
+      "sha256": "57909408db57eca9f0f38d8e22ae6cf80f87e41a04b6951f83392cf7333a1cc4"
     },
     {
       "path": "services_checker/gradle_check_presets.json",
-      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/gradle_check_presets.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/services_checker/gradle_check_presets.json",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/gradle_check_presets.json",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/gradle_check_presets.json",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/gradle_check_presets.json"
+        "https://github.com/trucbm/Eventchecker/raw/main/services_checker/gradle_check_presets.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/gradle_check_presets.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/gradle_check_presets.json"
       ],
-      "sha256": "d0e29c2a480af8724e6a5594ea31fe9eaf9868656d251ed5ec6f71d4e6c2a09a"
+      "sha256": "5c762a7ee4dad22a1a532b1e4dc6db9a40e4a3470c6a7cba2eba39b71cdfae0e"
+    },
+    {
+      "path": "services_checker/gradle_lib_mapping.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/services_checker/gradle_lib_mapping.json",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/main/services_checker/gradle_lib_mapping.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/gradle_lib_mapping.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/gradle_lib_mapping.json"
+      ],
+      "sha256": "431e67ff911b36fec2c17bdefb874ae3896b16b8c9937ae04b67f01eb2c24ab2"
     },
     {
       "path": "services_checker/podfile_check_presets.json",
-      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/podfile_check_presets.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/services_checker/podfile_check_presets.json",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/podfile_check_presets.json",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/podfile_check_presets.json",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/podfile_check_presets.json"
+        "https://github.com/trucbm/Eventchecker/raw/main/services_checker/podfile_check_presets.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/podfile_check_presets.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/podfile_check_presets.json"
       ],
       "sha256": "9793f68c44a3f01c1fe03a5f6317ab2b274eac23c533cba4340bd885acd9ed0c"
     },
     {
       "path": "services_checker/manifest_check_presets.json",
-      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/manifest_check_presets.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/services_checker/manifest_check_presets.json",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/manifest_check_presets.json",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/manifest_check_presets.json",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/manifest_check_presets.json"
+        "https://github.com/trucbm/Eventchecker/raw/main/services_checker/manifest_check_presets.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/manifest_check_presets.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/manifest_check_presets.json"
       ],
-      "sha256": "65e54042ac6f93adf456d900707208aed144b581855d057470071fb429da01d9"
+      "sha256": "df883a282c1b0dc19f17c0018189d3449d68c7b90ae1338eb4496c0748a1a5fd"
     }
   ]
 }

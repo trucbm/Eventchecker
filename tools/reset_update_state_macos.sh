@@ -3,11 +3,11 @@
 set -u
 
 APP_SUPPORT_DIR="${HOME}/Library/Application Support/EventInspector"
-MANIFEST_URL="https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/remote_manifest.json"
-TARGET_VERSION="2026-08-19-1-2.5.0-43"
+MANIFEST_URL="https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/remote_manifest.json"
+TARGET_VERSION="2026-08-20-1-2.5.0-47"
 
 echo "Event Inspector update reset (macOS)"
-echo "Target release: v2.5.0(43)"
+echo "Target release: v2.5.0(47)"
 echo "Target folder: ${APP_SUPPORT_DIR}"
 echo
 echo "Make sure Event Inspector is fully closed before continuing."
@@ -57,8 +57,8 @@ cat > "${CONFIG_FILE_V250}" <<JSON
   "manifest_url": "${MANIFEST_URL}",
   "manifest_urls": [
     "${MANIFEST_URL}",
-    "https://github.com/trucbm/Eventchecker/raw/2.5.0/Updates_2_5/remote_manifest.json",
-    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/remote_manifest.json"
+    "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/remote_manifest.json",
+    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_5/remote_manifest.json"
   ],
   "timeout_sec": 15,
   "min_interval_sec": 0
@@ -82,6 +82,7 @@ cat > "${STATE_FILE_V250}" <<JSON
     "services_checker/bundletool-all-1.18.1.jar",
     "services_checker/apk_check_presets.json",
     "services_checker/gradle_check_presets.json",
+    "services_checker/gradle_lib_mapping.json",
     "services_checker/podfile_check_presets.json",
     "services_checker/manifest_check_presets.json"
   ]

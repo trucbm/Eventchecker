@@ -5,12 +5,12 @@ rem Official Windows update reset for the v2.5.0 channel.
 rem Use this only while Event Inspector is fully closed.
 
 set "APP_SUPPORT_DIR=%LOCALAPPDATA%\EventInspector"
-set "MANIFEST_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/remote_manifest.json"
-set "TARGET_VERSION=2026-08-19-1-2.5.0-44"
+set "MANIFEST_URL=https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/remote_manifest.json"
+set "TARGET_VERSION=2026-08-20-1-2.5.0-47"
 set "UPDATES_DIR_V250=%APP_SUPPORT_DIR%\updates_v250"
 
 echo Event Inspector update reset (Windows)
-echo Target release: v2.5.0(44)
+echo Target release: v2.5.0(47)
 echo Target folder: %APP_SUPPORT_DIR%
 echo.
 echo Make sure Event Inspector is fully closed before continuing.
@@ -51,8 +51,8 @@ for %%C in (v230 v240 v250) do (
   echo   "manifest_url": "%MANIFEST_URL%",
   echo   "manifest_urls": [
   echo     "%MANIFEST_URL%",
-  echo     "https://github.com/trucbm/Eventchecker/raw/2.5.0/Updates_2_5/remote_manifest.json",
-  echo     "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/remote_manifest.json"
+  echo     "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/remote_manifest.json",
+  echo     "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_5/remote_manifest.json"
   echo   ],
   echo   "timeout_sec": 15,
   echo   "min_interval_sec": 0
@@ -76,6 +76,7 @@ echo Wrote: %APP_SUPPORT_DIR%\remote_update_config_v250.json
   echo     "services_checker/bundletool-all-1.18.1.jar",
   echo     "services_checker/apk_check_presets.json",
   echo     "services_checker/gradle_check_presets.json",
+  echo     "services_checker/gradle_lib_mapping.json",
   echo     "services_checker/podfile_check_presets.json",
   echo     "services_checker/manifest_check_presets.json"
   echo   ]

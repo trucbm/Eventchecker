@@ -96,7 +96,7 @@ def _payload_path_candidates(manifest_path: Path, item: dict) -> List[Path]:
 
 def _valid_payload_urls(manifest_path: Path, rel_path: str, payload_path: Path) -> set[str]:
     repo_rel = payload_path.relative_to(ROOT).as_posix()
-    branch = "2.5.0" if manifest_path.parent.name == "Updates_2_5" else "main"
+    branch = "main"
     return {
         f"https://github.com/trucbm/Eventchecker/raw/{branch}/{repo_rel}",
         f"https://raw.githubusercontent.com/trucbm/Eventchecker/{branch}/{repo_rel}",
@@ -524,7 +524,7 @@ def test_sdk_check_preset_contract() -> None:
     _assert("def _fetch_sdk_check_presets(force_remote=False):" in source_text, "SDK preset force refresh support is missing")
     _assert("refresh_requested = request.args.get(\"refresh\"" in source_text, "SDK preset refresh query is missing")
     _assert("force_remote=refresh_requested" in source_text, "SDK preset endpoint must honor forced refresh")
-    _assert("2.5.0/sdk_check_presets.json" in source_text, "SDK preset release fallback URL is missing")
+    _assert("main/sdk_check_presets.json" in source_text, "SDK preset main fallback URL is missing")
 
 
 def test_rendered_sdk_preset_javascript_contract() -> None:
@@ -565,12 +565,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(44)" in text, "Log_checker.py must be prepared for v2.5.0(44)")
+    _assert("v2.5.0(47)" in text, "Log_checker.py must be prepared for v2.5.0(47)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(44)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(47)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -704,11 +704,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-19-1-2.5.0-44", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-20-1-2.5.0-47", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(44\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(47\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -762,6 +762,7 @@ def test_update_candidate_does_not_downgrade() -> None:
 
 def test_services_checker_gradle_mapping_contract() -> None:
     service_source = (ROOT / "services_checker" / "app.py").read_text(encoding="utf-8")
+    gradle_mapping = json.loads((ROOT / "services_checker" / "gradle_lib_mapping.json").read_text(encoding="utf-8"))
     gradle_presets = json.loads((ROOT / "services_checker" / "gradle_check_presets.json").read_text(encoding="utf-8"))
     podfile_presets = json.loads((ROOT / "services_checker" / "podfile_check_presets.json").read_text(encoding="utf-8"))
     c190_gradle_lines = gradle_presets.get("C-190-Android", {}).get("lines") or []
@@ -785,11 +786,9 @@ def test_services_checker_gradle_mapping_contract() -> None:
         ],
         "C-180 iOS Podfile preset changed",
     )
-    _assert_equal(
-        service_source.count("GRADLE_LIB_MAPPING ="),
-        1,
-        "Services Checker must have one authoritative Gradle mapping",
-    )
+    _assert("gradle_lib_mapping.json" in service_source, "Services Checker Gradle mapping file is missing")
+    _assert("def _load_gradle_lib_mapping(" in service_source, "Services Checker Gradle mapping loader is missing")
+    _assert("GRADLE_LIB_MAPPING =" not in service_source, "Gradle mapping must not remain hardcoded in app.py")
     _assert_equal(
         service_source.count("def scan_gradle_for_versions("),
         1,
@@ -814,6 +813,7 @@ def test_services_checker_gradle_mapping_contract() -> None:
         "import requests",
         "SERVICES_CHECKER_PRESET_BRANCHES",
         "SERVICES_CHECKER_PRESET_FILENAMES",
+        "SERVICES_CHECKER_REMOTE_DATA_FILENAMES",
         "def _remote_preset_urls(",
         "requests.get(",
         "response.raise_for_status()",
@@ -842,16 +842,20 @@ def test_services_checker_gradle_mapping_contract() -> None:
     _assert("'gradle_presets': gradle_presets" in service_source, "Gradle preset API group is missing")
     _assert("'podfile_presets': podfile_presets" in service_source, "Podfile preset API group is missing")
     required_mappings = {
-        '"LINE Ads adapter": "com.unity3d.ads-mediation:line-adapter"',
-        '"Adjust Meta Referrer": "com.adjust.sdk:adjust-android-meta-referrer"',
-        '"Adjust Samsung Referrer": "com.adjust.sdk:adjust-android-samsung-referrer"',
-        '"Adjust Vivo Referrer": "com.adjust.sdk:adjust-android-vivo-referrer"',
-        '"Adjust Xiaomi Referrer": "com.adjust.sdk:adjust-android-xiaomi-referrer"',
-        '"Xiaomi Install Referrer": "com.miui.referrer:homereferrer"',
-        '"Samsung Install Referrer": "store.galaxy.samsung.installreferrer:samsung_galaxystore_install_referrer"',
+        "LINE Ads adapter": "com.unity3d.ads-mediation:line-adapter",
+        "Adjust Meta Referrer": "com.adjust.sdk:adjust-android-meta-referrer",
+        "Adjust Samsung Referrer": "com.adjust.sdk:adjust-android-samsung-referrer",
+        "Adjust Vivo Referrer": "com.adjust.sdk:adjust-android-vivo-referrer",
+        "Adjust Xiaomi Referrer": "com.adjust.sdk:adjust-android-xiaomi-referrer",
+        "Xiaomi Install Referrer": "com.miui.referrer:homereferrer",
+        "Samsung Install Referrer": "store.galaxy.samsung.installreferrer:samsung_galaxystore_install_referrer",
     }
-    for mapping in required_mappings:
-        _assert(mapping in service_source, f"Services Checker mapping missing: {mapping}")
+    for mapping_name, mapping_artifact in required_mappings.items():
+        _assert_equal(
+            gradle_mapping.get(mapping_name),
+            mapping_artifact,
+            f"Services Checker mapping changed or missing: {mapping_name}",
+        )
     for control_id in (
         'id="apk-build-check-preset"',
         'id="gradle-build-check-preset"',
@@ -902,6 +906,8 @@ def test_services_checker_live_preset_refresh_after_restart() -> None:
         calls.append(url)
         _assert("/main/services_checker/" in url, f"preset refresh used a non-main source: {url}")
         filename = url.split("/services_checker/", 1)[1].split("?", 1)[0]
+        if filename == "gradle_lib_mapping.json":
+            return FakeResponse({"Harness Library": f"com.example:harness-{revision['value']}"})
         payload = {
             "C-190-Android": {
                 "platform": "ios" if filename == "podfile_check_presets.json" else "android",
@@ -934,6 +940,11 @@ def test_services_checker_live_preset_refresh_after_restart() -> None:
                 ["manifest_check_presets.json:old"],
                 "first Service Checker start did not load the remote preset",
             )
+            _assert_equal(
+                first._load_gradle_lib_mapping().get("Harness Library"),
+                "com.example:harness-old",
+                "first Services Checker start did not load the remote Gradle mapping",
+            )
 
             revision["value"] = "new"
             second = load_service_module("eventinspector_services_checker_refresh_two")
@@ -946,10 +957,16 @@ def test_services_checker_live_preset_refresh_after_restart() -> None:
                 "Services Checker restart kept the stale per-user preset cache",
             )
             _assert_equal(
+                second._load_gradle_lib_mapping().get("Harness Library"),
+                "com.example:harness-new",
+                "Services Checker restart kept the stale Gradle mapping cache",
+            )
+            _assert_equal(
                 set(second_data["refreshed_files"]),
                 {
                     "apk_check_presets.json",
                     "gradle_check_presets.json",
+                    "gradle_lib_mapping.json",
                     "podfile_check_presets.json",
                     "manifest_check_presets.json",
                 },
@@ -978,6 +995,7 @@ def test_services_checker_git_value_reload_from_real_commit() -> None:
     preset_filenames = (
         "apk_check_presets.json",
         "gradle_check_presets.json",
+        "gradle_lib_mapping.json",
         "podfile_check_presets.json",
         "manifest_check_presets.json",
     )
@@ -1009,13 +1027,16 @@ def test_services_checker_git_value_reload_from_real_commit() -> None:
 
             def write_presets(revision):
                 for filename in preset_filenames:
-                    payload = {
-                        "C-190-Android": {
-                            "platform": "ios" if filename == "podfile_check_presets.json" else "android",
-                            "lines": [f"{filename}:{revision}"],
-                            "harness_marker": revision,
+                    if filename == "gradle_lib_mapping.json":
+                        payload = {"Harness Library": f"com.example:harness-{revision}"}
+                    else:
+                        payload = {
+                            "C-190-Android": {
+                                "platform": "ios" if filename == "podfile_check_presets.json" else "android",
+                                "lines": [f"{filename}:{revision}"],
+                                "harness_marker": revision,
+                            }
                         }
-                    }
                     (repo / "services_checker" / filename).write_text(
                         json.dumps(payload, sort_keys=True),
                         encoding="utf-8",
@@ -1053,6 +1074,11 @@ def test_services_checker_git_value_reload_from_real_commit() -> None:
                 "commit-one",
                 "client did not receive the first committed Git value",
             )
+            _assert_equal(
+                module._load_gradle_lib_mapping().get("Harness Library"),
+                "com.example:harness-commit-one",
+                "client did not receive the first committed Gradle mapping",
+            )
             first_digest = first_data["loaded_preset_files"]["manifest_check_presets.json"]["sha256"]
             _assert_equal(
                 first_data["refreshed_sources"]["manifest_check_presets.json"],
@@ -1073,6 +1099,11 @@ def test_services_checker_git_value_reload_from_real_commit() -> None:
                 second_data["manifest_presets"]["C-190-Android"]["harness_marker"],
                 "commit-two",
                 "client kept the old preset value after a real Git commit changed",
+            )
+            _assert_equal(
+                module._load_gradle_lib_mapping().get("Harness Library"),
+                "com.example:harness-commit-two",
+                "client kept the old Gradle mapping after a real Git commit changed",
             )
             second_digest = second_data["loaded_preset_files"]["manifest_check_presets.json"]["sha256"]
             _assert(first_digest != second_digest, "client preset hash did not change after Git commit")
@@ -1244,18 +1275,22 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-19-1-2.5.0-44", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-20-1-2.5.0-47", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 44, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 47, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
-                not os.path.exists(os.path.join(prepared["update_dir"], "services_checker", "bundletool-all-1.18.1.jar")),
-                "large bundletool asset must not be required in the remote update payload",
+                os.path.exists(os.path.join(prepared["update_dir"], "services_checker", "bundletool-all-1.18.1.jar")),
+                "prepared bundletool asset missing from the remote update payload",
             )
             _assert(
                 os.path.exists(os.path.join(prepared["update_dir"], "services_checker", "manifest_check_presets.json")),
                 "prepared manifest preset payload missing",
+            )
+            _assert(
+                os.path.exists(os.path.join(prepared["update_dir"], "services_checker", "gradle_lib_mapping.json")),
+                "prepared Gradle mapping payload missing",
             )
             _assert(
                 os.path.exists(os.path.join(prepared["update_dir"], "services_checker", "axml_fallback.py")),
@@ -1363,6 +1398,7 @@ def test_build_scripts_clean_outputs() -> None:
         "services_checker/bundletool-all-1.18.1.jar",
         "services_checker/apk_check_presets.json",
         "services_checker/gradle_check_presets.json",
+        "services_checker/gradle_lib_mapping.json",
         "services_checker/podfile_check_presets.json",
         "services_checker/manifest_check_presets.json",
         "services_checker/my-key.keystore",
@@ -1388,6 +1424,7 @@ def test_build_scripts_clean_outputs() -> None:
         "services_checker\\bundletool-all-1.18.1.jar",
         "services_checker\\apk_check_presets.json",
         "services_checker\\gradle_check_presets.json",
+        "services_checker\\gradle_lib_mapping.json",
         "services_checker\\podfile_check_presets.json",
         "services_checker\\manifest_check_presets.json",
         "services_checker\\my-key.keystore",
@@ -1406,6 +1443,7 @@ def test_build_scripts_clean_outputs() -> None:
         "services_checker/bundletool-all-1.18.1.jar",
         "services_checker/apk_check_presets.json",
         "services_checker/gradle_check_presets.json",
+        "services_checker/gradle_lib_mapping.json",
         "services_checker/podfile_check_presets.json",
         "services_checker/manifest_check_presets.json",
         "services_checker/my-key.keystore",
@@ -1432,8 +1470,8 @@ def test_windows_release_build_version_contract() -> None:
     installer_script = (ROOT / "build" / "windows" / "build_windows.bat").read_text(encoding="utf-8", errors="ignore")
     iss_script = (ROOT / "build" / "windows" / "EventChecker.iss").read_text(encoding="utf-8", errors="ignore")
 
-    _assert('default: "2.5.0"' in workflow, "Windows workflow must default to the v2.5 release ref")
-    _assert("ref: ${{ inputs.source_ref || '2.5.0' }}" in workflow, "Windows workflow must checkout the requested v2.5 ref")
+    _assert('default: "main"' in workflow, "Windows workflow must default to the main source ref")
+    _assert("ref: ${{ inputs.source_ref || 'main' }}" in workflow, "Windows workflow must checkout the requested main source ref")
     _assert("Verify Portable ZIP version" in workflow, "Windows workflow must verify the portable ZIP")
     _assert("EventInspector-Windows-v${{ steps.release.outputs.release_version }}" in workflow, "Windows artifacts must be versioned")
     _assert('[switch]$PrintVersion' in source_guard, "Windows source guard must expose the resolved version")
@@ -1443,13 +1481,13 @@ def test_windows_release_build_version_contract() -> None:
     _assert("EventInspector.exe" in bundle_guard, "Windows bundle guard must require the executable")
     _assert("-PrintVersion" in installer_script, "Windows installer must derive its version from the source")
     _assert("/DMyAppVersion=%EVENTINSPECTOR_RELEASE_VERSION%" in installer_script, "Inno Setup must receive the source version")
-    _assert('#define MyAppVersion "2.5.0.44"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
+    _assert('#define MyAppVersion "2.5.0.47"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
 
 
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-19-1-2.5.0-44' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-20-1-2.5.0-47' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
@@ -1472,6 +1510,10 @@ def test_services_checker_bridge_contract() -> None:
         _assert("subprocess.Popen" in payload_source, "Services Checker launcher missing")
         _assert("_services_checker_ready" in payload_source, "Services Checker readiness check missing")
         _assert("_prepare_services_checker_runtime" in payload_source, "Services Checker bundle import preparation missing")
+        _assert("_services_checker_resource_roots" in payload_source, "Services Checker resource layout resolver missing")
+        _assert("_services_checker_bundled_resource_root" in payload_source, "Services Checker complete resource contract missing")
+        _assert("EVENTINSPECTOR_BUNDLETOOL_PATH" in payload_source, "Services Checker bundletool path pin missing")
+        _assert("SERVICES_CHECKER_REQUIRED_RESOURCES" in payload_source, "Services Checker required resource list missing")
         _assert('importlib.import_module("androguard.core.axml")' in payload_source, "Services Checker androguard preload missing")
         _assert("_services_checker_saved_host_path" in payload_source, "saved host override missing")
         _assert("/api/services-checker/host" in payload_source, "host replacement API missing")
@@ -1524,6 +1566,59 @@ def test_services_checker_bridge_contract() -> None:
     _assert(key_path.is_file() and key_path.stat().st_size > 0, "bundled test keystore is missing")
 
 
+def test_services_checker_resource_contract_is_platform_neutral() -> None:
+    source = (ROOT / "Log_checker.py").read_text(encoding="utf-8")
+    helper_start = source.index("def _services_checker_resource_roots")
+    helper_end = source.index("def _prepare_services_checker_runtime")
+    helper_source = source[helper_start:helper_end].lower()
+    for forbidden in ("sys.platform", "platform.system", "os.name", '"darwin"', '"windows"'):
+        _assert(forbidden not in helper_source, f"resource resolver must not infer platform from {forbidden}")
+
+    previous_root = os.environ.get("EVENTINSPECTOR_BUNDLED_SERVICES_ROOT")
+    previous_bundletool = os.environ.get("EVENTINSPECTOR_BUNDLETOOL_PATH")
+    try:
+        for layout in (
+            Path("mac-artifact") / "Contents" / "Resources" / "services_checker",
+            Path("windows-artifact") / "_internal" / "services_checker",
+        ):
+            with tempfile.TemporaryDirectory(prefix="eventchecker-resource-contract-") as temp_dir:
+                resource_root = Path(temp_dir) / layout
+                resource_root.mkdir(parents=True)
+                (resource_root / "bundletool-all-1.18.1.jar").write_bytes(b"bundletool")
+                (resource_root / "my-key.keystore").write_bytes(b"keystore")
+                app_path = resource_root / "app.py"
+                app_path.write_text("# test app\n", encoding="utf-8")
+                os.environ["EVENTINSPECTOR_BUNDLED_SERVICES_ROOT"] = str(resource_root)
+                os.environ.pop("EVENTINSPECTOR_BUNDLETOOL_PATH", None)
+
+                resolved_root = lc._services_checker_bundled_resource_root(str(app_path))
+                _assert_equal(
+                    Path(resolved_root).resolve(),
+                    resource_root.resolve(),
+                    f"resource resolver must use the declared {layout} layout",
+                )
+                lc._prepare_services_checker_runtime(str(app_path))
+                _assert_equal(
+                    Path(os.environ["EVENTINSPECTOR_BUNDLED_SERVICES_ROOT"]).resolve(),
+                    resource_root.resolve(),
+                    "runtime must pin the complete resource root",
+                )
+                _assert_equal(
+                    Path(os.environ["EVENTINSPECTOR_BUNDLETOOL_PATH"]).resolve(),
+                    (resource_root / "bundletool-all-1.18.1.jar").resolve(),
+                    "runtime must pin bundletool inside the same resource root",
+                )
+    finally:
+        if previous_root is None:
+            os.environ.pop("EVENTINSPECTOR_BUNDLED_SERVICES_ROOT", None)
+        else:
+            os.environ["EVENTINSPECTOR_BUNDLED_SERVICES_ROOT"] = previous_root
+        if previous_bundletool is None:
+            os.environ.pop("EVENTINSPECTOR_BUNDLETOOL_PATH", None)
+        else:
+            os.environ["EVENTINSPECTOR_BUNDLETOOL_PATH"] = previous_bundletool
+
+
 def test_native_download_contract() -> None:
     source = (ROOT / "desktop_app.py").read_text(encoding="utf-8")
     configure_marker = "webview.settings['ALLOW_DOWNLOADS'] = True"
@@ -1534,6 +1629,32 @@ def test_native_download_contract() -> None:
 
     service_path = ROOT / "services_checker" / "app.py"
     service_source = service_path.read_text(encoding="utf-8", errors="ignore")
+    _assert("def _resolve_bundletool_path()" in service_source, "AAB converter bundletool resolver is missing")
+    _assert("def _resolve_keystore_path()" in service_source, "AAB converter keystore resolver is missing")
+    _assert(
+        "bundletool_path = _resolve_bundletool_path()" in service_source,
+        "AAB conversion must resolve bundletool at request time",
+    )
+    _assert(
+        "final_ks_path = _resolve_keystore_path()" in service_source,
+        "AAB conversion must resolve the keystore at request time",
+    )
+    _assert(
+        "BUNDLETOOL_PATH" not in service_source[service_source.index("def convert_aab_to_apk"):service_source.index("@app.route('/download/<filename>')")],
+        "AAB conversion route must not use the import-time bundletool path",
+    )
+    _assert(
+        "def _cleanup_stale_conversion_artifacts()" in service_source,
+        "AAB conversion must clean abandoned generated artefacts",
+    )
+    _assert(
+        "_cleanup_stale_conversion_artifacts()" in service_source[service_source.index("def convert_aab_to_apk"):service_source.index("@app.route('/download/<filename>')")],
+        "AAB conversion must clean abandoned artefacts before bundletool runs",
+    )
+    _assert(
+        "_remove_generated_file(source_path)" in service_source,
+        "Native APK save must remove the generated source after copying",
+    )
     _assert("@app.route('/download/<filename>')" in service_source, "Services Checker download route is missing")
     _assert("as_attachment=True" in service_source, "Services Checker download route must return an attachment")
     _assert(
@@ -1541,12 +1662,60 @@ def test_native_download_contract() -> None:
         "Services Checker native save route is missing",
     )
     _assert(
-        "'/save_download/' + encodeURIComponent(apkFilename)" in service_source,
-        "AAB download button must use the native-safe save route",
+        "def _copy_generated_file_to_downloads" in service_source,
+        "AAB conversion must provide a platform-native Downloads save helper",
+    )
+    conversion_start = service_source.index("def convert_aab_to_apk()")
+    download_route_start = service_source.index("@app.route('/download/<filename>')")
+    conversion_source = service_source[conversion_start:download_route_start]
+    _assert(
+        "def _write_zip_member_to_downloads" in service_source,
+        "AAB conversion must have a direct Downloads writer",
     )
     _assert(
-        "downloadLink.addEventListener('click'" in service_source,
-        "AAB download button must handle native WebView clicks",
+        "download_apk_path, saved_filename = _write_zip_member_to_downloads(" in conversion_source,
+        "AAB conversion must write universal.apk directly to Downloads",
+    )
+    _assert(
+        "'saved_to_downloads': True" in conversion_source,
+        "AAB conversion response must confirm the direct Downloads save",
+    )
+    _assert(
+        "session.setdefault('downloadable_files', {})[final_apk_filename]" not in conversion_source,
+        "Final APK must not be staged in the Flask session download cache",
+    )
+    _assert(
+        "final_apk_savelocation" not in conversion_source,
+        "Final APK must not be staged in UPLOAD_FOLDER",
+    )
+    _assert(
+        "'apk_download_url'" not in conversion_source,
+        "AAB conversion must not fall back to a temporary browser download URL",
+    )
+    _assert(
+        "const saved_to_downloads" not in service_source,
+        "AAB conversion UI must require the direct Downloads result",
+    )
+    _assert(
+        "APK saved directly to Downloads:" in service_source,
+        "AAB conversion UI must show the direct Downloads result",
+    )
+
+
+def test_gradle_comparison_hides_unlisted_preset_rows() -> None:
+    service_source = (ROOT / "services_checker" / "app.py").read_text(encoding="utf-8", errors="ignore")
+    _assert(
+        'if (archiveType !== "Gradle") {' in service_source,
+        "Gradle comparison must hide mapped libraries outside the selected preset",
+    )
+    _assert(
+        "INFO (Found in ' + archiveType + ', not in expected list)" in service_source,
+        "non-Gradle comparisons must retain informational unlisted-library rows",
+    )
+    _assert(
+        "gradle_mapping = _load_gradle_lib_mapping()" in service_source
+        and "found_versions = scan_gradle_for_versions(gradle_content, gradle_mapping)" in service_source,
+        "Gradle scanner must continue scanning the complete loaded mapping",
     )
 
 
@@ -1577,7 +1746,9 @@ TESTS: List[Callable[[], None]] = [
     test_windows_release_build_version_contract,
     test_windows_update_recovery_script,
     test_services_checker_bridge_contract,
+    test_services_checker_resource_contract_is_platform_neutral,
     test_native_download_contract,
+    test_gradle_comparison_hides_unlisted_preset_rows,
 ]
 
 
