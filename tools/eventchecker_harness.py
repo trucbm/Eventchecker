@@ -565,12 +565,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(47)" in text, "Log_checker.py must be prepared for v2.5.0(47)")
+    _assert("v2.5.0(48)" in text, "Log_checker.py must be prepared for v2.5.0(48)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(47)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(48)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -731,13 +731,111 @@ def test_levelplay_impression_data_callback_contract() -> None:
             ["LevelPlayImpressionData - Banner", "LevelPlayImpressionData - Rewarded", "LevelPlayImpressionData - Interstitial"],
             "LevelPlay impression callback names do not include the ad unit",
         )
-        _assert(all(row["type"] == "Callback" for row in rows), "LevelPlay impression mapper rows must use the LevelPlay callback filter")
+        _assert(all(row["type"] == "Callback Levelplay" for row in rows), "LevelPlay impression mapper rows must use the LevelPlay callback filter")
         _assert(all("LevelPlayAdImpressionEventMapper->Map" in row["raw_log"] for row in rows), "LevelPlay impression raw logs were not preserved")
         _assert_equal(len(emitted), 3, "LevelPlay impression callbacks were not emitted to the Callback tab")
 
         # Existing LevelPlay listener callbacks must keep their old display name.
         lc.process_callback_and_ad_event_log("Unity LevelPlayInterstitialAdListener", "device-levelplay")
         _assert_equal(lc.callback_ad_logs[-1]["event_name"], "Interstitial", "existing LevelPlay listener name changed")
+    finally:
+        lc.is_paused = original_paused
+        lc.callback_ad_logs.clear()
+        lc.callback_ad_logs.extend(original_rows)
+        lc.socketio.emit = original_emit
+
+
+def test_ascendx_cloudx_callback_contract() -> None:
+    source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    compatibility_source = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    required_markers = (
+        "_OnAdLoadedEvent",
+        "_OnAdImpressionEvent",
+        "_OnAdDisplayedEvent",
+        "_OnAdClickedEvent",
+        "_OnAdClosedEvent",
+        "_OnAdReceivedRewardEvent",
+        "OnAdLoadFailed",
+        "OnAdLoadSuccess",
+        "OnAdRevenuePaid",
+        "OnAdClicked",
+        "OnAdShowSuccess",
+        "OnAdRewarded",
+        "OnAdHidden",
+        'value="ascendx_callback"',
+        'value="cloudx_callback"',
+        "Callback Ascendx",
+        "Callback Cloudx",
+        "Callback Levelplay",
+        'id="callbackTypeAll" name="callbackType" type="checkbox"',
+        'id="callbackTypeCallback" name="callbackType" type="checkbox"',
+        'id="callbackTypeAscendx" name="callbackType" type="checkbox"',
+        'id="callbackTypeCloudx" name="callbackType" type="checkbox"',
+        'id="callbackTypeGadsme" name="callbackType" type="checkbox"',
+        'id="callbackTypeAdverty5" name="callbackType" type="checkbox"',
+        "selectedTypeFilters",
+        "bindCallbackCheckboxGroup",
+        'details-cell text-sm align-top"><div class="max-h-64 overflow-auto">${res.details}',
+        'log-cell text-xs font-normal text-gray-600 align-top"><div class="max-h-64 overflow-auto whitespace-pre-wrap break-all">',
+    )
+    for marker in required_markers:
+        _assert(marker in source_text, f"AscendX/CloudX callback contract is missing: {marker}")
+        _assert(marker in compatibility_source, f"compatibility AscendX/CloudX callback contract is missing: {marker}")
+
+    original_paused = lc.is_paused
+    original_emit = lc.socketio.emit
+    original_rows = list(lc.callback_ad_logs)
+    emitted = []
+    try:
+        lc.is_paused = False
+        lc.callback_ad_logs.clear()
+        lc.socketio.emit = lambda event, payload: emitted.append((event, payload))
+
+        for callback_event in lc.ASCENDX_CALLBACK_EVENTS:
+            ad_unit = "Reward" if callback_event == "_OnAdReceivedRewardEvent" else "Interstitial"
+            line = f"Unity [Ad,AscendX,{ad_unit}] {callback_event}"
+            lc.process_callback_and_ad_event_log(line, "device-callback")
+
+        for callback_event in lc.CLOUDX_CALLBACK_EVENTS:
+            ad_unit = "Reward" if callback_event == "OnAdRewarded" else "Interstitial"
+            line = f"Unity [Ad,CloudX,{ad_unit}] {callback_event}"
+            lc.process_callback_and_ad_event_log(line, "device-callback")
+
+        rows = list(lc.callback_ad_logs)
+        _assert_equal(len(rows), len(lc.ASCENDX_CALLBACK_EVENTS) + len(lc.CLOUDX_CALLBACK_EVENTS), "provider callback row count changed")
+        _assert_equal(
+            [row["type"] for row in rows[:len(lc.ASCENDX_CALLBACK_EVENTS)]],
+            ["Callback Ascendx"] * len(lc.ASCENDX_CALLBACK_EVENTS),
+            "AscendX callback rows use the wrong filter type",
+        )
+        _assert_equal(
+            [row["type"] for row in rows[len(lc.ASCENDX_CALLBACK_EVENTS):]],
+            ["Callback Cloudx"] * len(lc.CLOUDX_CALLBACK_EVENTS),
+            "CloudX callback rows use the wrong filter type",
+        )
+        _assert_equal(rows[0]["event_name"], "_OnAdLoadedEvent - Interstitial", "AscendX ad unit name was not added")
+        _assert_equal(rows[5]["event_name"], "_OnAdReceivedRewardEvent - Reward", "AscendX reward name was not added")
+        _assert_equal(rows[6]["event_name"], "OnAdLoadFailed - Interstitial", "CloudX ad unit name was not added")
+        _assert_equal(rows[11]["event_name"], "OnAdRewarded - Reward", "CloudX reward name was not added")
+        _assert(all(row["raw_log"].startswith("Unity [Ad,") for row in rows), "provider callback raw logs were not preserved")
+        _assert_equal(len(emitted), len(rows), "provider callbacks were not emitted to the Callback tab")
+
+        rendered = lc.app.test_client().get("/").get_data(as_text=True)
+        for marker in (
+            'id="callbackTypeAscendx"',
+            'id="callbackTypeCloudx"',
+            'value="ascendx_callback"',
+            'value="cloudx_callback"',
+        ):
+            _assert(marker in rendered, f"rendered callback filter is missing: {marker}")
+        ordered_filters = [
+            rendered.index('id="callbackTypeCallback"'),
+            rendered.index('id="callbackTypeAscendx"'),
+            rendered.index('id="callbackTypeCloudx"'),
+            rendered.index('id="callbackTypeGadsme"'),
+            rendered.index('id="callbackTypeAdverty5"'),
+        ]
+        _assert_equal(ordered_filters, sorted(ordered_filters), "callback filters are not grouped in the requested order")
     finally:
         lc.is_paused = original_paused
         lc.callback_ad_logs.clear()
@@ -758,11 +856,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-20-1-2.5.0-47", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-20-1-2.5.0-48", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(47\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(48\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -1347,9 +1445,9 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-20-1-2.5.0-47", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-20-1-2.5.0-48", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 47, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 48, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
@@ -1553,13 +1651,13 @@ def test_windows_release_build_version_contract() -> None:
     _assert("EventInspector.exe" in bundle_guard, "Windows bundle guard must require the executable")
     _assert("-PrintVersion" in installer_script, "Windows installer must derive its version from the source")
     _assert("/DMyAppVersion=%EVENTINSPECTOR_RELEASE_VERSION%" in installer_script, "Inno Setup must receive the source version")
-    _assert('#define MyAppVersion "2.5.0.47"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
+    _assert('#define MyAppVersion "2.5.0.48"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
 
 
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-20-1-2.5.0-47' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-20-1-2.5.0-48' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
@@ -1807,6 +1905,7 @@ TESTS: List[Callable[[], None]] = [
     test_price_rotation_exact_parser,
     test_load_ads_provider_contract,
     test_levelplay_impression_data_callback_contract,
+    test_ascendx_cloudx_callback_contract,
     test_release_payload_sync,
     test_update_candidate_does_not_downgrade,
     test_services_checker_gradle_mapping_contract,

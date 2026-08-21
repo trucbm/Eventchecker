@@ -33,7 +33,7 @@ from pathlib import Path
 from queue import Empty, Queue
 
 # Compatibility marker for the 2.4 desktop shell and the current handoff.
-LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(47)"
+LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(48)"
 
 # Khởi tạo ứng dụng Flask và SocketIO
 app = Flask(__name__)
@@ -1257,7 +1257,33 @@ IOS_FIREBASE_EVENT_PATTERN = re.compile(
     re.IGNORECASE
 )
 LEVELPLAY_IMPRESSION_DATA_MAPPER_KEYWORD = "LevelPlayAdImpressionEventMapper->Map"
-CALLBACK_LOG_PATTERN = re.compile(r"(LevelPlayAdImpressionEventMapper->Map|_OnImpressionDataReadyEvent|_OnLevelPlayImpressionDataReadyEvent|LevelPlayInterstitialAdListener|LevelPlayBannerAdViewListener|LevelPlayRewardedAdListener|Receive Ironsource Impression Data LevelPlayImpressionData)")
+ASCENDX_CALLBACK_EVENTS = (
+    "_OnAdLoadedEvent",
+    "_OnAdImpressionEvent",
+    "_OnAdDisplayedEvent",
+    "_OnAdClickedEvent",
+    "_OnAdClosedEvent",
+    "_OnAdReceivedRewardEvent",
+)
+CLOUDX_CALLBACK_EVENTS = (
+    "OnAdLoadFailed",
+    "OnAdLoadSuccess",
+    "OnAdRevenuePaid",
+    "OnAdClicked",
+    "OnAdShowSuccess",
+    "OnAdRewarded",
+    "OnAdHidden",
+)
+CALLBACK_LOG_PATTERN = re.compile(
+    r"(LevelPlayAdImpressionEventMapper->Map|_OnImpressionDataReadyEvent|"
+    r"_OnLevelPlayImpressionDataReadyEvent|LevelPlayInterstitialAdListener|"
+    r"LevelPlayBannerAdViewListener|LevelPlayRewardedAdListener|"
+    r"Receive Ironsource Impression Data LevelPlayImpressionData|"
+    r"_OnAdLoadedEvent|_OnAdImpressionEvent|_OnAdDisplayedEvent|"
+    r"_OnAdClickedEvent|_OnAdClosedEvent|_OnAdReceivedRewardEvent|"
+    r"OnAdLoadFailed|OnAdLoadSuccess|OnAdRevenuePaid|OnAdClicked|"
+    r"OnAdShowSuccess|OnAdRewarded|OnAdHidden)"
+)
 ADREVENUE_LOG_PATTERN = re.compile(r"AdRevenue Received:\s*AdRevenue\{(.*)\}")
 APPSFLYER_ADREVENUE_PATTERN = re.compile(r"\b(ADREVENUE)-\d+:\s*preparing data:\s*(\{.*\})", re.IGNORECASE)
 SDK_CHECK_SEARCH_PATTERN = re.compile(r'"search_pattern"\s*:\s*["\'](.*?)["\']')
@@ -2445,6 +2471,69 @@ def _levelplay_impression_data_event_name(data):
             break
     return f"LevelPlayImpressionData - {ad_unit_name}" if ad_unit_name else "LevelPlayImpressionData"
 
+
+def _find_named_callback_event(log_entry, event_names):
+    raw_log = str(log_entry or "")
+    return next((event_name for event_name in event_names if event_name in raw_log), "")
+
+
+def _named_callback_ad_unit_label(log_entry, event_name=""):
+    """Resolve the Reward/Interstitial suffix used by AscendX and CloudX callbacks."""
+    if event_name in {"_OnAdReceivedRewardEvent", "OnAdRewarded"}:
+        return "Reward"
+
+    raw_log = str(log_entry or "")
+    json_str = extract_json_object_from_text(raw_log)
+    if json_str:
+        data = _parse_callback_json_payload(json_str)
+        if data is not None:
+            for key in ("adUnitName", "mediationAdUnitName", "adUnit", "adFormat", "ad_format", "format"):
+                value = _find_first_key_deep(data, {key})
+                label = _normalize_ad_format_label(value)
+                if label in {"Reward", "Interstitial"}:
+                    return label
+
+    lowered = raw_log.lower()
+    if re.search(r"\binterstitial\b", lowered):
+        return "Interstitial"
+    if re.search(r"\breward(?:ed)?\b|rewarded[_ -]?video", lowered):
+        return "Reward"
+    return ""
+
+
+def _record_named_provider_callback(log_entry, device_id, event_name, callback_type):
+    after_keyword = str(log_entry or "").split(event_name, 1)[1].strip()
+    json_str = extract_json_object_from_text(after_keyword)
+    details = "Callback fired"
+    json_data_for_log = "{}"
+    if json_str:
+        data = _parse_callback_json_payload(json_str)
+        if data is not None:
+            details = format_json_html(data)
+            json_data_for_log = json.dumps(data, ensure_ascii=False)
+        else:
+            details = (
+                '<div class="text-xs font-mono break-all text-red-600">JSON Parse Error</div>'
+                f'<div class="text-xs font-mono break-all">{html.escape(json_str)}</div>'
+            )
+    elif after_keyword:
+        details = f'<div class="text-xs font-mono break-all">{html.escape(after_keyword.lstrip(":").strip())}</div>'
+
+    ad_unit_label = _named_callback_ad_unit_label(log_entry, event_name)
+    display_name = f"{event_name} - {ad_unit_label}" if ad_unit_label else event_name
+    with lock:
+        callback_ad_logs.append({
+            "device_id": device_id,
+            "device_name": get_device_name(device_id),
+            "type": callback_type,
+            "event_name": display_name,
+            "details": details,
+            "raw_log": str(log_entry or "").strip(),
+            "json_data": json_data_for_log,
+        })
+        socketio.emit('update_callback_ad_table', list(callback_ad_logs))
+
+
 def split_top_level_csv(text):
     parts = []
     current = []
@@ -2855,7 +2944,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(47)</title>
+    <title>Event Inspector v2.5.0(48)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -2932,7 +3021,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(47)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(48)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3276,23 +3365,31 @@ HTML_TEMPLATE = """
                             <label class="block text-xs font-medium text-gray-700">Filter by Type:</label>
                             <div class="mt-2 flex flex-wrap lg:flex-nowrap items-center gap-x-4 gap-y-2 text-sm">
                                 <label class="inline-flex items-center whitespace-nowrap">
-                                    <input id="callbackTypeAll" name="callbackType" type="radio" value="all" checked class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <input id="callbackTypeAll" name="callbackType" type="checkbox" value="all" checked class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
                                     <span class="ml-2 text-sm text-gray-900">All</span>
                                 </label>
                                 <label class="inline-flex items-center whitespace-nowrap">
-                                    <input id="callbackTypeCallback" name="callbackType" type="radio" value="callback" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <input id="callbackTypeCallback" name="callbackType" type="checkbox" value="callback" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
                                     <span class="ml-2 text-sm text-gray-900">Callback Levelplay</span>
                                 </label>
                                 <label class="inline-flex items-center whitespace-nowrap">
-                                    <input id="callbackTypeGadsme" name="callbackType" type="radio" value="gadsme_callback" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <input id="callbackTypeAscendx" name="callbackType" type="checkbox" value="ascendx_callback" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">Callback Ascendx</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="callbackTypeCloudx" name="callbackType" type="checkbox" value="cloudx_callback" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">Callback Cloudx</span>
+                                </label>
+                                <label class="inline-flex items-center whitespace-nowrap">
+                                    <input id="callbackTypeGadsme" name="callbackType" type="checkbox" value="gadsme_callback" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
                                     <span class="ml-2 text-sm text-gray-900">Callback Gadsme</span>
                                 </label>
                                 <label class="inline-flex items-center whitespace-nowrap">
-                                    <input id="callbackTypeAdverty5" name="callbackType" type="radio" value="adverty5_callback" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <input id="callbackTypeAdverty5" name="callbackType" type="checkbox" value="adverty5_callback" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
                                     <span class="ml-2 text-sm text-gray-900">Callback Adverty5</span>
                                 </label>
                                 <label class="inline-flex items-center whitespace-nowrap">
-                                    <input id="callbackTypeAdEvent" name="callbackType" type="radio" value="ad_event" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                                    <input id="callbackTypeAdEvent" name="callbackType" type="checkbox" value="ad_event" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
                                     <span class="ml-2 text-sm text-gray-900">Ad Event</span>
                                 </label>
                             </div>
@@ -4468,8 +4565,10 @@ HTML_TEMPLATE = """
             const tbody = document.getElementById('callbackAdTableBody');
             if (!tbody) return;
 
-            // Get filter values
-            const typeFilter = document.querySelector('input[name="callbackType"]:checked').value;
+            // Get filter values. Multiple callback groups can be selected together.
+            const selectedTypeFilters = Array.from(document.querySelectorAll('input[name="callbackType"]:checked'))
+                .map(input => input.value)
+                .filter(value => value !== 'all');
             const textFilter = document.getElementById('callbackAdFilterInput').value.toLowerCase();
 
             const filtered = d.filter(r => {
@@ -4477,10 +4576,15 @@ HTML_TEMPLATE = """
                 if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
 
                 // Type filter
-                if (typeFilter === 'callback' && (r.type === 'Ad Event' || r.type === 'Callback Gadsme' || r.type === 'Callback Adverty5')) return false;
-                if (typeFilter === 'gadsme_callback' && r.type !== 'Callback Gadsme') return false;
-                if (typeFilter === 'adverty5_callback' && r.type !== 'Callback Adverty5') return false;
-                if (typeFilter === 'ad_event' && r.type !== 'Ad Event') return false;
+                const callbackTypeMap = {
+                    callback: 'Callback Levelplay',
+                    gadsme_callback: 'Callback Gadsme',
+                    adverty5_callback: 'Callback Adverty5',
+                    ascendx_callback: 'Callback Ascendx',
+                    cloudx_callback: 'Callback Cloudx',
+                    ad_event: 'Ad Event',
+                };
+                if (selectedTypeFilters.length > 0 && !selectedTypeFilters.some(value => callbackTypeMap[value] === r.type)) return false;
 
                 // Text filter
                 if (textFilter && !r.raw_log.toLowerCase().includes(textFilter)) return false;
@@ -4495,13 +4599,28 @@ HTML_TEMPLATE = """
                      const isFailed = nameLower.includes('failed');
                      const isImpression = nameLower.includes('onimpression') || nameLower.includes('_onimpression');
                      const eventClass = isFailed ? 'text-red-600' : (isImpression ? 'text-blue-600' : '');
-                     return `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold ${res.type==='Ad Event'?'text-orange-600':'text-cyan-600'}">${res.type}</td><td class="py-2 px-3 text-sm font-medium ${eventClass}">${res.event_name}</td><td class="py-2 px-3 details-cell text-sm">${res.details}</td><td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${escapeHTML(res.raw_log || '')}</td><td class="py-2 px-3"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`;
+                     return `<tr class="hover:bg-gray-50 border-b text-sm"><td class="py-2 px-3 text-purple-700 text-sm align-top">${res.device_name}</td><td class="py-2 px-3 text-sm font-semibold align-top ${res.type==='Ad Event'?'text-orange-600':'text-cyan-600'}">${res.type}</td><td class="py-2 px-3 text-sm font-medium align-top ${eventClass}">${res.event_name}</td><td class="py-2 px-3 details-cell text-sm align-top"><div class="max-h-64 overflow-auto">${res.details}</div></td><td class="py-2 px-3 log-cell text-xs font-normal text-gray-600 align-top"><div class="max-h-64 overflow-auto whitespace-pre-wrap break-all">${escapeHTML(res.raw_log || '')}</div></td><td class="py-2 px-3 align-top"><button class="view-json-btn text-xs bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-medium py-1 px-2 rounded" data-json='${escapeAttribute(res.json_data)}'>View JSON</button></td></tr>`;
                  }).join('');
              }
         }
 
         // Add listeners
-        document.querySelectorAll('input[name="callbackType"]').forEach(r => r.addEventListener('change', renderCallbackTable));
+        function bindCallbackCheckboxGroup() {
+            document.querySelectorAll('input[name="callbackType"]').forEach(input => input.addEventListener('change', (event) => {
+                const allInput = document.getElementById('callbackTypeAll');
+                const specificInputs = Array.from(document.querySelectorAll('input[name="callbackType"]'))
+                    .filter(item => item !== allInput);
+                if (event.target === allInput) {
+                    if (allInput.checked) specificInputs.forEach(item => item.checked = false);
+                } else if (event.target.checked) {
+                    allInput.checked = false;
+                } else if (!specificInputs.some(item => item.checked)) {
+                    allInput.checked = true;
+                }
+                renderCallbackTable();
+            }));
+        }
+        bindCallbackCheckboxGroup();
         document.getElementById('callbackAdFilterInput').addEventListener('input', renderCallbackTable);
 
         let lastPriceRotationData = [];
@@ -6600,7 +6719,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
             callback_ad_logs.append({
                 "device_id": device_id,
                 "device_name": get_device_name(device_id),
-                "type": "Callback",
+                "type": "Callback Levelplay",
                 "event_name": display_name,
                 "details": details,
                 "raw_log": log_entry.strip(),
@@ -6634,7 +6753,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
             callback_ad_logs.append({
                 "device_id": device_id,
                 "device_name": get_device_name(device_id),
-                "type": "Callback",
+                "type": "Callback Levelplay",
                 "event_name": display_name,
                 "details": details,
                 "raw_log": log_entry.strip(),
@@ -6643,7 +6762,19 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
             socketio.emit('update_callback_ad_table', list(callback_ad_logs))
         return
 
-    # --- 0c. Process Gadsme callbacks ---
+    # --- 0c. Process AscendX callbacks ---
+    ascendx_event = _find_named_callback_event(log_entry, ASCENDX_CALLBACK_EVENTS)
+    if ascendx_event:
+        _record_named_provider_callback(log_entry, device_id, ascendx_event, "Callback Ascendx")
+        return
+
+    # --- 0d. Process CloudX callbacks ---
+    cloudx_event = _find_named_callback_event(log_entry, CLOUDX_CALLBACK_EVENTS)
+    if cloudx_event:
+        _record_named_provider_callback(log_entry, device_id, cloudx_event, "Callback Cloudx")
+        return
+
+    # --- 0e. Process Gadsme callbacks ---
     if GADSME_SERVICE_KEYWORD in log_entry:
         try:
             after_keyword = log_entry.split(GADSME_SERVICE_KEYWORD, 1)[1]
@@ -6818,7 +6949,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                     callback_ad_logs.append({
                         "device_id": device_id,
                         "device_name": get_device_name(device_id),
-                        "type": "Callback",
+                        "type": "Callback Levelplay",
                         "event_name": display_name,
                         "details": details,
                         "raw_log": current_buffer.strip(),
@@ -6886,7 +7017,7 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                  details = "Listener Fired"
 
         with lock:
-            callback_ad_logs.append({"device_id": device_id, "device_name": get_device_name(device_id), "type": "Callback", "event_name": display_name, "details": details, "raw_log": log_entry.strip(), "json_data": json_data_for_log})
+            callback_ad_logs.append({"device_id": device_id, "device_name": get_device_name(device_id), "type": "Callback Levelplay", "event_name": display_name, "details": details, "raw_log": log_entry.strip(), "json_data": json_data_for_log})
             socketio.emit('update_callback_ad_table', list(callback_ad_logs))
 
 def process_event_validator_log(event_name, actual_params, json_string, log_entry, device_id):
