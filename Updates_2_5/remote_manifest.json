@@ -53,7 +53,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/app.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/app.py"
       ],
-      "sha256": "e30afa3d66ce9a705016f7e987af51fa5cdc3a03e9aa8b69ca1d137212bcfe0d"
+      "sha256": "5a2753f14e94441bea8c516767e2b38ddf5cfacd22c5618713e1ae7f134593c0"
     },
     {
       "path": "services_checker/bundletool-all-1.18.1.jar",
@@ -103,7 +103,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/gradle_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/gradle_check_presets.json"
       ],
-      "sha256": "5c762a7ee4dad22a1a532b1e4dc6db9a40e4a3470c6a7cba2eba39b71cdfae0e"
+      "sha256": "84060b878a8c55f0c38ef7fc9a18ac749cbfd80e89e6b1ef69919d644408a471"
     },
     {
       "path": "services_checker/gradle_lib_mapping.json",
@@ -113,7 +113,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/gradle_lib_mapping.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/gradle_lib_mapping.json"
       ],
-      "sha256": "431e67ff911b36fec2c17bdefb874ae3896b16b8c9937ae04b67f01eb2c24ab2"
+      "sha256": "21dde6f2b67f1a677a0c5f1fb0219dbb5417bc5191935e3a5eafa81914c166fc"
     },
     {
       "path": "services_checker/podfile_check_presets.json",

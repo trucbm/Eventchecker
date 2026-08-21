@@ -1970,6 +1970,12 @@ GRADLE_LIB_MAPPING_FILENAME = "gradle_lib_mapping.json"
 # Reload report success while returning stale presets.
 SERVICES_CHECKER_PRESET_BRANCH = "main"
 SERVICES_CHECKER_PRESET_BRANCHES = (SERVICES_CHECKER_PRESET_BRANCH,)
+SERVICES_CHECKER_GITHUB_REPO = "trucbm/Eventchecker"
+SERVICES_CHECKER_GITHUB_API_URL = (
+    f"https://api.github.com/repos/{SERVICES_CHECKER_GITHUB_REPO}/commits/"
+    f"{SERVICES_CHECKER_PRESET_BRANCH}"
+)
+SERVICES_CHECKER_COMMIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 SERVICES_CHECKER_PRESET_FILENAMES = (
     APK_CHECK_PRESETS_FILENAME,
     GRADLE_CHECK_PRESETS_FILENAME,
@@ -2024,18 +2030,74 @@ def _preset_file_candidates(filename):
     )
 
 
-def _remote_preset_urls(filename):
+def _fetch_services_checker_revision():
+    """Resolve the current main commit before downloading live preset files.
+
+    GitHub Raw caches branch paths for several minutes. A commit SHA is
+    immutable, so using it for the file paths makes Reload reflect the latest
+    main commit immediately while retaining the branch URL fallback below.
+    """
+    cache_bust = time.time_ns()
+    try:
+        response = requests.get(
+            f"{SERVICES_CHECKER_GITHUB_API_URL}?eventinspector_refresh={cache_bust}",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Cache-Control": "no-cache, no-store, max-age=0",
+                "Pragma": "no-cache",
+                "User-Agent": "EventInspector-Service-Checker",
+            },
+            timeout=8,
+        )
+        response.raise_for_status()
+        revision = str((response.json() or {}).get("sha") or "").strip()
+        if not SERVICES_CHECKER_COMMIT_SHA_PATTERN.fullmatch(revision):
+            raise ValueError("github_main_commit_sha_invalid")
+        return revision.lower()
+    except Exception as exc:
+        logger.warning(
+            "Could not resolve the current GitHub main commit; using branch fallback: %s",
+            exc,
+        )
+        return None
+
+
+def _remote_preset_urls(filename, revision=None):
     for branch in SERVICES_CHECKER_PRESET_BRANCHES:
-        yield branch, f"https://raw.githubusercontent.com/trucbm/Eventchecker/{branch}/services_checker/{filename}"
-        yield branch, f"https://github.com/trucbm/Eventchecker/raw/{branch}/services_checker/{filename}"
-        yield branch, f"https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@{branch}/services_checker/{filename}"
+        if revision:
+            # These URLs are immutable and therefore do not inherit the
+            # multi-minute cache attached to the moving main branch.
+            yield branch, (
+                f"https://raw.githubusercontent.com/{SERVICES_CHECKER_GITHUB_REPO}/{revision}/"
+                f"services_checker/{filename}"
+            )
+            yield branch, (
+                f"https://github.com/{SERVICES_CHECKER_GITHUB_REPO}/raw/{revision}/"
+                f"services_checker/{filename}"
+            )
+            yield branch, (
+                f"https://cdn.jsdelivr.net/gh/{SERVICES_CHECKER_GITHUB_REPO}@{revision}/"
+                f"services_checker/{filename}"
+            )
+        yield branch, (
+            f"https://raw.githubusercontent.com/{SERVICES_CHECKER_GITHUB_REPO}/{branch}/"
+            f"services_checker/{filename}"
+        )
+        yield branch, (
+            f"https://github.com/{SERVICES_CHECKER_GITHUB_REPO}/raw/{branch}/"
+            f"services_checker/{filename}"
+        )
+        yield branch, (
+            f"https://cdn.jsdelivr.net/gh/{SERVICES_CHECKER_GITHUB_REPO}@{branch}/"
+            f"services_checker/{filename}"
+        )
 
 
-def _fetch_remote_preset(filename):
+def _fetch_remote_preset(filename, revision=None):
     """Fetch and validate one preset file, bypassing intermediary caches."""
     last_error = None
     cache_bust = time.time_ns()
-    for branch, url in _remote_preset_urls(filename):
+    for branch, url in _remote_preset_urls(filename, revision):
         separator = "&" if "?" in url else "?"
         try:
             response = requests.get(
@@ -2074,10 +2136,11 @@ def _refresh_remote_preset_files_unlocked():
     errors = []
     refreshed_sources = {}
     refreshed_digests = {}
+    revision = _fetch_services_checker_revision()
 
     def fetch_one(filename):
         try:
-            return filename, _fetch_remote_preset(filename), None
+            return filename, _fetch_remote_preset(filename, revision), None
         except Exception as exc:
             return filename, None, exc
 

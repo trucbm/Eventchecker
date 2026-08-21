@@ -812,6 +812,9 @@ def test_services_checker_gradle_mapping_contract() -> None:
     for remote_contract in (
         "import requests",
         "SERVICES_CHECKER_PRESET_BRANCHES",
+        "SERVICES_CHECKER_GITHUB_API_URL",
+        "def _fetch_services_checker_revision(",
+        "SERVICES_CHECKER_COMMIT_SHA_PATTERN",
         "SERVICES_CHECKER_PRESET_FILENAMES",
         "SERVICES_CHECKER_REMOTE_DATA_FILENAMES",
         "def _remote_preset_urls(",
@@ -842,7 +845,6 @@ def test_services_checker_gradle_mapping_contract() -> None:
     _assert("'gradle_presets': gradle_presets" in service_source, "Gradle preset API group is missing")
     _assert("'podfile_presets': podfile_presets" in service_source, "Podfile preset API group is missing")
     required_mappings = {
-        "LINE Ads adapter": "com.unity3d.ads-mediation:line-adapter",
         "Adjust Meta Referrer": "com.adjust.sdk:adjust-android-meta-referrer",
         "Adjust Samsung Referrer": "com.adjust.sdk:adjust-android-samsung-referrer",
         "Adjust Vivo Referrer": "com.adjust.sdk:adjust-android-vivo-referrer",
@@ -856,6 +858,7 @@ def test_services_checker_gradle_mapping_contract() -> None:
             mapping_artifact,
             f"Services Checker mapping changed or missing: {mapping_name}",
         )
+    _assert("LINE Ads adapter" not in gradle_mapping, "LINE Ads mapping must remain removed")
     for control_id in (
         'id="apk-build-check-preset"',
         'id="gradle-build-check-preset"',
@@ -904,7 +907,16 @@ def test_services_checker_live_preset_refresh_after_restart() -> None:
 
     def fake_get(url, **_kwargs):
         calls.append(url)
-        _assert("/main/services_checker/" in url, f"preset refresh used a non-main source: {url}")
+        if "api.github.com/repos/" in url:
+            return FakeResponse({"sha": "a" * 40})
+        _assert(
+            "/services_checker/" in url
+            and (
+                "/main/services_checker/" in url
+                or "/" + ("a" * 40) + "/services_checker/" in url
+            ),
+            f"preset refresh used a non-main source: {url}",
+        )
         filename = url.split("/services_checker/", 1)[1].split("?", 1)[0]
         if filename == "gradle_lib_mapping.json":
             return FakeResponse({"Harness Library": f"com.example:harness-{revision['value']}"})
@@ -972,7 +984,12 @@ def test_services_checker_live_preset_refresh_after_restart() -> None:
                 },
                 "restart did not refresh all Services Checker preset files",
             )
-            _assert(calls and all("/main/services_checker/" in url for url in calls), "preset source was not main")
+            preset_calls = [url for url in calls if "/services_checker/" in url]
+            _assert(
+                preset_calls
+                and all("/" + ("a" * 40) + "/services_checker/" in url for url in preset_calls),
+                "preset source was not immutable main commit",
+            )
     finally:
         service_requests.get = original_get
         for name in module_names:
@@ -1060,7 +1077,8 @@ def test_services_checker_git_value_reload_from_real_commit() -> None:
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
             spec.loader.exec_module(module)
-            module._remote_preset_urls = lambda filename: (
+            module._fetch_services_checker_revision = lambda: None
+            module._remote_preset_urls = lambda filename, _revision=None: (
                 ("git-fixture", f"{base_url}/{filename}")
                 for _ in (0,)
             )
