@@ -1266,7 +1266,8 @@ IOS_FIREBASE_EVENT_PATTERN = re.compile(
     r'\[\s*Tracking\s*\]\s*TrackingService->_LogEvent:\s*(\{.*\})',
     re.IGNORECASE
 )
-CALLBACK_LOG_PATTERN = re.compile(r"(_OnImpressionDataReadyEvent|_OnLevelPlayImpressionDataReadyEvent|LevelPlayInterstitialAdListener|LevelPlayBannerAdViewListener|LevelPlayRewardedAdListener|Receive Ironsource Impression Data LevelPlayImpressionData)")
+LEVELPLAY_IMPRESSION_DATA_MAPPER_KEYWORD = "LevelPlayAdImpressionEventMapper->Map"
+CALLBACK_LOG_PATTERN = re.compile(r"(LevelPlayAdImpressionEventMapper->Map|_OnImpressionDataReadyEvent|_OnLevelPlayImpressionDataReadyEvent|LevelPlayInterstitialAdListener|LevelPlayBannerAdViewListener|LevelPlayRewardedAdListener|Receive Ironsource Impression Data LevelPlayImpressionData)")
 ADREVENUE_LOG_PATTERN = re.compile(r"AdRevenue Received:\s*AdRevenue\{(.*)\}")
 APPSFLYER_ADREVENUE_PATTERN = re.compile(r"\b(ADREVENUE)-\d+:\s*preparing data:\s*(\{.*\})", re.IGNORECASE)
 SDK_CHECK_SEARCH_PATTERN = re.compile(r'"search_pattern"\s*:\s*["\'](.*?)["\']')
@@ -1300,7 +1301,8 @@ CALLBACK_DISPLAY_NAMES = {
     "LevelPlayRewardedAdListener": "Rewarded",
     "_OnImpressionDataReadyEvent": "Impression Data",
     "_OnLevelPlayImpressionDataReadyEvent": "LevelPlay Impression Data",
-    "Receive Ironsource Impression Data LevelPlayImpressionData": "LevelPlayImpressionData"
+    "Receive Ironsource Impression Data LevelPlayImpressionData": "LevelPlayImpressionData",
+    LEVELPLAY_IMPRESSION_DATA_MAPPER_KEYWORD: "LevelPlayImpressionData",
 }
 
 IOS_LEVELPLAY_CALLBACK_KEYS = {
@@ -2388,7 +2390,7 @@ def _parse_callback_json_payload(json_str):
     if not isinstance(data, dict):
         return None
 
-    for key in ("adInfo", "error", "impressionData"):
+    for key in ("adInfo", "error", "impressionData", "LevelPlayImpressionData"):
         value = data.get(key)
         if isinstance(value, str):
             nested_text = _decode_ios_levelplay_json_text(value).strip()
@@ -2430,6 +2432,28 @@ def _levelplay_impression_event_name(data, fallback_format=""):
     ad_format = _find_first_key_deep(data, {"AdFormat", "adFormat", "ad_format"})
     label = _normalize_ad_format_label(ad_format, fallback_format)
     return f"_OnLevelPlayImpressionDataReadyEvent - {label}" if label else "_OnLevelPlayImpressionDataReadyEvent"
+
+
+def _normalize_levelplay_ad_unit_label(value):
+    raw = str(value or "").strip()
+    normalized = raw.lower().replace("_", "").replace("-", "")
+    if "banner" in normalized:
+        return "Banner"
+    if "reward" in normalized:
+        return "Rewarded"
+    if "interstitial" in normalized or normalized == "inter":
+        return "Interstitial"
+    return raw
+
+
+def _levelplay_impression_data_event_name(data):
+    ad_unit_name = ""
+    for key in ("mediationAdUnitName", "adUnitName", "adUnit", "adFormat"):
+        value = _find_first_key_deep(data, {key})
+        if str(value or "").strip():
+            ad_unit_name = _normalize_levelplay_ad_unit_label(value)
+            break
+    return f"LevelPlayImpressionData - {ad_unit_name}" if ad_unit_name else "LevelPlayImpressionData"
 
 def split_top_level_csv(text):
     parts = []
@@ -6595,7 +6619,41 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
             socketio.emit('update_callback_ad_table', list(callback_ad_logs))
         return
 
-    # --- 0. Process Gadsme callbacks ---
+    # --- 0b. Process Android LevelPlay impression data mapper callbacks ---
+    if LEVELPLAY_IMPRESSION_DATA_MAPPER_KEYWORD in log_entry:
+        after_keyword = log_entry.split(LEVELPLAY_IMPRESSION_DATA_MAPPER_KEYWORD, 1)[1].strip()
+        json_str = extract_json_object_from_text(after_keyword)
+        details_target = None
+        json_data_for_log = "{}"
+        details = "LevelPlay impression data"
+        if json_str:
+            try:
+                data = _parse_callback_json_payload(json_str) or {}
+                details_target = data.get("LevelPlayImpressionData", data)
+                if not isinstance(details_target, (dict, list)):
+                    details_target = data
+                details = format_json_html(details_target)
+                json_data_for_log = json.dumps(details_target, ensure_ascii=False)
+            except Exception:
+                details = f'<div class="text-xs font-mono break-all text-red-600">JSON Parse Error</div><div class="text-xs font-mono break-all">{html.escape(json_str)}</div>'
+        elif after_keyword:
+            details = f'<div class="text-xs font-mono break-all">{html.escape(after_keyword.lstrip(":").strip())}</div>'
+
+        display_name = _levelplay_impression_data_event_name(details_target or {})
+        with lock:
+            callback_ad_logs.append({
+                "device_id": device_id,
+                "device_name": get_device_name(device_id),
+                "type": "Callback",
+                "event_name": display_name,
+                "details": details,
+                "raw_log": log_entry.strip(),
+                "json_data": json_data_for_log,
+            })
+            socketio.emit('update_callback_ad_table', list(callback_ad_logs))
+        return
+
+    # --- 0c. Process Gadsme callbacks ---
     if GADSME_SERVICE_KEYWORD in log_entry:
         try:
             after_keyword = log_entry.split(GADSME_SERVICE_KEYWORD, 1)[1]

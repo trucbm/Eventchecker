@@ -691,6 +691,60 @@ def test_load_ads_provider_contract() -> None:
         lc.socketio.emit = original_emit
 
 
+def test_levelplay_impression_data_callback_contract() -> None:
+    source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    compatibility_source = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    for marker in (
+        "LevelPlayAdImpressionEventMapper->Map",
+        "LevelPlayImpressionData - {ad_unit_name}",
+        'return "Banner"',
+        'return "Rewarded"',
+        'return "Interstitial"',
+    ):
+        _assert(marker in source_text, f"LevelPlay callback contract is missing: {marker}")
+        _assert(marker in compatibility_source, f"compatibility LevelPlay callback contract is missing: {marker}")
+
+    original_paused = lc.is_paused
+    original_emit = lc.socketio.emit
+    original_rows = list(lc.callback_ad_logs)
+    emitted = []
+    try:
+        lc.is_paused = False
+        lc.callback_ad_logs.clear()
+        lc.socketio.emit = lambda event, payload: emitted.append((event, payload))
+
+        ad_units = {
+            "Banner": {"mediationAdUnitName": "Banner", "adUnit": "banner", "adFormat": "banner"},
+            "Rewarded": {"mediationAdUnitName": "Rewarded", "adUnit": "rewarded_video", "adFormat": "rewarded_video"},
+            "Interstitial": {"mediationAdUnitName": "Interstitial", "adUnit": "interstitial", "adFormat": "interstitial"},
+        }
+        for expected_label, impression_data in ad_units.items():
+            nested_json = json.dumps(impression_data, separators=(",", ":"))
+            outer_json = json.dumps({"LevelPlayImpressionData": nested_json}, separators=(",", ":"))
+            line = f"Unity LevelPlayAdImpressionEventMapper->Map: {outer_json}"
+            lc.process_callback_and_ad_event_log(line, "device-levelplay")
+
+        rows = list(lc.callback_ad_logs)
+        _assert_equal(len(rows), 3, "LevelPlay impression mapper should add one callback row per ad unit")
+        _assert_equal(
+            [row["event_name"] for row in rows],
+            ["LevelPlayImpressionData - Banner", "LevelPlayImpressionData - Rewarded", "LevelPlayImpressionData - Interstitial"],
+            "LevelPlay impression callback names do not include the ad unit",
+        )
+        _assert(all(row["type"] == "Callback" for row in rows), "LevelPlay impression mapper rows must use the LevelPlay callback filter")
+        _assert(all("LevelPlayAdImpressionEventMapper->Map" in row["raw_log"] for row in rows), "LevelPlay impression raw logs were not preserved")
+        _assert_equal(len(emitted), 3, "LevelPlay impression callbacks were not emitted to the Callback tab")
+
+        # Existing LevelPlay listener callbacks must keep their old display name.
+        lc.process_callback_and_ad_event_log("Unity LevelPlayInterstitialAdListener", "device-levelplay")
+        _assert_equal(lc.callback_ad_logs[-1]["event_name"], "Interstitial", "existing LevelPlay listener name changed")
+    finally:
+        lc.is_paused = original_paused
+        lc.callback_ad_logs.clear()
+        lc.callback_ad_logs.extend(original_rows)
+        lc.socketio.emit = original_emit
+
+
 def test_release_payload_sync() -> None:
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
     compatibility_source = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
@@ -1752,6 +1806,7 @@ TESTS: List[Callable[[], None]] = [
     test_rewarded_bidding_filter_contract,
     test_price_rotation_exact_parser,
     test_load_ads_provider_contract,
+    test_levelplay_impression_data_callback_contract,
     test_release_payload_sync,
     test_update_candidate_does_not_downgrade,
     test_services_checker_gradle_mapping_contract,
