@@ -488,19 +488,19 @@ def test_sdk_check_preset_contract() -> None:
     _assert_equal(len(lines), 44, "C-190 Android preset line count changed")
     _assert_equal(lines[0], "Ads Network\tAdapter\tNative", "C-190 preset header changed")
     _assert(all("http://" not in line and "https://" not in line for line in lines), "C-190 preset must not contain documentation links")
-    _assert("CloudX\t4.5.0\t4.5.0" in lines, "C-190 CloudX entry changed")
+    _assert("CloudX\t4.5.1\t4.5.1" in lines, "C-190 CloudX entry changed")
     _assert("Bigo Ads\t5.11.0\t6.0.0" in lines, "C-190 Bigo Ads versions changed")
     _assert(any(line.startswith("Digital Turbine (fyber) - Cloudx\t") for line in lines), "C-190 Cloudx entries are missing")
     _assert("Meta Audience Network\t5.4.0\t6.22.0" in lines, "C-190 Meta Audience Network adapter changed")
-    _assert("Mintegral - Cloudx\t17.1.71.0\t17.1.71" in lines, "Mintegral Cloudx native version changed")
+    _assert("Mintegral - Cloudx\t17.1.71.1\t17.1.71" in lines, "Mintegral Cloudx native version changed")
     _assert("Ogury\t5.5.0\t6.3.1" in lines, "C-190 Ogury versions changed")
-    _assert("Yandex\t5.12.0\t8.3.0" in lines, "C-190 Yandex versions changed")
+    _assert("Yandex\t5.13.0\t8.3.0" in lines, "C-190 Yandex versions changed")
     _assert("Adverty\t5.2.9\t" in lines, "C-190 Adverty version changed")
     _assert("Gadsme\t1.12.6\t" in lines, "C-190 Gadsme version changed")
     _assert("AppMetrica SDK\t\t8.4.1" in lines, "C-190 AppMetrica version changed")
     cloudx_lines = [line for line in lines if " - Cloudx\t" in line]
     _assert(cloudx_lines and all(len(line.split("\t")) >= 3 and line.split("\t")[2].strip() for line in cloudx_lines), "Cloudx native versions are missing")
-    _assert("Adjust\t\t5.6.1" in lines, "C-190 single SDK entry changed")
+    _assert("Adjust\t\t5.8.0" in lines, "C-190 single SDK entry changed")
 
     for line in lines[1:]:
         parsed = lc._parse_sdk_expected_line(line)

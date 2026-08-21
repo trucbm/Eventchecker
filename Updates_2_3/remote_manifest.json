@@ -31,7 +31,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/sdk_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/sdk_check_presets.json"
       ],
-      "sha256": "3bb3d9cb3a1b4d18d0bdb0d609f9ff473ccfab97a53b5bb179a634f05e9f0b5c"
+      "sha256": "b47271cf186ad0c5498ffb0b7fc70357233739888f676ef7ca7cdfb750b215be"
     },
     {
       "path": "remote_update_config_v250.json",
