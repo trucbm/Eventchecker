@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-20-1-2.5.0-46",
+  "version": "2026-08-20-1-2.5.0-47",
   "update_enabled": true,
   "update_message": "",
   "files": [
@@ -11,7 +11,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/Updates_2_5/compat/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/Updates_2_5/compat/Log_checker.py"
       ],
-      "sha256": "b9813443d3799778d4128d96e596654f178a40c1b33c3439541c468f645bf2b6"
+      "sha256": "8c5e90051cefa52ede42cb10bfe1a1601ab2626e265d181f57aabb9ace90823d"
     },
     {
       "path": "remote_update.py",
@@ -51,7 +51,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/app.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/app.py"
       ],
-      "sha256": "296aa2db59eabba1c74449558dd9c886a2adf3d88f31b9e287d8b33550a5a037"
+      "sha256": "e30afa3d66ce9a705016f7e987af51fa5cdc3a03e9aa8b69ca1d137212bcfe0d"
     },
     {
       "path": "services_checker/bundletool-all-1.18.1.jar",
@@ -102,6 +102,16 @@
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/gradle_check_presets.json"
       ],
       "sha256": "d76cca935b1902106177c0b85d7a39a76d5becb0892cb33e3ed45b59a0e62139"
+    },
+    {
+      "path": "services_checker/gradle_lib_mapping.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/gradle_lib_mapping.json",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/2.5.0/services_checker/gradle_lib_mapping.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/2.5.0/services_checker/gradle_lib_mapping.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@2.5.0/services_checker/gradle_lib_mapping.json"
+      ],
+      "sha256": "431e67ff911b36fec2c17bdefb874ae3896b16b8c9937ae04b67f01eb2c24ab2"
     },
     {
       "path": "services_checker/podfile_check_presets.json",

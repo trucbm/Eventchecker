@@ -89,6 +89,7 @@ pyinstaller --noconfirm --clean --windowed \
   --add-data "services_checker/bundletool-all-1.18.1.jar:services_checker" \
   --add-data "services_checker/apk_check_presets.json:services_checker" \
   --add-data "services_checker/gradle_check_presets.json:services_checker" \
+  --add-data "services_checker/gradle_lib_mapping.json:services_checker" \
   --add-data "services_checker/podfile_check_presets.json:services_checker" \
   --add-data "services_checker/manifest_check_presets.json:services_checker" \
   --add-data "services_checker/my-key.keystore:services_checker" \

@@ -419,40 +419,10 @@ TARGET_METADATA_KEYS_MAP = {
 }
 
 # --- Mapping for Gradle Verification ---
-# Maps a user-friendly name to the gradle artifact string (group:artifact)
-GRADLE_LIB_MAPPING = {
-    "Kidoz adapter": "net.kidoz.sdk:kidoz-android-ironsource-adapter",
-    "Kidoz native": "net.kidoz.sdk:kidoz-android-native",
-    "LINE Ads adapter": "com.unity3d.ads-mediation:line-adapter",
-    "LINE Ads native": "com.linecorp.adsnetwork:fivead",
-    "Maticoo adapter": "io.github.maticooads:maticoo-adapter-ironsource",
-    "Maticoo sdk": "io.github.maticooads:maticoo-android-sdk",
-    "TaurusX adapter": "com.ironsource.mediation:taurusXAdapters",
-    "TaurusX native": "com.taurusx.tax:ads",
-    #"Appsflyer Purchase Connector Unity": "com.appsflyer:af-purchaseconnector-unity",
-    #"Appsflyer Purchase Connector sdk": "com.appsflyer:purchase-connector",
-    #"Google License Verification Library": "com.appsflyer:lvl",
-    "Firebase Cloud Messaging Unity": "com.google.firebase:firebase-messaging-unity",
-    "Firebase Cloud Messaging": "com.google.firebase:firebase-messaging",
-    "Firebase Installations": "com.google.firebase:firebase-installations",
-    "Firebase Remote Config Unity": "com.google.firebase:firebase-config-unity",
-    "Firebase Remote Config": "com.google.firebase:firebase-config",
-    "Firebase Performance Monitoring Plugin": "com.google.firebase:perf-plugin",
-    "Firebase Performance Monitoring": "com.google.firebase:firebase-perf",
-    "com.android.installreferrer:installreferrer": "com.android.installreferrer:installreferrer",
-    "Odeeo SDK": "io.odeeo:odeeo-sdk",
-    "Ascendx Adapter": "com.knorex:ascendx-mobile-sdk-levelplay-v9-custom-adapter",
-    "Voodoo (ADN) Adapter": "com.unity3d.ads-mediation:voodoo-adapter",
-    "Voodoo (ADN) SDK": "io.adn:adn-sdk",
-    "Adjust Google LVL": "com.adjust.sdk:adjust-android-google-lvl",
-    "Adjust Meta Referrer": "com.adjust.sdk:adjust-android-meta-referrer",
-    "Adjust Samsung Referrer": "com.adjust.sdk:adjust-android-samsung-referrer",
-    "Adjust Vivo Referrer": "com.adjust.sdk:adjust-android-vivo-referrer",
-    "Adjust Xiaomi Referrer": "com.adjust.sdk:adjust-android-xiaomi-referrer",
-    "Xiaomi Install Referrer": "com.miui.referrer:homereferrer",
-    "Samsung Install Referrer": "store.galaxy.samsung.installreferrer:samsung_galaxystore_install_referrer",
-    "Ascendx Prebid": "com.knorex:knorex-sdk-unity",
-}
+# The user-facing library-to-artifact mapping lives in
+# ``gradle_lib_mapping.json`` so adding or removing a library is a data
+# refresh, not a Services Checker code release. The bundled JSON remains the
+# offline fallback when GitHub is unavailable.
 
 # --- Mapping for Podfile Verification ---
 # Maps a user-friendly name to the Pod name
@@ -1723,8 +1693,14 @@ HTML_TEMPLATE = """
                 ul.appendChild(li);
             }
 
-            // Add any found versions that were not in the expected list
-            for (const [libName, foundVersionRaw] of Object.entries(foundVersions)) {
+            // The Gradle preset is the visible allow-list for this comparison.
+            // Keep scanning every mapped artifact, but do not render mapped
+            // dependencies that are intentionally absent from the selected
+            // Gradle preset. APK and Podfile comparisons retain the existing
+            // informational rows for unlisted findings.
+            if (archiveType !== "Gradle") {
+              // Add any found versions that were not in the expected list
+              for (const [libName, foundVersionRaw] of Object.entries(foundVersions)) {
                  if (!comparedLibs.has(libName)) { // Only if not already processed
                     const li = document.createElement('li');
                     li.className = 'comparison-item';
@@ -1758,6 +1734,7 @@ HTML_TEMPLATE = """
                     li.dataset.resultStatus = 'INFO';
                     ul.appendChild(li);
                 }
+              }
             }
             const resultRank = { FAILED: 0, INFO: 1, PASSED: 2 };
             Array.from(ul.children)
@@ -1984,6 +1961,7 @@ APK_CHECK_PRESETS_FILENAME = "apk_check_presets.json"
 GRADLE_CHECK_PRESETS_FILENAME = "gradle_check_presets.json"
 PODFILE_CHECK_PRESETS_FILENAME = "podfile_check_presets.json"
 MANIFEST_CHECK_PRESETS_FILENAME = "manifest_check_presets.json"
+GRADLE_LIB_MAPPING_FILENAME = "gradle_lib_mapping.json"
 
 # Presets are live data. The Service Checker always refreshes these files when
 # its page starts, and the Reload buttons repeat the same operation. `main` is
@@ -1997,6 +1975,10 @@ SERVICES_CHECKER_PRESET_FILENAMES = (
     GRADLE_CHECK_PRESETS_FILENAME,
     PODFILE_CHECK_PRESETS_FILENAME,
     MANIFEST_CHECK_PRESETS_FILENAME,
+)
+SERVICES_CHECKER_REMOTE_DATA_FILENAMES = (
+    *SERVICES_CHECKER_PRESET_FILENAMES,
+    GRADLE_LIB_MAPPING_FILENAME,
 )
 
 # Keep the payload returned by the most recent successful Git refresh in
@@ -2071,6 +2053,8 @@ def _fetch_remote_preset(filename):
             decoded = response.json()
             if not isinstance(decoded, dict) or not decoded:
                 raise ValueError("preset_root_must_be_object")
+            if filename == GRADLE_LIB_MAPPING_FILENAME and not _normalize_gradle_lib_mapping(decoded):
+                raise ValueError("gradle_mapping_must_contain_group_artifact_entries")
             return payload, branch
         except Exception as exc:
             last_error = exc
@@ -2099,8 +2083,8 @@ def _refresh_remote_preset_files_unlocked():
 
     # Each file has the same GitHub fallback chain. Fetching them concurrently
     # keeps one slow/unreachable mirror from multiplying the total reload time.
-    with ThreadPoolExecutor(max_workers=len(SERVICES_CHECKER_PRESET_FILENAMES)) as executor:
-        results = list(executor.map(fetch_one, SERVICES_CHECKER_PRESET_FILENAMES))
+    with ThreadPoolExecutor(max_workers=len(SERVICES_CHECKER_REMOTE_DATA_FILENAMES)) as executor:
+        results = list(executor.map(fetch_one, SERVICES_CHECKER_REMOTE_DATA_FILENAMES))
 
     for filename, result, error in results:
         if error is not None:
@@ -2131,7 +2115,7 @@ def _preset_file_metadata():
     """Describe the exact preset copy currently visible to the client."""
     cache_dir = _services_checker_preset_cache_dir()
     metadata = {}
-    for filename in SERVICES_CHECKER_PRESET_FILENAMES:
+    for filename in SERVICES_CHECKER_REMOTE_DATA_FILENAMES:
         live_payload = _live_remote_preset_payloads.get(filename)
         if live_payload is not None:
             metadata[filename] = {
@@ -2160,7 +2144,7 @@ def _preset_file_metadata():
 def _preset_revision(metadata):
     digest_input = {
         filename: (metadata.get(filename) or {}).get("sha256", "")
-        for filename in SERVICES_CHECKER_PRESET_FILENAMES
+        for filename in SERVICES_CHECKER_REMOTE_DATA_FILENAMES
     }
     return hashlib.sha256(
         json.dumps(digest_input, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -2216,6 +2200,45 @@ def _load_podfile_check_presets():
 
 def _load_manifest_check_presets():
     return _load_preset_file(MANIFEST_CHECK_PRESETS_FILENAME, "android")
+
+
+def _normalize_gradle_lib_mapping(payload):
+    """Return a safe display-name -> ``group:artifact`` mapping from JSON."""
+    if not isinstance(payload, dict):
+        return {}
+
+    mapping = {}
+    for raw_name, raw_artifact in payload.items():
+        name = str(raw_name or "").strip()
+        artifact = str(raw_artifact or "").strip()
+        if not name or not artifact or ":" not in artifact:
+            continue
+        mapping[name] = artifact
+    return mapping
+
+
+def _load_gradle_lib_mapping():
+    """Load the latest remote mapping, with cache and bundled fallbacks."""
+    payload_candidates = []
+    live_payload = _live_remote_preset_payloads.get(GRADLE_LIB_MAPPING_FILENAME)
+    if live_payload is not None:
+        try:
+            payload_candidates.append(("<live-remote>", json.loads(live_payload.decode("utf-8"))))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            pass
+
+    for path in _preset_file_candidates(GRADLE_LIB_MAPPING_FILENAME):
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                payload_candidates.append((path, json.load(handle)))
+        except Exception as exc:
+            logger.warning("Gradle mapping file unavailable (%s): %s", path, exc)
+
+    for _source, payload in payload_candidates:
+        mapping = _normalize_gradle_lib_mapping(payload)
+        if mapping:
+            return mapping
+    return {}
 
 
 def _resolve_manifest_permission(permission_name, actual_package):
@@ -2331,7 +2354,7 @@ def get_build_check_presets_final():
     podfile_presets = _load_podfile_check_presets()
     manifest_presets = _load_manifest_check_presets()
     loaded_preset_files = _preset_file_metadata()
-    if len(refreshed) == len(SERVICES_CHECKER_PRESET_FILENAMES):
+    if len(refreshed) == len(SERVICES_CHECKER_REMOTE_DATA_FILENAMES):
         source = 'github'
     elif refreshed:
         source = 'github (partial)'
@@ -2448,8 +2471,10 @@ def analyze_gradle():
         try:
             gradle_content = file.read().decode('utf-8')
 
-            # Use the predefined mapping to find versions
-            found_versions = scan_gradle_for_versions(gradle_content, GRADLE_LIB_MAPPING)
+            # Load the latest mapping so library additions/removals do not
+            # require changing or rebuilding the Services Checker code.
+            gradle_mapping = _load_gradle_lib_mapping()
+            found_versions = scan_gradle_for_versions(gradle_content, gradle_mapping)
 
             return jsonify({
                 'success': True,
