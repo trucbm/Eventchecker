@@ -2953,7 +2953,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(49)</title>
+    <title>Event Inspector v2.5.0(50)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -2989,6 +2989,11 @@ HTML_TEMPLATE = """
         .adrevenue-raw-panel { height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
         .price-rotation-details,
         .price-rotation-details * {
+            user-select: text !important;
+            -webkit-user-select: text !important;
+            cursor: text;
+        }
+        .installation-id-value {
             user-select: text !important;
             -webkit-user-select: text !important;
             cursor: text;
@@ -3030,7 +3035,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(49)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(50)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3042,7 +3047,10 @@ HTML_TEMPLATE = """
                         <div class="flex items-start justify-between gap-3">
                             <div class="min-w-0 flex-1">
                                 <div id="installationIdGame" class="text-xs font-semibold text-slate-700 truncate">-</div>
-                                <div id="installationIdValue" class="text-[11px] text-slate-500 font-mono break-all leading-4 mt-1">Installation ID: -</div>
+                                <label class="flex items-center gap-1 mt-1 min-w-0 text-[11px] text-slate-500 font-mono">
+                                    <span class="shrink-0">Installation ID:</span>
+                                    <input id="installationIdValue" type="text" readonly value="" placeholder="-" aria-label="Installation ID" class="installation-id-value min-w-0 flex-1 bg-transparent border-0 p-0 text-[11px] text-slate-500 font-mono leading-4 focus:outline-none focus:ring-0">
+                                </label>
                             </div>
                             <button id="copyInstallationIdBtn" type="button" class="shrink-0 text-[11px] font-semibold px-2 py-1 rounded border border-slate-300 bg-white hover:bg-slate-100 text-slate-700">Copy</button>
                         </div>
@@ -3968,13 +3976,18 @@ HTML_TEMPLATE = """
             const gameCode = installationIdState.game_code || '';
             const installationId = installationIdState.installation_id || '';
             installationIdGameEl.textContent = packageId ? `${gameCode || 'Unknown'} | ${packageId}` : '-';
-            installationIdValueEl.textContent = installationId ? `Installation ID: ${installationId}` : 'Installation ID: -';
+            installationIdValueEl.value = installationId;
+            installationIdValueEl.placeholder = installationId ? '' : '-';
             if (copyInstallationIdBtn) {
                 copyInstallationIdBtn.disabled = !installationId;
                 copyInstallationIdBtn.classList.toggle('opacity-50', !installationId);
                 copyInstallationIdBtn.classList.toggle('cursor-not-allowed', !installationId);
             }
         }
+
+        installationIdValueEl?.addEventListener('focus', () => {
+            if (installationIdValueEl.value) installationIdValueEl.select();
+        });
 
         copyInstallationIdBtn?.addEventListener('click', async () => {
             const installationId = installationIdState.installation_id || '';

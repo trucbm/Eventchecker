@@ -563,10 +563,27 @@ def test_installation_id_copy_contract() -> None:
             "await navigator.clipboard.writeText(installationId);" not in source_text,
             f"Installation ID button still bypasses the cross-platform copy helper in {source_path}",
         )
+        _assert(
+            'id="installationIdValue" type="text" readonly' in source_text,
+            f"Installation ID must be exposed as a selectable readonly text field in {source_path}",
+        )
+        _assert(
+            "installationIdValueEl.value = installationId;" in source_text,
+            f"Installation ID text field is not updated through its value in {source_path}",
+        )
+        _assert(
+            "installationIdValueEl.select();" in source_text,
+            f"Installation ID text field does not select its value on focus in {source_path}",
+        )
+        _assert(
+            ".installation-id-value" in source_text and "user-select: text !important" in source_text,
+            f"Installation ID text field is not explicitly selectable in {source_path}",
+        )
 
     rendered = lc.app.test_client().get("/").get_data(as_text=True)
     _assert("async function copyTextToClipboard(text)" in rendered, "rendered copy helper is missing")
     _assert("document.execCommand('copy')" in rendered, "rendered Windows clipboard fallback is missing")
+    _assert('id="installationIdValue" type="text" readonly' in rendered, "rendered Installation ID field is not selectable")
     _assert("id=\"clearUpdateCacheBtn\"" not in rendered, "Clear Cache button must stay removed from the release UI")
 
 
@@ -589,12 +606,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(49)" in text, "Log_checker.py must be prepared for v2.5.0(49)")
+    _assert("v2.5.0(50)" in text, "Log_checker.py must be prepared for v2.5.0(50)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(49)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(50)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -880,11 +897,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-20-1-2.5.0-49", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-20-1-2.5.0-50", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(49\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(50\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -1469,9 +1486,9 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-20-1-2.5.0-49", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-20-1-2.5.0-50", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 49, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 50, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
@@ -1675,13 +1692,13 @@ def test_windows_release_build_version_contract() -> None:
     _assert("EventInspector.exe" in bundle_guard, "Windows bundle guard must require the executable")
     _assert("-PrintVersion" in installer_script, "Windows installer must derive its version from the source")
     _assert("/DMyAppVersion=%EVENTINSPECTOR_RELEASE_VERSION%" in installer_script, "Inno Setup must receive the source version")
-    _assert('#define MyAppVersion "2.5.0.49"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
+    _assert('#define MyAppVersion "2.5.0.50"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
 
 
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-20-1-2.5.0-49' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-20-1-2.5.0-50' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
