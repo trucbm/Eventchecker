@@ -2953,7 +2953,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(48)</title>
+    <title>Event Inspector v2.5.0(49)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -3030,13 +3030,12 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(48)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(49)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
                     <div class="flex items-center gap-2">
                     <button id="restartAppBtn" class="bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Check Update</button>
-                    <button id="clearUpdateCacheBtn" class="bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Clear Cache</button>
                     <button id="manualRestartBtn" class="bg-slate-500 hover:bg-slate-600 text-white text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Restart</button>
                     <button id="platformBtn" class="bg-white hover:bg-gray-50 text-slate-700 border border-slate-300 text-sm font-semibold py-2 px-3 rounded-lg transition-colors shadow-sm">Platform: Android</button>
                     <div id="installationIdPanel" class="min-w-[300px] max-w-[420px] bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 shadow-sm">
@@ -3835,6 +3834,41 @@ HTML_TEMPLATE = """
             return platform === 'ios' ? 'iOS' : 'Android';
         }
 
+        async function copyTextToClipboard(text) {
+            const value = String(text || '');
+            if (!value) return false;
+
+            if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+                try {
+                    await navigator.clipboard.writeText(value);
+                    return true;
+                } catch (err) {
+                    console.warn('Clipboard API copy failed, using fallback', err);
+                }
+            }
+
+            const textarea = document.createElement('textarea');
+            textarea.value = value;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.top = '0';
+            textarea.style.left = '0';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            textarea.setSelectionRange(0, textarea.value.length);
+            let copied = false;
+            try {
+                copied = typeof document.execCommand === 'function' && document.execCommand('copy');
+            } catch (err) {
+                console.warn('Clipboard fallback failed', err);
+            } finally {
+                document.body.removeChild(textarea);
+            }
+            return copied;
+        }
+
         function showPlatformModal() {
             platformModal?.classList.remove('hidden');
             platformModal?.classList.add('flex');
@@ -3947,7 +3981,9 @@ HTML_TEMPLATE = """
             if (!installationId) return;
             const originalText = copyInstallationIdBtn.textContent;
             try {
-                await navigator.clipboard.writeText(installationId);
+                if (!await copyTextToClipboard(installationId)) {
+                    throw new Error('clipboard_unavailable');
+                }
                 copyInstallationIdBtn.textContent = 'Copied';
             } catch (err) {
                 alert('Copy failed: ' + err);
@@ -4094,31 +4130,6 @@ HTML_TEMPLATE = """
                 .finally(() => {
                     restartAppBtn.disabled = false;
                     restartAppBtn.textContent = originalText;
-                });
-        });
-
-        const clearUpdateCacheBtn = document.getElementById('clearUpdateCacheBtn');
-        clearUpdateCacheBtn?.addEventListener('click', () => {
-            if (clearUpdateCacheBtn.disabled) return;
-            if (!confirm('Clear update cache now? Use this only when a machine is stuck on an old version.')) return;
-            const originalText = clearUpdateCacheBtn.textContent;
-            clearUpdateCacheBtn.disabled = true;
-            clearUpdateCacheBtn.textContent = 'Clearing...';
-            fetch('/clear_update_cache', { method: 'POST' })
-                .then(r => r.json())
-                .then(data => {
-                    if (data.ok) {
-                        alert('Update cache cleared. Press Check Update again.');
-                    } else {
-                        alert('Clear cache failed: ' + (data.error || 'unknown_error'));
-                    }
-                })
-                .catch(err => {
-                    alert('Clear cache failed: ' + err);
-                })
-                .finally(() => {
-                    clearUpdateCacheBtn.disabled = false;
-                    clearUpdateCacheBtn.textContent = originalText;
                 });
         });
 

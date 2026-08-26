@@ -546,6 +546,30 @@ def test_rendered_sdk_preset_javascript_contract() -> None:
     _assert("reloadSdkCheckPresetsBtn" in html and "loadSdkCheckPresetsFromGit" in html, "reload button handler is missing")
 
 
+def test_installation_id_copy_contract() -> None:
+    for source_path in (
+        ROOT / "Log_checker.py",
+        ROOT / "Updates_2_5" / "compat" / "Log_checker.py",
+    ):
+        source_text = source_path.read_text(encoding="utf-8", errors="ignore")
+        _assert("async function copyTextToClipboard(text)" in source_text, f"copy helper missing in {source_path}")
+        _assert("await navigator.clipboard.writeText(value);" in source_text, f"Clipboard API path missing in {source_path}")
+        _assert("document.execCommand('copy')" in source_text, f"Windows clipboard fallback missing in {source_path}")
+        _assert(
+            "if (!await copyTextToClipboard(installationId))" in source_text,
+            f"Installation ID button is not using the cross-platform copy helper in {source_path}",
+        )
+        _assert(
+            "await navigator.clipboard.writeText(installationId);" not in source_text,
+            f"Installation ID button still bypasses the cross-platform copy helper in {source_path}",
+        )
+
+    rendered = lc.app.test_client().get("/").get_data(as_text=True)
+    _assert("async function copyTextToClipboard(text)" in rendered, "rendered copy helper is missing")
+    _assert("document.execCommand('copy')" in rendered, "rendered Windows clipboard fallback is missing")
+    _assert("id=\"clearUpdateCacheBtn\"" not in rendered, "Clear Cache button must stay removed from the release UI")
+
+
 def test_sdk_failed_groups_sort_first() -> None:
     groups = [
         [{"status": "PASSED"}, {"status": "PASSED"}],
@@ -565,12 +589,12 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(48)" in text, "Log_checker.py must be prepared for v2.5.0(48)")
+    _assert("v2.5.0(49)" in text, "Log_checker.py must be prepared for v2.5.0(49)")
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
     _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(48)"' in compatibility_text,
+        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(49)"' in compatibility_text,
         "compatibility payload must remain visible to legacy numeric update checks",
     )
 
@@ -856,11 +880,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-20-1-2.5.0-48", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], "2026-08-20-1-2.5.0-49", "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(48\)</title>",
+        "html_title": r"<title>Event Inspector v2\.5\.0\(49\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -1445,9 +1469,9 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-20-1-2.5.0-48", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), "2026-08-20-1-2.5.0-49", "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 48, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), 49, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
@@ -1651,13 +1675,13 @@ def test_windows_release_build_version_contract() -> None:
     _assert("EventInspector.exe" in bundle_guard, "Windows bundle guard must require the executable")
     _assert("-PrintVersion" in installer_script, "Windows installer must derive its version from the source")
     _assert("/DMyAppVersion=%EVENTINSPECTOR_RELEASE_VERSION%" in installer_script, "Inno Setup must receive the source version")
-    _assert('#define MyAppVersion "2.5.0.48"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
+    _assert('#define MyAppVersion "2.5.0.49"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
 
 
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-20-1-2.5.0-48' in text, "windows recovery script must target the current release")
+    _assert('TARGET_VERSION=2026-08-20-1-2.5.0-49' in text, "windows recovery script must target the current release")
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
@@ -1899,6 +1923,7 @@ TESTS: List[Callable[[], None]] = [
     test_cloudx_sdk_adapter_metadata,
     test_sdk_check_preset_contract,
     test_rendered_sdk_preset_javascript_contract,
+    test_installation_id_copy_contract,
     test_sdk_failed_groups_sort_first,
     test_release_build_marker,
     test_rewarded_bidding_filter_contract,
