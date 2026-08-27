@@ -34,8 +34,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, List
 
+from openpyxl import Workbook
+
 
 ROOT = Path(__file__).resolve().parents[1]
+CURRENT_RELEASE_VERSION = "2026-08-27-2-2.5.0-51"
+CURRENT_RELEASE_BUILD = 51
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -546,6 +550,244 @@ def test_rendered_sdk_preset_javascript_contract() -> None:
     _assert("reloadSdkCheckPresetsBtn" in html and "loadSdkCheckPresetsFromGit" in html, "reload button handler is missing")
 
 
+def test_default_ad_event_contract() -> None:
+    normal_events = {
+        "interstitial": [
+            "ad_load",
+            "ad_load_failed",
+            "ad_load_succeeded",
+            "ad_ready",
+            "ad_not_ready",
+            "ad_impression",
+            "ad_show_succeeded",
+            "ad_show_failed",
+            "ad_clicked",
+            "ad_closed",
+        ],
+        "rewarded": [
+            "ad_load",
+            "ad_load_failed",
+            "ad_load_succeeded",
+            "ad_ready",
+            "ad_not_ready",
+            "ad_impression",
+            "ad_show_succeeded",
+            "ad_show_failed",
+            "ad_clicked",
+            "ad_closed",
+            "ad_rewarded",
+        ],
+        "banner": [
+            "ad_load",
+            "ad_load_failed",
+            "ad_load_succeeded",
+            "ad_impression",
+            "ad_show_succeeded",
+            "ad_show_failed",
+            "ad_clicked",
+        ],
+        "mrec": [
+            "ad_load",
+            "ad_load_failed",
+            "ad_load_succeeded",
+            "ad_impression",
+            "ad_show_succeeded",
+            "ad_show_failed",
+            "ad_clicked",
+        ],
+    }
+    simple_events = {
+        "audioads": {
+            "odeeo": [
+                "ad_load_succeeded",
+                "ad_ready",
+                "ad_not_ready",
+                "ad_impression",
+                "ad_show_succeeded",
+                "ad_show_failed",
+                "ad_clicked",
+                "ad_closed",
+                "ad_rewarded",
+            ],
+            "audiomob": [
+                "ad_load",
+                "ad_load_failed",
+                "ad_impression",
+                "ad_show_succeeded",
+                "ad_show_failed",
+                "ad_clicked",
+            ],
+        },
+        "inplayads": {
+            "adverty": ["ad_impression", "ad_show_succeeded", "ad_clicked"],
+            "gadsme": ["ad_load_failed", "ad_load_succeeded", "ad_impression", "ad_show_succeeded", "ad_clicked"],
+        },
+    }
+
+    workbook = Workbook()
+    workbook.active.title = "events"
+
+    def add_normal_sheet(provider: str) -> None:
+        worksheet = workbook.create_sheet(provider)
+        for column, ad_format in zip((2, 6, 10, 14), lc.DEFAULT_AD_EVENT_FORMATS):
+            worksheet.merge_cells(
+                start_row=2,
+                start_column=column,
+                end_row=2,
+                end_column=column + 2,
+            )
+            worksheet.cell(2, column).value = lc.DEFAULT_AD_EVENT_FORMAT_LABELS[ad_format]
+            row = 3
+            for event_name in normal_events[ad_format]:
+                worksheet.cell(row, column).value = event_name
+                worksheet.cell(row + 1, column + 1).value = "ad_platform"
+                worksheet.cell(row + 1, column + 2).value = provider
+                worksheet.cell(row + 2, column + 1).value = "ad_format"
+                worksheet.cell(row + 2, column + 2).value = ad_format
+                row += 3
+
+    for provider in ("Ironsource", "Cloudx", "Ascendx"):
+        add_normal_sheet(provider)
+
+    def add_simple_sheet(category: str) -> None:
+        worksheet = workbook.create_sheet(lc.DEFAULT_AD_EVENT_SIMPLE_CATEGORY_LABELS[category])
+        for column, provider in zip((2, 6), lc.DEFAULT_AD_EVENT_SIMPLE_PROVIDERS[category]):
+            worksheet.merge_cells(
+                start_row=2,
+                start_column=column,
+                end_row=2,
+                end_column=column + 2,
+            )
+            worksheet.cell(2, column).value = provider
+            row = 3
+            for event_name in simple_events[category][provider]:
+                worksheet.cell(row, column).value = event_name
+                worksheet.cell(row + 1, column + 1).value = "ad_platform"
+                worksheet.cell(row + 1, column + 2).value = provider
+                worksheet.cell(row + 2, column + 1).value = "ad_format"
+                worksheet.cell(row + 2, column + 2).value = "audio_rewarded" if category == "audioads" else "in_play"
+                row += 3
+
+    add_simple_sheet("audioads")
+    add_simple_sheet("inplayads")
+
+    parsed_normal = lc._read_default_ad_event_config(workbook)
+    expected_normal = {
+        ad_format: {
+            provider: list(normal_events[ad_format])
+            for provider in lc.DEFAULT_AD_EVENT_PROVIDERS
+        }
+        for ad_format in lc.DEFAULT_AD_EVENT_FORMATS
+    }
+    _assert_equal(parsed_normal, expected_normal, "normal Default Ad Event sheets parsed incorrectly")
+    parsed_simple = lc._read_default_ad_event_simple_config(workbook)
+    _assert_equal(parsed_simple, simple_events, "AudioAds/InplayAds sheets parsed incorrectly")
+
+    legacy_workbook = Workbook()
+    legacy_workbook.active.title = "events"
+    legacy_normal = lc._read_default_ad_event_config(legacy_workbook)
+    legacy_simple = lc._read_default_ad_event_simple_config(legacy_workbook)
+    _assert(
+        not any(event_names for providers in legacy_normal.values() for event_names in providers.values()),
+        "missing provider sheets must not create normal ad-event rows",
+    )
+    _assert(
+        not any(event_names for providers in legacy_simple.values() for event_names in providers.values()),
+        "missing AudioAds/InplayAds sheets must not create simple ad-event rows",
+    )
+
+    original_config = lc.default_ad_event_config
+    original_simple_config = lc.default_ad_event_simple_config
+    original_hits = set(lc.default_ad_event_hits)
+    original_simple_hits = set(lc.default_ad_event_simple_hits)
+    original_clients = set(lc.default_ad_event_clients)
+    original_paused = lc.is_paused
+    original_emit = lc.socketio.emit
+    emitted = []
+    try:
+        lc.default_ad_event_config = parsed_normal
+        lc.default_ad_event_simple_config = parsed_simple
+        lc.default_ad_event_hits.clear()
+        lc.default_ad_event_simple_hits.clear()
+        lc.default_ad_event_clients.clear()
+        lc.default_ad_event_clients.add("harness-client")
+        lc.is_paused = False
+        lc.socketio.emit = lambda event, payload: emitted.append((event, payload))
+
+        line = (
+            'Unity : TrackingService->Track: '
+            '{"eventName":"ad_impression","e":{"ad_platform":"CLOUDX","ad_format":"Rewarded"}}'
+        )
+        event_name, actual_params, _json_string = lc.find_and_parse_event(line)
+        _assert_equal(event_name, "ad_impression", "generic ad event was not parsed")
+        _assert_equal(
+            actual_params,
+            {"ad_platform": "CLOUDX", "ad_format": "Rewarded"},
+            "generic ad event parameters were not parsed",
+        )
+        lc._record_default_ad_event_hit(event_name, actual_params, "device-normal")
+        lc._record_default_ad_event_hit(
+            "ad_clicked",
+            {"ad_platform": "Audiomob", "ad_format": "audio_skippable"},
+            "device-simple",
+        )
+        lc._record_default_ad_event_hit(
+            "ad_rewarded",
+            {"ad_platform": "Cloudx", "ad_format": "interstitial"},
+            "device-wrong-format",
+        )
+
+        payload = lc._default_ad_event_payload()
+        _assert_equal(
+            payload["hits"],
+            [{
+                "device_id": "device-normal",
+                "provider": "cloudx",
+                "ad_format": "rewarded",
+                "event_name": "ad_impression",
+            }],
+            "normal ad-event match did not use both ad_platform and ad_format",
+        )
+        _assert_equal(
+            payload["simple_hits"],
+            [{
+                "device_id": "device-simple",
+                "category": "audioads",
+                "provider": "audiomob",
+                "event_name": "ad_clicked",
+            }],
+            "simple ad-event match did not use ad_platform-only matching",
+        )
+        _assert_equal(len(emitted), 2, "only matching ad events should emit coverage updates")
+
+        rendered = lc.app.test_client().get("/")
+        _assert_equal(rendered.status_code, 200, "Default Ad Events UI route must render")
+        html = rendered.get_data(as_text=True)
+        for marker in (
+            ">Default Ad Events</button>",
+            "defaultAdEventMatrix",
+            "defaultAdEventHitKey",
+            "defaultAdEventSimpleHitKey",
+            "Odeeo",
+            "Audiomob",
+            "Adverty",
+            "Gadsme",
+            "Simple providers are intentionally rendered as separate blocks",
+        ):
+            _assert(marker in html, f"Default Ad Events UI contract is missing: {marker}")
+    finally:
+        lc.default_ad_event_config = original_config
+        lc.default_ad_event_simple_config = original_simple_config
+        lc.default_ad_event_hits.clear()
+        lc.default_ad_event_hits.update(original_hits)
+        lc.default_ad_event_simple_hits.clear()
+        lc.default_ad_event_simple_hits.update(original_simple_hits)
+        lc.default_ad_event_clients.clear()
+        lc.default_ad_event_clients.update(original_clients)
+        lc.is_paused = original_paused
+        lc.socketio.emit = original_emit
+
+
 def test_installation_id_copy_contract() -> None:
     for source_path in (
         ROOT / "Log_checker.py",
@@ -606,7 +848,10 @@ def test_sdk_failed_groups_sort_first() -> None:
 
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    _assert("v2.5.0(50)" in text, "Log_checker.py must be prepared for v2.5.0(50)")
+    _assert(
+        f"v2.5.0({CURRENT_RELEASE_BUILD})" in text,
+        f"Log_checker.py must be prepared for v2.5.0({CURRENT_RELEASE_BUILD})",
+    )
     compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
         encoding="utf-8", errors="ignore"
     )
@@ -897,11 +1142,11 @@ def test_release_payload_sync() -> None:
         log_item["compat_sha256"],
         "compatibility Log_checker.py drift detected",
     )
-    _assert_equal(manifest["version"], "2026-08-20-1-2.5.0-50", "v2.5 release manifest version changed")
+    _assert_equal(manifest["version"], CURRENT_RELEASE_VERSION, "v2.5 release manifest version changed")
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": r"<title>Event Inspector v2\.5\.0\(50\)</title>",
+        "html_title": rf"<title>Event Inspector v2\.5\.0\({CURRENT_RELEASE_BUILD}\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -1486,9 +1731,9 @@ def test_update_flow_legacy_to_v25() -> None:
 
             first = updater.check_for_updates(force_refresh=True)
             _assert_equal(first.get("status"), "updated", "v2.5 client must prepare the release payload")
-            _assert_equal(first.get("version"), "2026-08-20-1-2.5.0-50", "prepared v2.5 payload version mismatch")
+            _assert_equal(first.get("version"), CURRENT_RELEASE_VERSION, "prepared v2.5 payload version mismatch")
             prepared = updater.get_prepared_update_info()
-            _assert_equal(prepared.get("build"), 50, "prepared v2.5 payload build mismatch")
+            _assert_equal(prepared.get("build"), CURRENT_RELEASE_BUILD, "prepared v2.5 payload build mismatch")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "Log_checker.py")), "prepared Log_checker.py missing")
             _assert(os.path.exists(os.path.join(prepared["update_dir"], "sdk_check_presets.json")), "prepared SDK preset file missing")
             _assert(
@@ -1506,6 +1751,25 @@ def test_update_flow_legacy_to_v25() -> None:
             _assert(
                 os.path.exists(os.path.join(prepared["update_dir"], "services_checker", "axml_fallback.py")),
                 "prepared dependency-free AXML fallback payload missing",
+            )
+
+            selected = desktop._select_prepared_update_candidate(
+                [{
+                    "update_dir": prepared["update_dir"],
+                    "build": prepared["build"],
+                    "source": "harness-prepared-release",
+                }],
+                bundled_build=50,
+            )
+            _assert(selected is not None, "bundle build 50 must accept the prepared build 51 payload")
+            _assert_equal(selected.get("build"), CURRENT_RELEASE_BUILD, "prepared build 51 was not selected")
+            updated_source = Path(prepared["update_dir"], "Log_checker.py").read_text(
+                encoding="utf-8", errors="ignore"
+            )
+            _assert("Default Ad Events" in updated_source, "prepared payload does not contain Default Ad Events")
+            _assert(
+                f"v2.5.0({CURRENT_RELEASE_BUILD})" in updated_source,
+                "prepared payload carries the wrong UI build marker",
             )
 
             second = updater.check_for_updates()
@@ -1698,7 +1962,10 @@ def test_windows_release_build_version_contract() -> None:
 def test_windows_update_recovery_script() -> None:
     script_path = ROOT / "tools" / "reset_update_state_windows.bat"
     text = script_path.read_text(encoding="utf-8", errors="ignore")
-    _assert('TARGET_VERSION=2026-08-20-1-2.5.0-50' in text, "windows recovery script must target the current release")
+    _assert(
+        f"TARGET_VERSION={CURRENT_RELEASE_VERSION}" in text,
+        "windows recovery script must target the current release",
+    )
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
@@ -1940,6 +2207,7 @@ TESTS: List[Callable[[], None]] = [
     test_cloudx_sdk_adapter_metadata,
     test_sdk_check_preset_contract,
     test_rendered_sdk_preset_javascript_contract,
+    test_default_ad_event_contract,
     test_installation_id_copy_contract,
     test_sdk_failed_groups_sort_first,
     test_release_build_marker,
