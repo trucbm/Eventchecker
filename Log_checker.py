@@ -3,6 +3,7 @@ import re
 import subprocess
 import threading
 import time
+import atexit
 import requests
 import html
 import importlib.util
@@ -188,6 +189,35 @@ def _resolve_default_params_path():
 
 DEFAULT_PARAMS_XLSX = _resolve_default_params_path()
 DEFAULT_PARAM_FILL = "FFFCE5CD"
+DEFAULT_AD_EVENT_PROVIDERS = ("ironsource", "cloudx", "ascendx")
+DEFAULT_AD_EVENT_PROVIDER_LABELS = {
+    "ironsource": "Ironsource",
+    "cloudx": "Cloudx",
+    "ascendx": "Ascendx",
+}
+DEFAULT_AD_EVENT_FORMATS = ("interstitial", "rewarded", "banner", "mrec")
+DEFAULT_AD_EVENT_FORMAT_LABELS = {
+    "interstitial": "Interstitial",
+    "rewarded": "Rewarded",
+    "banner": "Banner",
+    "mrec": "MREC",
+}
+DEFAULT_AD_EVENT_PARAM_KEYS = {"ad_platform", "ad_format"}
+DEFAULT_AD_EVENT_SIMPLE_CATEGORIES = ("audioads", "inplayads")
+DEFAULT_AD_EVENT_SIMPLE_CATEGORY_LABELS = {
+    "audioads": "AudioAds",
+    "inplayads": "InplayAds",
+}
+DEFAULT_AD_EVENT_SIMPLE_PROVIDERS = {
+    "audioads": ("odeeo", "audiomob"),
+    "inplayads": ("adverty", "gadsme"),
+}
+DEFAULT_AD_EVENT_SIMPLE_PROVIDER_LABELS = {
+    "odeeo": "Odeeo",
+    "audiomob": "Audiomob",
+    "adverty": "Adverty",
+    "gadsme": "Gadsme",
+}
 REMOTE_UPDATE_CONFIG_FILENAME = "remote_update_config_v250.json"
 DEFAULT_REMOTE_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/remote_manifest.json"
 DEFAULT_REMOTE_MANIFEST_URLS = [
@@ -1066,6 +1096,19 @@ required_params = []  # Manual extra params from UI
 default_params = []   # Default params from sheet (apply to all events)
 event_specific_params = {}  # event_name -> list of params
 validator_active = False
+
+# 3A. Dữ liệu coverage cho Tab Default Ad Events
+default_ad_event_config = {
+    ad_format: {provider: [] for provider in DEFAULT_AD_EVENT_PROVIDERS}
+    for ad_format in DEFAULT_AD_EVENT_FORMATS
+}
+default_ad_event_hits = set()  # (device_id, provider, ad_format, event_name)
+default_ad_event_simple_config = {
+    category: {provider: [] for provider in DEFAULT_AD_EVENT_SIMPLE_PROVIDERS[category]}
+    for category in DEFAULT_AD_EVENT_SIMPLE_CATEGORIES
+}
+default_ad_event_simple_hits = set()  # (device_id, category, provider, event_name)
+default_ad_event_clients = set()
 
 # 4. Dữ liệu cho Tab Specific Event
 event_log_cache = deque(maxlen=MAX_SPECIFIC_EVENT_LOGS)
@@ -2695,6 +2738,423 @@ def _read_profile_sheet(ws, allow_default_fill=True):
     return game_name, merged_default, {k: v["specific"] for k, v in event_map.items()}
 
 
+def _normalize_default_ad_event_token(value):
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().casefold())
+
+
+def _normalize_default_ad_event_provider(value):
+    aliases = {
+        "ironsource": "ironsource",
+        "iron": "ironsource",
+        "cloudx": "cloudx",
+        "ascendx": "ascendx",
+    }
+    return aliases.get(_normalize_default_ad_event_token(value), "")
+
+
+def _normalize_default_ad_event_simple_category(value):
+    aliases = {
+        "audioads": "audioads",
+        "audioad": "audioads",
+        "inplayads": "inplayads",
+        "inplayad": "inplayads",
+        "inplay": "inplayads",
+    }
+    return aliases.get(_normalize_default_ad_event_token(value), "")
+
+
+def _normalize_default_ad_event_simple_provider(value):
+    aliases = {
+        "odeeo": "odeeo",
+        "audiomob": "audiomob",
+        "adverty": "adverty",
+        "gadsme": "gadsme",
+    }
+    return aliases.get(_normalize_default_ad_event_token(value), "")
+
+
+def _normalize_default_ad_event_format(value):
+    aliases = {
+        "interstitial": "interstitial",
+        "rewarded": "rewarded",
+        "rewardedvideo": "rewarded",
+        "banner": "banner",
+        "mrec": "mrec",
+        "mediumrectangle": "mrec",
+    }
+    return aliases.get(_normalize_default_ad_event_token(value), "")
+
+
+def _normalize_default_ad_event_param_key(value):
+    token = _normalize_default_ad_event_token(value)
+    return {
+        "adplatform": "ad_platform",
+        "adformat": "ad_format",
+    }.get(token, "")
+
+
+def _normalize_default_ad_event_name(value):
+    return str(value or "").strip().casefold()
+
+
+def _is_default_ad_event_name(value):
+    text = str(value or "").strip()
+    if not text.casefold().startswith("ad_"):
+        return False
+    return _normalize_default_ad_event_param_key(text) == ""
+
+
+def _new_default_ad_event_config():
+    return {
+        ad_format: {provider: [] for provider in DEFAULT_AD_EVENT_PROVIDERS}
+        for ad_format in DEFAULT_AD_EVENT_FORMATS
+    }
+
+
+def _new_default_ad_event_simple_config():
+    return {
+        category: {provider: [] for provider in DEFAULT_AD_EVENT_SIMPLE_PROVIDERS[category]}
+        for category in DEFAULT_AD_EVENT_SIMPLE_CATEGORIES
+    }
+
+
+def _read_default_ad_event_sheet(ws, provider):
+    """Read one provider sheet laid out as horizontal or vertical format blocks."""
+    records = {}
+
+    # The reference template has four merged headings on one row. The first
+    # occurrence of each format is the heading; later occurrences are values
+    # in the ad_format parameter rows and must not become new blocks.
+    headings_by_format = {}
+    for row in ws.iter_rows():
+        for cell in row:
+            ad_format = _normalize_default_ad_event_format(cell.value)
+            if ad_format and ad_format not in headings_by_format:
+                headings_by_format[ad_format] = (cell.row, cell.column)
+
+    headings = sorted(
+        (
+            ad_format,
+            position[0],
+            position[1],
+        )
+        for ad_format, position in headings_by_format.items()
+    )
+
+    for ad_format, heading_row, heading_column in headings:
+        # A following heading in the same column means vertically stacked
+        # blocks. A following heading in the same row means side-by-side
+        # blocks. This keeps the parser compatible with both spreadsheet forms.
+        vertical_boundaries = [
+            row
+            for _, row, column in headings
+            if column == heading_column and row > heading_row
+        ]
+        horizontal_boundaries = [
+            column
+            for _, row, column in headings
+            if row == heading_row and column > heading_column
+        ]
+        row_end = min(vertical_boundaries) - 1 if vertical_boundaries else ws.max_row
+        column_end = min(horizontal_boundaries) - 1 if horizontal_boundaries else ws.max_column
+        current_event = None
+
+        for row in range(heading_row + 1, row_end + 1):
+            event_value = ws.cell(row, heading_column).value
+            if _is_default_ad_event_name(event_value):
+                current_event = str(event_value).strip()
+                records.setdefault((ad_format, current_event), {})
+
+            if not current_event:
+                continue
+
+            record = records.setdefault((ad_format, current_event), {})
+            for column in range(heading_column + 1, column_end + 1):
+                key = _normalize_default_ad_event_param_key(ws.cell(row, column).value)
+                if not key:
+                    continue
+                value = None
+                for value_column in range(column + 1, column_end + 1):
+                    value_cell = ws.cell(row, value_column)
+                    if value_cell.value is not None and str(value_cell.value).strip():
+                        value = str(value_cell.value).strip()
+                        break
+                if value:
+                    record[key] = value
+
+    parsed = {ad_format: [] for ad_format in DEFAULT_AD_EVENT_FORMATS}
+    for (ad_format, event_name), params in records.items():
+        configured_provider = _normalize_default_ad_event_provider(params.get("ad_platform"))
+        configured_format = _normalize_default_ad_event_format(params.get("ad_format"))
+        if configured_provider != provider or configured_format != ad_format:
+            continue
+        if event_name not in parsed[ad_format]:
+            parsed[ad_format].append(event_name)
+    return parsed
+
+
+def _read_default_ad_event_config(wb):
+    config = _new_default_ad_event_config()
+    for ws in wb.worksheets:
+        provider = _normalize_default_ad_event_provider(ws.title)
+        if not provider:
+            continue
+        parsed = _read_default_ad_event_sheet(ws, provider)
+        for ad_format, event_names in parsed.items():
+            config[ad_format][provider].extend(event_names)
+    return config
+
+
+def _read_default_ad_event_simple_sheet(ws, category):
+    """Read AudioAds/InplayAds blocks where each block is identified by platform."""
+    expected_providers = set(DEFAULT_AD_EVENT_SIMPLE_PROVIDERS.get(category, ()))
+    headings = []
+
+    # The supplied workbook uses merged platform headings such as B2:D2 and
+    # F2:H2. Reading only merged headings prevents ad_platform values in the
+    # parameter rows from being mistaken for another block.
+    for merged_range in ws.merged_cells.ranges:
+        if merged_range.min_row != merged_range.max_row or merged_range.min_row > 5:
+            continue
+        provider = _normalize_default_ad_event_simple_provider(
+            ws.cell(merged_range.min_row, merged_range.min_col).value
+        )
+        if provider in expected_providers:
+            headings.append((provider, merged_range.min_row, merged_range.min_col))
+
+    # Keep compatibility with a simple unmerged layout whose platform names
+    # are placed in the first few rows.
+    if not headings:
+        for row in range(1, min(ws.max_row, 3) + 1):
+            for column in range(1, ws.max_column + 1):
+                provider = _normalize_default_ad_event_simple_provider(ws.cell(row, column).value)
+                if provider in expected_providers:
+                    headings.append((provider, row, column))
+
+    headings = sorted(set(headings), key=lambda item: (item[1], item[2], item[0]))
+    parsed = {provider: [] for provider in DEFAULT_AD_EVENT_SIMPLE_PROVIDERS.get(category, ())}
+    if not headings:
+        return parsed
+
+    for provider, heading_row, heading_column in headings:
+        vertical_boundaries = [
+            row
+            for other_provider, row, column in headings
+            if column == heading_column and row > heading_row
+        ]
+        horizontal_boundaries = [
+            column
+            for other_provider, row, column in headings
+            if row == heading_row and column > heading_column
+        ]
+        row_end = min(vertical_boundaries) - 1 if vertical_boundaries else ws.max_row
+        column_end = min(horizontal_boundaries) - 1 if horizontal_boundaries else ws.max_column
+
+        for row in range(heading_row + 1, row_end + 1):
+            event_name = ws.cell(row, heading_column).value
+            if not _is_default_ad_event_name(event_name):
+                continue
+            event_name = str(event_name).strip()
+            if event_name and event_name not in parsed[provider]:
+                parsed[provider].append(event_name)
+
+    return parsed
+
+
+def _read_default_ad_event_simple_config(wb):
+    config = _new_default_ad_event_simple_config()
+    for ws in wb.worksheets:
+        category = _normalize_default_ad_event_simple_category(ws.title)
+        if not category:
+            continue
+        parsed = _read_default_ad_event_simple_sheet(ws, category)
+        for provider, event_names in parsed.items():
+            config[category][provider].extend(event_names)
+    return config
+
+
+def _default_ad_event_catalog_payload():
+    formats = []
+    for ad_format in DEFAULT_AD_EVENT_FORMATS:
+        event_names = []
+        for provider in DEFAULT_AD_EVENT_PROVIDERS:
+            for event_name in default_ad_event_config.get(ad_format, {}).get(provider, []):
+                if event_name not in event_names:
+                    event_names.append(event_name)
+        formats.append({
+            "key": ad_format,
+            "label": DEFAULT_AD_EVENT_FORMAT_LABELS[ad_format],
+            "events": [
+                {
+                    "name": event_name,
+                    "providers": [
+                        provider
+                        for provider in DEFAULT_AD_EVENT_PROVIDERS
+                        if event_name in default_ad_event_config.get(ad_format, {}).get(provider, [])
+                    ],
+                }
+                for event_name in event_names
+            ],
+        })
+    return {
+        "providers": [
+            {"key": provider, "label": DEFAULT_AD_EVENT_PROVIDER_LABELS[provider]}
+            for provider in DEFAULT_AD_EVENT_PROVIDERS
+        ],
+        "formats": formats,
+    }
+
+
+def _default_ad_event_simple_catalog_payload():
+    categories = []
+    for category in DEFAULT_AD_EVENT_SIMPLE_CATEGORIES:
+        providers = [
+            {
+                "key": provider,
+                "label": DEFAULT_AD_EVENT_SIMPLE_PROVIDER_LABELS[provider],
+            }
+            for provider in DEFAULT_AD_EVENT_SIMPLE_PROVIDERS[category]
+            if default_ad_event_simple_config.get(category, {}).get(provider) is not None
+        ]
+        event_names = []
+        for provider in DEFAULT_AD_EVENT_SIMPLE_PROVIDERS[category]:
+            for event_name in default_ad_event_simple_config.get(category, {}).get(provider, []):
+                if event_name not in event_names:
+                    event_names.append(event_name)
+        if not event_names:
+            continue
+        categories.append({
+            "key": category,
+            "label": DEFAULT_AD_EVENT_SIMPLE_CATEGORY_LABELS[category],
+            "providers": providers,
+            "events": [
+                {
+                    "name": event_name,
+                    "providers": [
+                        provider
+                        for provider in DEFAULT_AD_EVENT_SIMPLE_PROVIDERS[category]
+                        if event_name in default_ad_event_simple_config.get(category, {}).get(provider, [])
+                    ],
+                }
+                for event_name in event_names
+            ],
+        })
+    return categories
+
+
+def _default_ad_event_payload_unlocked():
+    format_order = {value: index for index, value in enumerate(DEFAULT_AD_EVENT_FORMATS)}
+    provider_order = {value: index for index, value in enumerate(DEFAULT_AD_EVENT_PROVIDERS)}
+    category_order = {value: index for index, value in enumerate(DEFAULT_AD_EVENT_SIMPLE_CATEGORIES)}
+    hits = []
+    for device_id, provider, ad_format, event_name in sorted(
+        default_ad_event_hits,
+        key=lambda item: (
+            format_order.get(item[2], 99),
+            provider_order.get(item[1], 99),
+            _normalize_default_ad_event_name(item[3]),
+            str(item[0]),
+        ),
+    ):
+        hits.append({
+            "device_id": device_id,
+            "provider": provider,
+            "ad_format": ad_format,
+            "event_name": event_name,
+        })
+    simple_hits = []
+    for device_id, category, provider, event_name in sorted(
+        default_ad_event_simple_hits,
+        key=lambda item: (
+            category_order.get(item[1], 99),
+            DEFAULT_AD_EVENT_SIMPLE_PROVIDERS.get(item[1], ()).index(item[2])
+            if item[2] in DEFAULT_AD_EVENT_SIMPLE_PROVIDERS.get(item[1], ()) else 99,
+            _normalize_default_ad_event_name(item[3]),
+            str(item[0]),
+        ),
+    ):
+        simple_hits.append({
+            "device_id": device_id,
+            "category": category,
+            "provider": provider,
+            "event_name": event_name,
+        })
+    payload = _default_ad_event_catalog_payload()
+    payload["hits"] = hits
+    payload["simple_categories"] = _default_ad_event_simple_catalog_payload()
+    payload["simple_hits"] = simple_hits
+    return payload
+
+
+def _default_ad_event_payload():
+    with lock:
+        return _default_ad_event_payload_unlocked()
+
+
+def _clear_default_ad_event_history():
+    """Clear only runtime ad-event hits; keep the imported profile catalog intact."""
+    with lock:
+        default_ad_event_hits.clear()
+        default_ad_event_simple_hits.clear()
+
+
+atexit.register(_clear_default_ad_event_history)
+
+
+def _record_default_ad_event_hit(event_name, actual_params, device_id):
+    if is_paused or not isinstance(actual_params, dict):
+        return
+    provider = _normalize_default_ad_event_provider(actual_params.get("ad_platform"))
+    ad_format = _normalize_default_ad_event_format(actual_params.get("ad_format"))
+    simple_provider = _normalize_default_ad_event_simple_provider(actual_params.get("ad_platform"))
+    event_key = _normalize_default_ad_event_name(event_name)
+    if not event_key:
+        return
+
+    with lock:
+        if not default_ad_event_clients:
+            return
+        changed = False
+
+        if provider and ad_format:
+            configured_event = next(
+                (
+                    configured
+                    for configured in default_ad_event_config.get(ad_format, {}).get(provider, [])
+                    if _normalize_default_ad_event_name(configured) == event_key
+                ),
+                None,
+            )
+            if configured_event:
+                hit = (str(device_id or ""), provider, ad_format, configured_event)
+                if hit not in default_ad_event_hits:
+                    default_ad_event_hits.add(hit)
+                    changed = True
+
+        if simple_provider:
+            for category in DEFAULT_AD_EVENT_SIMPLE_CATEGORIES:
+                configured_event = next(
+                    (
+                        configured
+                        for configured in default_ad_event_simple_config.get(category, {}).get(simple_provider, [])
+                        if _normalize_default_ad_event_name(configured) == event_key
+                    ),
+                    None,
+                )
+                if not configured_event:
+                    continue
+                simple_hit = (str(device_id or ""), category, simple_provider, configured_event)
+                if simple_hit in default_ad_event_simple_hits:
+                    continue
+                default_ad_event_simple_hits.add(simple_hit)
+                changed = True
+
+        if not changed:
+            return
+        payload = _default_ad_event_payload_unlocked()
+    socketio.emit("update_default_ad_events", payload)
+
+
 def _normalize_adrevenue_sheet_key(name):
     text = re.sub(r'[^a-z0-9]+', '', str(name or "").lower())
     aliases = {
@@ -2750,6 +3210,8 @@ def load_default_params_config():
     """Load default params, event-specific params, and AdRevenue params from XLSX."""
     global default_params, event_specific_params, active_profile_game_name
     global adrevenue_default_params, adrevenue_source_params
+    global default_ad_event_config
+    global default_ad_event_simple_config
     path = active_profile_path or DEFAULT_PARAMS_XLSX
     if not path or not os.path.exists(path):
         print(f"INFO: Default params sheet not found: {path}")
@@ -2758,10 +3220,31 @@ def load_default_params_config():
         active_profile_game_name = ""
         adrevenue_default_params = []
         adrevenue_source_params = {}
+        with lock:
+            default_ad_event_config = _new_default_ad_event_config()
+            default_ad_event_simple_config = _new_default_ad_event_simple_config()
+            default_ad_event_hits.clear()
+            default_ad_event_simple_hits.clear()
         return
     try:
         wb = load_workbook(path)
-        active_profile_game_name, default_params, event_specific_params = _read_profile_sheet(wb.active, allow_default_fill=True)
+        profile_sheet = wb.active
+        if _normalize_default_ad_event_provider(profile_sheet.title):
+            profile_sheet = next(
+                (
+                    ws for ws in wb.worksheets
+                    if not _normalize_default_ad_event_provider(ws.title)
+                ),
+                profile_sheet,
+            )
+        active_profile_game_name, default_params, event_specific_params = _read_profile_sheet(profile_sheet, allow_default_fill=True)
+        parsed_ad_event_config = _read_default_ad_event_config(wb)
+        parsed_ad_event_simple_config = _read_default_ad_event_simple_config(wb)
+        with lock:
+            default_ad_event_config = parsed_ad_event_config
+            default_ad_event_simple_config = parsed_ad_event_simple_config
+            default_ad_event_hits.clear()
+            default_ad_event_simple_hits.clear()
 
         revenue_defaults = []
         revenue_specific = {}
@@ -2794,6 +3277,11 @@ def load_default_params_config():
         active_profile_game_name = ""
         adrevenue_default_params = []
         adrevenue_source_params = {}
+        with lock:
+            default_ad_event_config = _new_default_ad_event_config()
+            default_ad_event_simple_config = _new_default_ad_event_simple_config()
+            default_ad_event_hits.clear()
+            default_ad_event_simple_hits.clear()
 
 
 def _sanitize_profile_filename(filename):
@@ -2914,6 +3402,7 @@ def _profile_payload():
         "game_name": active_profile_game_name,
         "profile_dir": PROFILE_DIR,
         "default_event_names": sorted(event_specific_params.keys()),
+        "default_ad_event_data": _default_ad_event_payload(),
     }
 
 def _levenshtein_distance_limit(a, b, limit=2):
@@ -3095,6 +3584,7 @@ HTML_TEMPLATE = """
                     <button id="tabBtnLoadAdsExt" class="tab-btn active text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('LoadAdsExt')">Load Ads</button>
                     
                     <button id="tabBtnValidator" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Validator')">Default Events/Params</button>
+                    <button id="tabBtnDefaultAdEvents" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('DefaultAdEvents')">Default Ad Events</button>
                     <button id="tabBtnSpecific" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Specific')">Specific Validator</button>
                     <button id="tabBtnAdRevenue" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('AdRevenue')">Revenue</button>
                     <button id="tabBtnCallbackAd" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('CallbackAd')">CallBack & Ads</button>
@@ -3238,6 +3728,19 @@ HTML_TEMPLATE = """
                         </table>
                     </div>
                 </div>
+            </div>
+
+            <!-- TAB 3A: Default Ad Events -->
+            <div id="tabContentDefaultAdEvents" class="hidden">
+                <div class="bg-white rounded-xl shadow-md p-4 mb-4">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <label for="defaultAdEventProfileSelect" class="text-xs font-medium text-gray-700">Default File:</label>
+                        <select id="defaultAdEventProfileSelect" class="h-9 min-w-[260px] px-3 border rounded-md shadow-sm text-xs"></select>
+                        <span id="defaultAdEventProfileGameText" class="text-xs font-medium text-indigo-700"></span>
+                        <span class="text-xs text-gray-500">✓ = 3 bảng đầu khớp ad_platform + ad_format; các bảng platform riêng khớp ad_platform; ô trống = chưa thấy log</span>
+                    </div>
+                </div>
+                <div id="defaultAdEventMatrix" class="space-y-4"></div>
             </div>
 
             <!-- TAB 3A: BrightSDK -->
@@ -4079,7 +4582,7 @@ HTML_TEMPLATE = """
         function switchTab(tabName) {
             currentTab = tabName;
             // Hide all contents with Safety Check
-            ['tabContentLoadAds', 'tabContentLoadAdsExt', 'tabContentValidator', 'tabContentBrightSDK', 'tabContentSpecific', 'tabContentAdRevenue', 'tabContentCallbackAd', 'tabContentPriceRotation', 'tabContentSdkCheck', 'tabContentServicesChecker', 'tabContentPackage'].forEach(id => {
+            ['tabContentLoadAds', 'tabContentLoadAdsExt', 'tabContentValidator', 'tabContentDefaultAdEvents', 'tabContentBrightSDK', 'tabContentSpecific', 'tabContentAdRevenue', 'tabContentCallbackAd', 'tabContentPriceRotation', 'tabContentSdkCheck', 'tabContentServicesChecker', 'tabContentPackage'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.classList.add('hidden');
                 else console.warn('Missing element ID:', id);
@@ -4260,6 +4763,144 @@ HTML_TEMPLATE = """
         let defaultEventNames = {{ default_event_names | tojson }};
         let defaultEventStatusEls = {};
         let currentProfileName = {{ current_profile_name | tojson }};
+        let defaultAdEventData = {{ default_ad_event_data | tojson }};
+
+        function defaultAdEventHitKey(adFormat, provider, eventName) {
+            return [adFormat, provider, String(eventName || '').trim().toLowerCase()].join('|');
+        }
+
+        function defaultAdEventSimpleHitKey(category, provider, eventName) {
+            return [category, provider, String(eventName || '').trim().toLowerCase()].join('|');
+        }
+
+        function renderDefaultAdEventMatrix() {
+            const container = document.getElementById('defaultAdEventMatrix');
+            if (!container) return;
+            const data = defaultAdEventData || {};
+            const providers = Array.isArray(data.providers) ? data.providers : [];
+            const formats = Array.isArray(data.formats) ? data.formats : [];
+            const simpleCategories = Array.isArray(data.simple_categories) ? data.simple_categories : [];
+            const hits = new Set(
+                (Array.isArray(data.hits) ? data.hits : [])
+                    .filter(hit => selectedDevice === 'all' || hit.device_id === selectedDevice)
+                    .map(hit => defaultAdEventHitKey(hit.ad_format, hit.provider, hit.event_name))
+            );
+            const simpleHits = new Set(
+                (Array.isArray(data.simple_hits) ? data.simple_hits : [])
+                    .filter(hit => selectedDevice === 'all' || hit.device_id === selectedDevice)
+                    .map(hit => defaultAdEventSimpleHitKey(hit.category, hit.provider, hit.event_name))
+            );
+
+            const hasFormats = formats.some(section => Array.isArray(section.events) && section.events.length);
+            const hasSimpleCategories = simpleCategories.some(section => Array.isArray(section.events) && section.events.length);
+            if (!hasFormats && !hasSimpleCategories) {
+                container.innerHTML = '<div class="bg-white rounded-xl shadow-md p-4 text-sm text-gray-400">No default ad events configured</div>';
+                return;
+            }
+
+            const coverageFor = (section, providerKey) => {
+                const events = Array.isArray(section.events) ? section.events : [];
+                const configured = events.filter(event => (event.providers || []).includes(providerKey));
+                const checked = configured.filter(event => hits.has(defaultAdEventHitKey(section.key, providerKey, event.name)));
+                return {checked: checked.length, total: configured.length};
+            };
+            const totalCoverageFor = (providerKey) => formats.reduce((summary, section) => {
+                const current = coverageFor(section, providerKey);
+                summary.checked += current.checked;
+                summary.total += current.total;
+                return summary;
+            }, {checked: 0, total: 0});
+            const summaryCards = providers.map(provider => {
+                const summary = totalCoverageFor(provider.key);
+                return `<div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 min-w-[150px]">
+                    <div class="text-xs font-semibold text-slate-600">${escapeHTML(provider.label || provider.key || '')}</div>
+                    <div class="text-lg font-bold ${summary.checked ? 'text-green-600' : 'text-slate-500'}">${summary.checked}/${summary.total}</div>
+                    <div class="text-[11px] text-slate-500">matched events</div>
+                </div>`;
+            }).join('');
+            const sections = formats.map(section => {
+                const events = Array.isArray(section.events) ? section.events : [];
+                if (!events.length) return '';
+                const rows = events.map(event => {
+                    const configuredProviders = new Set(event.providers || []);
+                    return `<tr class="border-b last:border-b-0 hover:bg-gray-50">
+                        <td class="py-2 px-3 text-sm font-semibold text-gray-800 whitespace-nowrap">${escapeHTML(event.name || '')}</td>
+                        ${providers.map(provider => {
+                            const configured = configuredProviders.has(provider.key);
+                            const checked = configured && hits.has(defaultAdEventHitKey(section.key, provider.key, event.name));
+                            return `<td class="py-2 px-3 text-center text-lg ${checked ? 'text-green-600 font-bold' : 'text-gray-300'}">${checked ? '✓' : ''}</td>`;
+                        }).join('')}
+                    </tr>`;
+                }).join('');
+                const sectionCoverage = providers.map(provider => {
+                    const summary = coverageFor(section, provider.key);
+                    return `<span class="text-[10px] font-normal text-slate-500">${summary.checked}/${summary.total}</span>`;
+                });
+                return `<section class="bg-white rounded-xl shadow-md p-4">
+                    <h3 class="text-base font-bold text-gray-800 mb-3">${escapeHTML(section.label || section.key || '')}</h3>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full bg-white">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Event</th>
+                                    ${providers.map((provider, index) => `<th class="text-center text-sm font-semibold text-gray-600 py-2 px-3 border-b">${escapeHTML(provider.label || provider.key || '')}<br>${sectionCoverage[index]}</th>`).join('')}
+                                </tr>
+                            </thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                    </div>
+                </section>`;
+            }).join('');
+            const simpleSummaryCards = simpleCategories.reduce((html, category) => {
+                const providersForCategory = Array.isArray(category.providers) ? category.providers : [];
+                const events = Array.isArray(category.events) ? category.events : [];
+                const cards = providersForCategory.map(provider => {
+                    const configured = events.filter(event => (event.providers || []).includes(provider.key));
+                    const checked = configured.filter(event => simpleHits.has(defaultAdEventSimpleHitKey(category.key, provider.key, event.name)));
+                    return `<div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 min-w-[150px]">
+                        <div class="text-xs font-semibold text-slate-600">${escapeHTML(provider.label || provider.key || '')}</div>
+                        <div class="text-lg font-bold ${checked.length ? 'text-green-600' : 'text-slate-500'}">${checked.length}/${configured.length}</div>
+                        <div class="text-[11px] text-slate-500">matched events</div>
+                    </div>`;
+                }).join('');
+                return html + cards;
+            }, '');
+            // Simple providers are intentionally rendered as separate blocks.
+            // Their workbook sheets contain one event list per platform, so a
+            // shared category table would incorrectly mix unrelated events.
+            const simpleSections = simpleCategories.reduce((html, category) => {
+                const categoryProviders = Array.isArray(category.providers) ? category.providers : [];
+                const events = Array.isArray(category.events) ? category.events : [];
+                const providerBlocks = categoryProviders.map(provider => {
+                    const configuredEvents = events.filter(event => (event.providers || []).includes(provider.key));
+                    if (!configuredEvents.length) return '';
+                    const checkedCount = configuredEvents.filter(event => simpleHits.has(defaultAdEventSimpleHitKey(category.key, provider.key, event.name))).length;
+                    const rows = configuredEvents.map(event => {
+                        const checked = simpleHits.has(defaultAdEventSimpleHitKey(category.key, provider.key, event.name));
+                        return `<tr class="border-b last:border-b-0 hover:bg-gray-50">
+                            <td class="py-2 px-3 text-sm font-semibold text-gray-800 whitespace-nowrap">${escapeHTML(event.name || '')}</td>
+                            <td class="py-2 px-3 text-center text-lg ${checked ? 'text-green-600 font-bold' : 'text-gray-300'}">${checked ? '✓' : ''}</td>
+                        </tr>`;
+                    }).join('');
+                    return `<section class="bg-white rounded-xl shadow-md p-4">
+                        <h3 class="text-base font-bold text-gray-800 mb-3">${escapeHTML(provider.label || provider.key || '')}</h3>
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full bg-white">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Event</th>
+                                        <th class="text-center text-sm font-semibold text-gray-600 py-2 px-3 border-b">${escapeHTML(provider.label || provider.key || '')}<br><span class="text-[10px] font-normal">${checkedCount}/${configuredEvents.length}</span></th>
+                                    </tr>
+                                </thead>
+                                <tbody>${rows}</tbody>
+                            </table>
+                        </div>
+                    </section>`;
+                }).join('');
+                return html + providerBlocks;
+            }, '');
+            container.innerHTML = `<div class="flex flex-wrap gap-3">${summaryCards}${simpleSummaryCards}</div>${sections}${simpleSections}`;
+        }
 
         function updateProfileStatus(payload) {
             const gameEl = document.getElementById('profileGameText');
@@ -4279,7 +4920,7 @@ HTML_TEMPLATE = """
 
         function renderProfileOptions(payload) {
             const profiles = payload.profiles || [];
-            [document.getElementById('profileSelect'), document.getElementById('adRevenueProfileSelect')].forEach(select => {
+            [document.getElementById('profileSelect'), document.getElementById('adRevenueProfileSelect'), document.getElementById('defaultAdEventProfileSelect')].forEach(select => {
                 if (!select) return;
                 select.innerHTML = profiles.length
                     ? profiles.map(name => `<option value="${escapeAttribute(name)}"${name === payload.current_profile ? ' selected' : ''}>${escapeHTML(name)}</option>`).join('')
@@ -4288,12 +4929,18 @@ HTML_TEMPLATE = """
             });
             currentProfileName = payload.current_profile || '';
             defaultEventNames = payload.default_event_names || [];
+            defaultAdEventData = payload.default_ad_event_data || {providers: [], formats: [], hits: [], simple_categories: [], simple_hits: []};
             renderDefaultEventStatusList();
             updateDefaultEventStatus(validator_results_cache);
+            renderDefaultAdEventMatrix();
             updateProfileStatus(payload);
             const adRevenueGameEl = document.getElementById('adRevenueProfileGameText');
             if (adRevenueGameEl) {
                 adRevenueGameEl.textContent = payload.game_name || 'Unknown';
+            }
+            const defaultAdEventGameEl = document.getElementById('defaultAdEventProfileGameText');
+            if (defaultAdEventGameEl) {
+                defaultAdEventGameEl.textContent = payload.game_name || 'Unknown';
             }
         }
 
@@ -4381,6 +5028,7 @@ HTML_TEMPLATE = """
              }
         }
 
+        renderDefaultAdEventMatrix();
         renderDefaultEventStatusList();
         refreshProfiles().catch(() => {});
 
@@ -4450,6 +5098,10 @@ HTML_TEMPLATE = """
         });
 
         document.getElementById('adRevenueProfileSelect')?.addEventListener('change', async (e) => {
+            await switchSharedProfile(e.target.value);
+        });
+
+        document.getElementById('defaultAdEventProfileSelect')?.addEventListener('change', async (e) => {
             await switchSharedProfile(e.target.value);
         });
 
@@ -4533,6 +5185,11 @@ HTML_TEMPLATE = """
             validator_results_cache = d || [];
             renderValidatorTable(validator_results_cache);
             updateDefaultEventStatus(validator_results_cache);
+        });
+
+        socket.on('update_default_ad_events', (d) => {
+            defaultAdEventData = d || {providers: [], formats: [], hits: [], simple_categories: [], simple_hits: []};
+            renderDefaultAdEventMatrix();
         });
 
         let lastSpecificEventData = [];
@@ -5404,6 +6061,7 @@ HTML_TEMPLATE = """
             renderCallbackTable(); // Trigger client-side re-render immediately
             renderAdRevenueTable();
             renderPriceRotationTable();
+            renderDefaultAdEventMatrix();
         });
 
         // --- Specific Tab Logic ---
@@ -5984,6 +6642,7 @@ def index():
         HTML_TEMPLATE,
         default_event_names=sorted(event_specific_params.keys()),
         current_profile_name=active_profile_name,
+        default_ad_event_data=_default_ad_event_payload(),
         sdk_check_presets=_load_sdk_check_presets(),
     )
 
@@ -6057,6 +6716,7 @@ def select_profile():
         if not _set_active_profile(profile_name):
             return jsonify({'ok': False, 'error': 'profile_not_found'}), 404
         _apply_adrevenue_filter_and_emit()
+        socketio.emit('update_default_ad_events', _default_ad_event_payload())
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
     return jsonify({'ok': True, **_profile_payload()})
@@ -6069,6 +6729,7 @@ def reload_profile():
     else:
         _set_active_profile()
     _apply_adrevenue_filter_and_emit()
+    socketio.emit('update_default_ad_events', _default_ad_event_payload())
     return jsonify({'ok': True, **_profile_payload()})
 
 
@@ -6084,6 +6745,7 @@ def import_profile():
         upload.save(target)
         _set_active_profile(filename)
         _apply_adrevenue_filter_and_emit()
+        socketio.emit('update_default_ad_events', _default_ad_event_payload())
         return jsonify({'ok': True, **_profile_payload()})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
@@ -6164,6 +6826,7 @@ def restart_app():
     args = os.getenv('EVENTINSPECTOR_RESTART_ARGS', '')
     if not cmd:
         return jsonify({'ok': False, 'error': 'restart_cmd_missing'})
+    _clear_default_ad_event_history()
     argv = [cmd]
     if args:
         argv.append(args)
@@ -7960,6 +8623,7 @@ def adb_log_reader(device_id):
             # 6. Parse Generic Events for Validators
             event_name, params, json_string = find_and_parse_event(line)
             if event_name:
+                _record_default_ad_event_hit(event_name, params, device_id)
                 process_event_validator_log(event_name, params, json_string, line, device_id)
                 cache_specific_event_log(event_name, params, json_string, line, device_id)
                 # Call callback processor for "ad_" events
@@ -8007,6 +8671,7 @@ def ios_log_reader(device_id):
             process_callback_and_ad_event_log(log_obj["raw_log"], device_id)
             event_name, params, json_string = find_and_parse_event(log_obj["raw_log"])
             if event_name:
+                _record_default_ad_event_hit(event_name, params, device_id)
                 process_event_validator_log(event_name, params, json_string, log_obj["raw_log"], device_id)
                 cache_specific_event_log(event_name, params, json_string, log_obj["raw_log"], device_id)
                 process_callback_and_ad_event_log(log_obj["raw_log"], device_id, event_name, params, json_string)
@@ -8324,6 +8989,7 @@ def handle_change_tab(data):
     # Sync logs for current tab on switch
     if data.get('tab_name') == 'LoadAds': socketio.emit('update_load_ads', list(load_ads_events))
     if data.get('tab_name') == 'LoadAdsExt': socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
+    if data.get('tab_name') == 'DefaultAdEvents': socketio.emit('update_default_ad_events', _default_ad_event_payload())
     if data.get('tab_name') == 'SdkCheck': _emit_sdk_check_results()
     if data.get('tab_name') == 'CallbackAd': socketio.emit('update_callback_ad_table', list(callback_ad_logs))
     if data.get('tab_name') == 'PriceRotation': socketio.emit('update_price_rotation_table', list(price_rotation_logs))
@@ -8348,6 +9014,8 @@ def _reset_runtime_for_platform_switch():
         load_ads_events.clear(); unique_load_ads.clear()
         load_ads_ext_events.clear(); unique_load_ads_ext.clear()
         validator_results.clear()
+        default_ad_event_hits.clear()
+        default_ad_event_simple_hits.clear()
         specific_event_name_filters = []
         specific_event_params_filters = []
         specific_event_results.clear(); event_log_cache.clear()
@@ -8387,6 +9055,7 @@ def _reset_runtime_for_platform_switch():
     socketio.emit('update_load_ads', [])
     socketio.emit('update_load_ads_ext', [])
     socketio.emit('update_validator_table', [])
+    socketio.emit('update_default_ad_events', _default_ad_event_payload())
     socketio.emit('update_specific_event_table', [])
     socketio.emit('update_adrevenue_table', [])
     socketio.emit('update_callback_ad_table', [])
@@ -8461,6 +9130,8 @@ def cl():
         load_ads_events.clear(); unique_load_ads.clear()
         load_ads_ext_events.clear(); unique_load_ads_ext.clear()
         validator_results.clear()
+        default_ad_event_hits.clear()
+        default_ad_event_simple_hits.clear()
         specific_event_results.clear(); event_log_cache.clear()
         adrevenue_logs.clear(); callback_ad_logs.clear(); price_rotation_logs.clear()
         package_log_cache.clear()
@@ -8475,6 +9146,7 @@ def cl():
     socketio.emit('update_load_ads', [])
     socketio.emit('update_load_ads_ext', [])
     socketio.emit('update_validator_table', [])
+    socketio.emit('update_default_ad_events', _default_ad_event_payload())
     socketio.emit('update_specific_event_table', [])
     socketio.emit('update_adrevenue_table', [])
     socketio.emit('update_callback_ad_table', [])
@@ -8613,15 +9285,19 @@ def spl(d):
 def refresh():
     socketio.emit('update_load_ads', list(load_ads_events))
     socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
+    socketio.emit('update_default_ad_events', _default_ad_event_payload())
     socketio.emit('update_callback_ad_table', list(callback_ad_logs)) # Ensure callback data is refreshed
     socketio.emit('update_price_rotation_table', list(price_rotation_logs))
     # ... trigger others ...
 
 @socketio.on('connect')
 def connect(): 
+    with lock:
+        default_ad_event_clients.add(request.sid)
     socketio.emit('pause_status', {'is_paused': is_paused})
     socketio.emit('validator_status', {'active': validator_active})
     socketio.emit('platform_status', {'platform': active_platform})
+    socketio.emit('update_default_ad_events', _default_ad_event_payload())
     socketio.emit('update_price_rotation_table', list(price_rotation_logs))
     _emit_installation_id_state()
     # Sync recording buttons on connect
@@ -8632,8 +9308,17 @@ def connect():
             "current_sheet": state["current_sheet"]
         })
 
+@socketio.on('disconnect')
+def disconnect():
+    with lock:
+        default_ad_event_clients.discard(request.sid)
+        last_client_disconnected = not default_ad_event_clients
+    if last_client_disconnected:
+        _clear_default_ad_event_history()
+
 # --- MAIN ---
 def run_server(host="0.0.0.0", port=5008):
+    _clear_default_ad_event_history()
     _normalize_remote_update_config()
     threading.Thread(target=_record_app_open_audit_once, daemon=True).start()
     _set_active_profile()
