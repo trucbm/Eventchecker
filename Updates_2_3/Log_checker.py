@@ -184,11 +184,11 @@ def _resolve_default_params_path():
 DEFAULT_PARAMS_XLSX = _resolve_default_params_path()
 DEFAULT_PARAM_FILL = "FFFCE5CD"
 REMOTE_UPDATE_CONFIG_FILENAME = "remote_update_config_v230.json"
-DEFAULT_REMOTE_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json"
+DEFAULT_REMOTE_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/remote_manifest.json"
 DEFAULT_REMOTE_MANIFEST_URLS = [
-    "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json",
-    "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_3/remote_manifest.json",
-    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json",
+    "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/remote_manifest.json",
+    "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/remote_manifest.json",
+    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_5/remote_manifest.json",
 ]
 APP_AUDIT_CONFIG_FILENAME = "app_audit_config.json"
 DEFAULT_AUDIT_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbzKzf7KAJvy3gu1vfaQ7wHR0tk2mzR_UapoVIfjjjO-aFG2NHKmJQKYLvfsBwgi7heY/exec"

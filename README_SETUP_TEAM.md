@@ -15,7 +15,6 @@ Repo GitHub hien tai:
 Nhanh chinh:
 
 - `main`: source code chung, on dinh de team cung phat trien.
-- `2.4.0`: nhanh release/update payload cho app 2.4.
 
 Thanh phan chinh trong repo:
 
@@ -26,7 +25,7 @@ Thanh phan chinh trong repo:
 - `build/macos/`: script build macOS.
 - `build/windows/`: script build Windows.
 - `tools/`: script ho tro reset/update local.
-- `Updates_2_3/`, `Updates_2_4/`: payload update cho cac kenh app.
+- `Updates_2_5/remote_manifest.json`: manifest update duy nhat cho kenh chinh.
 
 
 ## 2. Yeu cau tren may moi
@@ -337,7 +336,7 @@ Nen commit:
 - `requirements.txt`
 - file trong `build/`
 - file trong `tools/`
-- `Updates_2_3/`, `Updates_2_4/`
+- `Updates_2_5/remote_manifest.json`
 - cac file README/huong dan
 
 Khong nen commit:
@@ -414,16 +413,14 @@ Quy tac thuc te:
 App hien co co che update payload thong qua:
 
 - `remote_update.py`
-- `Updates_2_3/remote_manifest.json`
-- `Updates_2_4/remote_manifest.json`
+- `Updates_2_5/remote_manifest.json`
 
 Khi sua mot tinh nang ma app can nhan qua updater:
 
 1. Sua source chinh can thiet
-2. Dong bo payload trong `Updates_2_3/` hoac `Updates_2_4/`
+2. Dong bo `sha256` va version trong `Updates_2_5/remote_manifest.json`
 3. Tang version/badge neu can
-4. Cap nhat `sha256` trong manifest
-5. Commit va push
+4. Commit va push tren `main` sau khi test
 
 Neu chi sua source local de dev, khong nhat thiet phai publish updater ngay.
 
@@ -553,7 +550,7 @@ Neu updater khong dung:
 
 - kiem tra `remote_manifest.json`
 - kiem tra `sha256`
-- kiem tra branch `main` va `2.4.0` da push chua
+- kiem tra branch `main` da push chua
 
 
 ## 17. Khuyen nghi cho team
@@ -601,7 +598,7 @@ Nguyen tac su dung:
 
 - chay harness truoc khi commit
 - neu harness fail thi sua xong moi push
-- neu sua `Updates_2_3/` hoac manifest update thi harness la bat buoc
+- neu sua `Updates_2_5/remote_manifest.json` hoac flow update thi harness la bat buoc
 - harness khong thay cho local run app, ma la them 1 lop chan loi
 
 Quy tac bat buoc cho du lieu lay tu Git:

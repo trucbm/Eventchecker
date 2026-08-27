@@ -92,10 +92,7 @@ def _payload_path_candidates(manifest_path: Path, item: dict) -> List[Path]:
     if not rel_path:
         return []
     payload_dir = manifest_path.parent
-    candidates = [ROOT / rel_path, payload_dir / rel_path]
-    if item.get("compat_sha256"):
-        candidates.append(ROOT / "Updates_2_5" / "compat" / rel_path)
-    return candidates
+    return [ROOT / rel_path, payload_dir / rel_path]
 
 
 def _valid_payload_urls(manifest_path: Path, rel_path: str, payload_path: Path) -> set[str]:
@@ -158,6 +155,38 @@ def test_manifest_payload_integrity() -> None:
                     extra_url in valid_urls,
                     f"{manifest_path.name} urls entry points outside {manifest_path.parent.name} for {rel_path}: {extra_url}",
                 )
+
+
+def test_canonical_update_channel_has_no_legacy_references() -> None:
+    """Keep the build-52 updater on the single canonical main/v250 channel."""
+    legacy_channel_pairs = ((2, 1), (2, 2), (2, 3), (2, 4))
+    legacy_markers = tuple(
+        marker
+        for major, minor in legacy_channel_pairs
+        for marker in (
+            f"Updates_{major}_{minor}",
+            f"remote_update_config_v{major}{minor}0",
+            f"update_state_v{major}{minor}0",
+            f"updates_v{major}{minor}0",
+            f"v{major}{minor}0",
+        )
+    )
+    canonical_paths = (
+        ROOT / "Log_checker.py",
+        ROOT / "desktop_app.py",
+        ROOT / "remote_update.py",
+        ROOT / "remote_update_config_v250.json",
+        ROOT / "Updates_2_5" / "remote_manifest.json",
+        ROOT / "build" / "macos" / "build_macos.sh",
+        ROOT / "build" / "windows" / "build_portable.bat",
+        ROOT / "build" / "windows" / "build_windows.bat",
+        ROOT / "tools" / "reset_update_state_macos.sh",
+        ROOT / "tools" / "reset_update_state_windows.bat",
+    )
+    for path in canonical_paths:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+        for marker in legacy_markers:
+            _assert(marker not in source, f"canonical release file still references legacy updater marker {marker}: {path}")
 
 
 def test_package_code_mapping() -> None:
@@ -789,10 +818,7 @@ def test_default_ad_event_contract() -> None:
 
 
 def test_installation_id_copy_contract() -> None:
-    for source_path in (
-        ROOT / "Log_checker.py",
-        ROOT / "Updates_2_5" / "compat" / "Log_checker.py",
-    ):
+    for source_path in (ROOT / "Log_checker.py",):
         source_text = source_path.read_text(encoding="utf-8", errors="ignore")
         _assert("async function copyTextToClipboard(text)" in source_text, f"copy helper missing in {source_path}")
         _assert("await navigator.clipboard.writeText(value);" in source_text, f"Clipboard API path missing in {source_path}")
@@ -851,13 +877,6 @@ def test_release_build_marker() -> None:
     _assert(
         f"v2.5.0({CURRENT_RELEASE_BUILD})" in text,
         f"Log_checker.py must be prepared for v2.5.0({CURRENT_RELEASE_BUILD})",
-    )
-    compatibility_text = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(
-        encoding="utf-8", errors="ignore"
-    )
-    _assert(
-        'LEGACY_UPDATE_BUILD_MARKER = "v2.5.0(50)"' in compatibility_text,
-        "compatibility payload must remain visible to legacy numeric update checks",
     )
 
 
@@ -963,11 +982,6 @@ def test_load_ads_provider_contract() -> None:
         _assert("Record Load Ads:" in rendered, "Load Ads recording label was not updated")
         _assert('>Provider</th>' in rendered, "Load Ads Provider column is missing")
         _assert('"provider": _normalize_load_ads_provider(provider)' in (ROOT / "Log_checker.py").read_text(encoding="utf-8"), "Sheet provider payload is missing")
-        compatibility_source = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-        _assert('>Load Ads</button>' in compatibility_source, "compatibility Load Ads tab label is stale")
-        _assert("Load Ads Ironsource" not in compatibility_source, "compatibility payload must not restore the old Load Ads label")
-        _assert('>Provider</th>' in compatibility_source, "compatibility Load Ads Provider column is missing")
-        _assert('"provider": _normalize_load_ads_provider(provider)' in compatibility_source, "compatibility sheet provider payload is missing")
     finally:
         lc.active_platform = original_platform
         lc.recording_states["LoadAdsExt"].clear()
@@ -979,7 +993,6 @@ def test_load_ads_provider_contract() -> None:
 
 def test_levelplay_impression_data_callback_contract() -> None:
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    compatibility_source = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
     for marker in (
         "LevelPlayAdImpressionEventMapper->Map",
         "LevelPlayImpressionData - {ad_unit_name}",
@@ -988,7 +1001,6 @@ def test_levelplay_impression_data_callback_contract() -> None:
         'return "Interstitial"',
     ):
         _assert(marker in source_text, f"LevelPlay callback contract is missing: {marker}")
-        _assert(marker in compatibility_source, f"compatibility LevelPlay callback contract is missing: {marker}")
 
     original_paused = lc.is_paused
     original_emit = lc.socketio.emit
@@ -1033,7 +1045,6 @@ def test_levelplay_impression_data_callback_contract() -> None:
 
 def test_ascendx_cloudx_callback_contract() -> None:
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    compatibility_source = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
     required_markers = (
         "_OnAdLoadedEvent",
         "_OnAdImpressionEvent",
@@ -1066,7 +1077,6 @@ def test_ascendx_cloudx_callback_contract() -> None:
     )
     for marker in required_markers:
         _assert(marker in source_text, f"AscendX/CloudX callback contract is missing: {marker}")
-        _assert(marker in compatibility_source, f"compatibility AscendX/CloudX callback contract is missing: {marker}")
 
     original_paused = lc.is_paused
     original_emit = lc.socketio.emit
@@ -1131,7 +1141,6 @@ def test_ascendx_cloudx_callback_contract() -> None:
 
 def test_release_payload_sync() -> None:
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
-    compatibility_source = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
     manifest_path = ROOT / "Updates_2_5" / "remote_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     log_item = next(item for item in manifest["files"] if item.get("path") == "Log_checker.py")
@@ -1160,7 +1169,7 @@ def test_release_payload_sync() -> None:
         "force_remote=refresh_requested",
         "const refreshQuery = force ? '&refresh=1'",
     ):
-        _assert(remote_contract in compatibility_source, f"compatibility SDK preset refresh is missing: {remote_contract}")
+        _assert(remote_contract in source_text, f"canonical SDK preset refresh is missing: {remote_contract}")
 
 
 def test_update_candidate_does_not_downgrade() -> None:
@@ -1191,7 +1200,7 @@ def test_update_candidate_does_not_downgrade() -> None:
     _assert_equal(
         desktop._select_prepared_update_candidate(compatibility_candidate, bundled_build=47)["build"],
         55,
-        "legacy v2.3.0(47) clients must accept the v2.4.0(25) compatibility payload",
+        "a newer prepared payload must be accepted over the bundled build",
     )
 
 
@@ -1672,42 +1681,25 @@ def test_sdk_preset_git_value_reload_from_real_commit() -> None:
         lc.SDK_CHECK_PRESETS_REMOTE_URLS[:] = original_urls
 
 
-def test_legacy_v24025_bridge_contract() -> None:
-    bridge_path = ROOT / "Updates_2_3" / "remote_manifest.json"
-    bridge = json.loads(bridge_path.read_text(encoding="utf-8"))
-    version = str(bridge.get("version") or "")
-    match = re.search(r"2\.5\.0-(\d+)$", version)
-    _assert(match is not None, "legacy bridge must target a concrete v2.5 build")
-    _assert_equal(int(match.group(1)), CURRENT_RELEASE_BUILD, "legacy clients must target the current canonical build")
-
-    files = {str(item.get("path")): item for item in bridge.get("files") or []}
-    canonical_manifest = json.loads(
-        (ROOT / "Updates_2_5" / "remote_manifest.json").read_text(encoding="utf-8")
-    )
-    canonical_files = {str(item.get("path")): item for item in canonical_manifest.get("files") or []}
-    for rel_path in ("Log_checker.py", "remote_update.py"):
-        item = files.get(rel_path)
-        _assert(item is not None, f"legacy bridge missing {rel_path}")
-        canonical_item = canonical_files.get(rel_path)
-        _assert(canonical_item is not None, f"canonical manifest missing {rel_path}")
-        _assert("/Updates_2_5/compat/" not in str(item.get("url")), f"legacy bridge must not use compat {rel_path}")
-        _assert(
-            all("/Updates_2_5/compat/" not in str(url) for url in item.get("urls") or []),
-            f"legacy bridge contains a compat fallback for {rel_path}",
-        )
-        _assert_equal(item.get("sha256"), canonical_item.get("sha256"), f"legacy bridge hash mismatch for {rel_path}")
-        _assert("compat_sha256" not in item, f"legacy bridge must not carry a compat hash for {rel_path}")
+def test_canonical_manifest_build_contract() -> None:
+    manifest_path = ROOT / "Updates_2_5" / "remote_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    _assert_equal(manifest.get("version"), CURRENT_RELEASE_VERSION, "canonical manifest must target the current build")
+    for item in manifest.get("files") or []:
+        _assert("compat_sha256" not in item, "canonical manifest must not carry a compatibility payload hash")
+        for url in [item.get("url"), *(item.get("urls") or [])]:
+            _assert(
+                "/main/" in str(url) or "@main/" in str(url),
+                f"canonical manifest URL must use the main payload: {url}",
+            )
 
 
-def test_update_flow_legacy_to_v25() -> None:
+def test_update_flow_canonical_v25() -> None:
     import remote_update as updater
 
     manifest_path = ROOT / "Updates_2_5" / "remote_manifest.json"
     manifest_bytes = manifest_path.read_bytes()
     manifest = json.loads(manifest_bytes)
-    bridge_manifest_path = ROOT / "Updates_2_3" / "remote_manifest.json"
-    bridge_manifest_bytes = bridge_manifest_path.read_bytes()
-    bridge_manifest = json.loads(bridge_manifest_bytes)
     payloads = {
         str(item["path"]): (ROOT / str(item["path"])).read_bytes()
         for item in manifest.get("files") or []
@@ -1781,96 +1773,6 @@ def test_update_flow_legacy_to_v25() -> None:
             second = updater.check_for_updates()
             _assert_equal(second.get("status"), "up_to_date", "same v2.5 payload must not download repeatedly")
 
-        # A legacy client can have a v51 state directory whose files are still
-        # the old compatibility payload. The bridge must replace that directory
-        # with the canonical main payload before saving v52.
-        compat_spec = importlib.util.spec_from_file_location(
-            "eventinspector_compat_update",
-            ROOT / "Updates_2_5" / "compat" / "remote_update.py",
-        )
-        _assert(compat_spec is not None and compat_spec.loader is not None, "compat updater could not be loaded")
-        compat = importlib.util.module_from_spec(compat_spec)
-        compat_spec.loader.exec_module(compat)
-        with tempfile.TemporaryDirectory(prefix="eventinspector_compat_harness_") as compat_home:
-            os.environ["HOME"] = compat_home
-            os.environ["EVENTINSPECTOR_BUNDLED_BUILD"] = "50"
-            compat_downloads = []
-
-            compat_user_dir = Path(compat._user_data_dir())
-            stale_update_dir = compat_user_dir / "updates_v230"
-            stale_update_dir.mkdir(parents=True, exist_ok=True)
-            (stale_update_dir / "Log_checker.py").write_bytes(
-                (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_bytes()
-            )
-            (stale_update_dir / "remote_update.py").write_bytes(
-                (ROOT / "Updates_2_5" / "compat" / "remote_update.py").read_bytes()
-            )
-            (compat_user_dir / "update_state_v230.json").write_text(
-                json.dumps(
-                    {
-                        "version": "2026-08-27-2-2.5.0-51",
-                        "update_dir": str(stale_update_dir),
-                        "files": ["Log_checker.py", "remote_update.py"],
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            def compat_download_first(_urls, _timeout):
-                return bridge_manifest_bytes, "harness://legacy-bridge-manifest"
-
-            def compat_download_verified(urls, _timeout, _expected_sha256=""):
-                rel_path = next(
-                    (
-                        str(item.get("path"))
-                        for item in bridge_manifest.get("files") or []
-                        if any(
-                            url.endswith("/" + str(item.get("path")))
-                            and "/Updates_2_5/compat/" not in url
-                            for url in urls
-                        )
-                    ),
-                    None,
-                )
-                _assert(rel_path is not None, f"legacy bridge did not provide a canonical URL: {urls}")
-                data = (ROOT / rel_path).read_bytes()
-                compat_downloads.append(rel_path)
-                return data, f"harness://{rel_path}"
-
-            original_compat_first = compat._download_first
-            original_compat_verified = compat._download_verified
-            compat._download_first = compat_download_first
-            compat._download_verified = compat_download_verified
-            try:
-                bridge_first = compat.check_for_updates()
-                _assert_equal(bridge_first.get("status"), "updated", "legacy bridge must replace the stale payload")
-                prepared = compat.get_prepared_update_info()
-                _assert_equal(prepared.get("build"), CURRENT_RELEASE_BUILD, "legacy bridge saved the wrong build")
-                prepared_log = Path(prepared["update_dir"], "Log_checker.py")
-                _assert_equal(
-                    _sha256_file(prepared_log),
-                    _sha256_file(ROOT / "Log_checker.py"),
-                    "legacy bridge saved compatibility Log_checker.py instead of main payload",
-                )
-                _assert(
-                    "Default Ad Events" in prepared_log.read_text(encoding="utf-8", errors="ignore"),
-                    "legacy bridge payload is missing Default Ad Events",
-                )
-                _assert(
-                    "Log_checker.py" in compat_downloads and "remote_update.py" in compat_downloads,
-                    "legacy bridge did not download the canonical app shell",
-                )
-                first_download_count = len(compat_downloads)
-                bridge_second = compat.check_for_updates()
-                _assert_equal(bridge_second.get("status"), "up_to_date", "legacy bridge must not download repeatedly")
-                _assert_equal(
-                    len(compat_downloads),
-                    first_download_count,
-                    "legacy bridge downloaded payload again after reaching up_to_date",
-                )
-            finally:
-                compat._download_first = original_compat_first
-                compat._download_verified = original_compat_verified
     finally:
         updater._download_first = original_download_first
         updater._download_verified = original_download_verified
@@ -2019,8 +1921,7 @@ def test_windows_update_recovery_script() -> None:
 
 def test_services_checker_bridge_contract() -> None:
     source = (ROOT / "Log_checker.py").read_text(encoding="utf-8")
-    compat_source = (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_text(encoding="utf-8")
-    for payload_source in (source, compat_source):
+    for payload_source in (source,):
         _assert("EVENTINSPECTOR_ALLOW_EXTERNAL_SERVICES_CHECKER" in payload_source, "bundled Services Checker source switch missing")
         _assert("_services_checker_external_sources_enabled" in payload_source, "bundled Services Checker source policy missing")
         _assert("EVENTINSPECTOR_SERVICES_COMMAND" in payload_source, "Services Checker command override missing")
@@ -2244,6 +2145,7 @@ def test_gradle_comparison_hides_unlisted_preset_rows() -> None:
 TESTS: List[Callable[[], None]] = [
     test_manifest_contract,
     test_manifest_payload_integrity,
+    test_canonical_update_channel_has_no_legacy_references,
     test_package_code_mapping,
     test_installation_id_state_machine,
     test_installation_id_log_parsing,
@@ -2266,8 +2168,8 @@ TESTS: List[Callable[[], None]] = [
     test_services_checker_live_preset_refresh_after_restart,
     test_services_checker_git_value_reload_from_real_commit,
     test_sdk_preset_git_value_reload_from_real_commit,
-    test_legacy_v24025_bridge_contract,
-    test_update_flow_legacy_to_v25,
+    test_canonical_manifest_build_contract,
+    test_update_flow_canonical_v25,
     test_build_scripts_clean_outputs,
     test_windows_release_build_version_contract,
     test_windows_update_recovery_script,

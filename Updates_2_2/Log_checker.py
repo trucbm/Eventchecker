@@ -102,7 +102,7 @@ def _resolve_default_params_path():
 DEFAULT_PARAMS_XLSX = _resolve_default_params_path()
 DEFAULT_PARAM_FILL = "FFFCE5CD"
 REMOTE_UPDATE_CONFIG_FILENAME = "remote_update_config_v220.json"
-DEFAULT_REMOTE_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json"
+DEFAULT_REMOTE_MANIFEST_URL = "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/remote_manifest.json"
 REMOTE_UPDATE_STATE_FILENAME = "update_state_v220.json"
 REMOTE_UPDATE_UPDATES_DIRNAME = "updates_v220"
 CURRENT_APP_VERSION = "2.2.0(65)"

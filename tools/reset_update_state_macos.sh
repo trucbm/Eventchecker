@@ -15,7 +15,7 @@ echo
 
 mkdir -p "${APP_SUPPORT_DIR}"
 
-for channel in v230 v240 v250; do
+for channel in v250; do
   state_file="${APP_SUPPORT_DIR}/update_state_${channel}.json"
   config_file="${APP_SUPPORT_DIR}/remote_update_config_${channel}.json"
   updates_dir="${APP_SUPPORT_DIR}/updates_${channel}"

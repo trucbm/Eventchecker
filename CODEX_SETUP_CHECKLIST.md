@@ -110,12 +110,9 @@ macOS:
 Trong do co the co:
 
 - `app.log`
-- `update_state_v230.json`
-- `update_state_v240.json`
-- `remote_update_config_v230.json`
-- `remote_update_config_v240.json`
-- `updates_v230/`
-- `updates_v240/`
+- `update_state_v250.json`
+- `remote_update_config_v250.json`
+- `updates_v250/`
 
 Day la state local, khong phai source code.
 
@@ -127,10 +124,7 @@ Nhung file Codex nen uu tien sua:
 - `Log_checker.py`
 - `desktop_app.py`
 - `remote_update.py`
-- `Updates_2_3/Log_checker.py`
-- `Updates_2_3/remote_manifest.json`
-- `Updates_2_4/Log_checker.py`
-- `Updates_2_4/remote_manifest.json`
+- `Updates_2_5/remote_manifest.json`
 - file trong `tools/`
 - file trong `build/`
 
@@ -148,7 +142,6 @@ Khong sua / khong commit:
 Mac dinh:
 
 - `main` = source chung
-- `2.4.0` = nhanh release payload
 
 Neu lam task moi:
 
@@ -263,7 +256,7 @@ Neu thay doi chi de dev local:
 
 Neu thay doi can app client nhan qua updater:
 
-- sua payload trong `Updates_2_3/` hoac `Updates_2_4/`
+- sua payload va manifest trong `Updates_2_5/`
 - cap nhat `sha256`
 - tang `version` trong manifest
 - commit va push

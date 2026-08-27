@@ -101,13 +101,10 @@ ls -la "$HOME/Library/Application Support/EventInspector"
 Co the clear state local bang tay:
 
 ```bash
-rm -f "$HOME/Library/Application Support/EventInspector/update_state_v230.json"
-rm -f "$HOME/Library/Application Support/EventInspector/update_state_v240.json"
-rm -f "$HOME/Library/Application Support/EventInspector/remote_update_config_v230.json"
-rm -f "$HOME/Library/Application Support/EventInspector/remote_update_config_v240.json"
-rm -rf "$HOME/Library/Application Support/EventInspector/updates_v230"
-rm -rf "$HOME/Library/Application Support/EventInspector/updates_v240"
-rm -rf "$HOME/Library/Application Support/EventInspector/updates_v230_tmp"
+rm -f "$HOME/Library/Application Support/EventInspector/update_state_v250.json"
+rm -f "$HOME/Library/Application Support/EventInspector/remote_update_config_v250.json"
+rm -rf "$HOME/Library/Application Support/EventInspector/updates_v250"
+rm -rf "$HOME/Library/Application Support/EventInspector/updates_v250_tmp"
 ```
 
 

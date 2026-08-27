@@ -121,12 +121,10 @@ explorer "%LOCALAPPDATA%\EventInspector"
 CMD:
 
 ```bat
-del /f /q "%LOCALAPPDATA%\EventInspector\update_state_v230.json"
-del /f /q "%LOCALAPPDATA%\EventInspector\update_state_v240.json"
-del /f /q "%LOCALAPPDATA%\EventInspector\remote_update_config_v230.json"
-del /f /q "%LOCALAPPDATA%\EventInspector\remote_update_config_v240.json"
-rmdir /s /q "%LOCALAPPDATA%\EventInspector\updates_v230"
-rmdir /s /q "%LOCALAPPDATA%\EventInspector\updates_v240"
+del /f /q "%LOCALAPPDATA%\EventInspector\update_state_v250.json"
+del /f /q "%LOCALAPPDATA%\EventInspector\remote_update_config_v250.json"
+rmdir /s /q "%LOCALAPPDATA%\EventInspector\updates_v250"
+rmdir /s /q "%LOCALAPPDATA%\EventInspector\updates_v250_tmp"
 ```
 
 

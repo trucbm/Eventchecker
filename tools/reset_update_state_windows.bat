@@ -18,7 +18,7 @@ echo.
 
 if not exist "%APP_SUPPORT_DIR%" mkdir "%APP_SUPPORT_DIR%"
 
-for %%C in (v230 v240 v250) do (
+for %%C in (v250) do (
   if exist "%APP_SUPPORT_DIR%\update_state_%%C.json" (
     del /f /q "%APP_SUPPORT_DIR%\update_state_%%C.json"
     echo Removed: %APP_SUPPORT_DIR%\update_state_%%C.json
