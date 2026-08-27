@@ -1,27 +1,27 @@
 {
-  "version": "2026-08-27-2-2.5.0-51",
+  "version": "2026-08-27-2-2.5.0-52",
   "update_enabled": true,
   "update_message": "",
   "files": [
     {
       "path": "Log_checker.py",
-      "url": "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/compat/Log_checker.py",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/Log_checker.py",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/compat/Log_checker.py",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/compat/Log_checker.py",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_5/compat/Log_checker.py"
+        "https://github.com/trucbm/Eventchecker/raw/main/Log_checker.py",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Log_checker.py",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Log_checker.py"
       ],
-      "sha256": "842cf9656078c883b68c0def30eddff9945ac89501cc7215001bfbaae5facef7"
+      "sha256": "5efa4ce6c6c0f1a3bc85092af7c2d17ae10cc2d1281cb528974da18af6c87ce1"
     },
     {
       "path": "remote_update.py",
-      "url": "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/compat/remote_update.py",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/remote_update.py",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/compat/remote_update.py",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/compat/remote_update.py",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_5/compat/remote_update.py"
+        "https://github.com/trucbm/Eventchecker/raw/main/remote_update.py",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/remote_update.py",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/remote_update.py"
       ],
-      "sha256": "060fc628ef891d91ac9c7174719e0809a31e8e637e91f83ab49a719a126a6aa6"
+      "sha256": "c4b49dfa974a006019c2e91d87941e7e240727f6132bb426a4125190e76b37e5"
     },
     {
       "path": "sdk_check_presets.json",

@@ -38,8 +38,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-08-27-2-2.5.0-51"
-CURRENT_RELEASE_BUILD = 51
+CURRENT_RELEASE_VERSION = "2026-08-27-2-2.5.0-52"
+CURRENT_RELEASE_BUILD = 52
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -1136,12 +1136,9 @@ def test_release_payload_sync() -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     log_item = next(item for item in manifest["files"] if item.get("path") == "Log_checker.py")
     _assert_equal(_sha256_file(ROOT / "Log_checker.py"), log_item["sha256"], "source/release Log_checker.py drift detected")
-    compatibility_path = ROOT / "Updates_2_5" / "compat" / "Log_checker.py"
-    _assert_equal(
-        _sha256_file(compatibility_path),
-        log_item["compat_sha256"],
-        "compatibility Log_checker.py drift detected",
-    )
+    _assert("compat_sha256" not in log_item, "canonical v2.5 payload must not select the stale compatibility source")
+    remote_item = next(item for item in manifest["files"] if item.get("path") == "remote_update.py")
+    _assert("compat_sha256" not in remote_item, "canonical updater payload must not select the stale compatibility source")
     _assert_equal(manifest["version"], CURRENT_RELEASE_VERSION, "v2.5 release manifest version changed")
 
     markers = {
@@ -1681,19 +1678,25 @@ def test_legacy_v24025_bridge_contract() -> None:
     version = str(bridge.get("version") or "")
     match = re.search(r"2\.5\.0-(\d+)$", version)
     _assert(match is not None, "legacy bridge must target a concrete v2.5 build")
-    _assert(int(match.group(1)) > 25, "legacy v2.4.0(25) clients must see a newer numeric build")
+    _assert_equal(int(match.group(1)), CURRENT_RELEASE_BUILD, "legacy clients must target the current canonical build")
 
     files = {str(item.get("path")): item for item in bridge.get("files") or []}
+    canonical_manifest = json.loads(
+        (ROOT / "Updates_2_5" / "remote_manifest.json").read_text(encoding="utf-8")
+    )
+    canonical_files = {str(item.get("path")): item for item in canonical_manifest.get("files") or []}
     for rel_path in ("Log_checker.py", "remote_update.py"):
         item = files.get(rel_path)
         _assert(item is not None, f"legacy bridge missing {rel_path}")
-        _assert("/Updates_2_5/compat/" in str(item.get("url")), f"legacy bridge must use compat {rel_path}")
-        compat_path = ROOT / "Updates_2_5" / "compat" / rel_path
-        _assert_equal(
-            _sha256_file(compat_path),
-            item.get("sha256"),
-            f"legacy bridge hash mismatch for compat {rel_path}",
+        canonical_item = canonical_files.get(rel_path)
+        _assert(canonical_item is not None, f"canonical manifest missing {rel_path}")
+        _assert("/Updates_2_5/compat/" not in str(item.get("url")), f"legacy bridge must not use compat {rel_path}")
+        _assert(
+            all("/Updates_2_5/compat/" not in str(url) for url in item.get("urls") or []),
+            f"legacy bridge contains a compat fallback for {rel_path}",
         )
+        _assert_equal(item.get("sha256"), canonical_item.get("sha256"), f"legacy bridge hash mismatch for {rel_path}")
+        _assert("compat_sha256" not in item, f"legacy bridge must not carry a compat hash for {rel_path}")
 
 
 def test_update_flow_legacy_to_v25() -> None:
@@ -1702,6 +1705,9 @@ def test_update_flow_legacy_to_v25() -> None:
     manifest_path = ROOT / "Updates_2_5" / "remote_manifest.json"
     manifest_bytes = manifest_path.read_bytes()
     manifest = json.loads(manifest_bytes)
+    bridge_manifest_path = ROOT / "Updates_2_3" / "remote_manifest.json"
+    bridge_manifest_bytes = bridge_manifest_path.read_bytes()
+    bridge_manifest = json.loads(bridge_manifest_bytes)
     payloads = {
         str(item["path"]): (ROOT / str(item["path"])).read_bytes()
         for item in manifest.get("files") or []
@@ -1761,8 +1767,8 @@ def test_update_flow_legacy_to_v25() -> None:
                 }],
                 bundled_build=50,
             )
-            _assert(selected is not None, "bundle build 50 must accept the prepared build 51 payload")
-            _assert_equal(selected.get("build"), CURRENT_RELEASE_BUILD, "prepared build 51 was not selected")
+            _assert(selected is not None, "bundle build 50 must accept the prepared build 52 payload")
+            _assert_equal(selected.get("build"), CURRENT_RELEASE_BUILD, "prepared build 52 was not selected")
             updated_source = Path(prepared["update_dir"], "Log_checker.py").read_text(
                 encoding="utf-8", errors="ignore"
             )
@@ -1775,8 +1781,9 @@ def test_update_flow_legacy_to_v25() -> None:
             second = updater.check_for_updates()
             _assert_equal(second.get("status"), "up_to_date", "same v2.5 payload must not download repeatedly")
 
-        # The bridge file is what an already installed v2.4 client executes
-        # after the first handoff. It must verify compat hashes on repeat.
+        # A legacy client can have a v51 state directory whose files are still
+        # the old compatibility payload. The bridge must replace that directory
+        # with the canonical main payload before saving v52.
         compat_spec = importlib.util.spec_from_file_location(
             "eventinspector_compat_update",
             ROOT / "Updates_2_5" / "compat" / "remote_update.py",
@@ -1786,26 +1793,47 @@ def test_update_flow_legacy_to_v25() -> None:
         compat_spec.loader.exec_module(compat)
         with tempfile.TemporaryDirectory(prefix="eventinspector_compat_harness_") as compat_home:
             os.environ["HOME"] = compat_home
-            os.environ["EVENTINSPECTOR_BUNDLED_BUILD"] = "26"
+            os.environ["EVENTINSPECTOR_BUNDLED_BUILD"] = "50"
             compat_downloads = []
 
+            compat_user_dir = Path(compat._user_data_dir())
+            stale_update_dir = compat_user_dir / "updates_v230"
+            stale_update_dir.mkdir(parents=True, exist_ok=True)
+            (stale_update_dir / "Log_checker.py").write_bytes(
+                (ROOT / "Updates_2_5" / "compat" / "Log_checker.py").read_bytes()
+            )
+            (stale_update_dir / "remote_update.py").write_bytes(
+                (ROOT / "Updates_2_5" / "compat" / "remote_update.py").read_bytes()
+            )
+            (compat_user_dir / "update_state_v230.json").write_text(
+                json.dumps(
+                    {
+                        "version": "2026-08-27-2-2.5.0-51",
+                        "update_dir": str(stale_update_dir),
+                        "files": ["Log_checker.py", "remote_update.py"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
             def compat_download_first(_urls, _timeout):
-                return manifest_bytes, "harness://v250-manifest"
+                return bridge_manifest_bytes, "harness://legacy-bridge-manifest"
 
             def compat_download_verified(urls, _timeout, _expected_sha256=""):
-                if any("/compat/Log_checker.py" in url for url in urls):
-                    rel_path = "Updates_2_5/compat/Log_checker.py"
-                    data = (ROOT / rel_path).read_bytes()
-                elif any("/compat/remote_update.py" in url for url in urls):
-                    rel_path = "Updates_2_5/compat/remote_update.py"
-                    data = (ROOT / rel_path).read_bytes()
-                else:
-                    rel_path = next(
-                        (path for path in payloads if any(url.endswith("/" + path) for url in urls)),
-                        None,
-                    )
-                    _assert(rel_path is not None, f"unexpected compat payload URL list: {urls}")
-                    data = payloads[rel_path]
+                rel_path = next(
+                    (
+                        str(item.get("path"))
+                        for item in bridge_manifest.get("files") or []
+                        if any(
+                            url.endswith("/" + str(item.get("path")))
+                            and "/Updates_2_5/compat/" not in url
+                            for url in urls
+                        )
+                    ),
+                    None,
+                )
+                _assert(rel_path is not None, f"legacy bridge did not provide a canonical URL: {urls}")
+                data = (ROOT / rel_path).read_bytes()
                 compat_downloads.append(rel_path)
                 return data, f"harness://{rel_path}"
 
@@ -1814,15 +1842,31 @@ def test_update_flow_legacy_to_v25() -> None:
             compat._download_first = compat_download_first
             compat._download_verified = compat_download_verified
             try:
-                bridge_first = compat.check_for_updates(force_refresh=True)
-                _assert_equal(bridge_first.get("status"), "updated", "v2.4 bridge must bootstrap v2.5")
+                bridge_first = compat.check_for_updates()
+                _assert_equal(bridge_first.get("status"), "updated", "legacy bridge must replace the stale payload")
+                prepared = compat.get_prepared_update_info()
+                _assert_equal(prepared.get("build"), CURRENT_RELEASE_BUILD, "legacy bridge saved the wrong build")
+                prepared_log = Path(prepared["update_dir"], "Log_checker.py")
+                _assert_equal(
+                    _sha256_file(prepared_log),
+                    _sha256_file(ROOT / "Log_checker.py"),
+                    "legacy bridge saved compatibility Log_checker.py instead of main payload",
+                )
+                _assert(
+                    "Default Ad Events" in prepared_log.read_text(encoding="utf-8", errors="ignore"),
+                    "legacy bridge payload is missing Default Ad Events",
+                )
+                _assert(
+                    "Log_checker.py" in compat_downloads and "remote_update.py" in compat_downloads,
+                    "legacy bridge did not download the canonical app shell",
+                )
                 first_download_count = len(compat_downloads)
                 bridge_second = compat.check_for_updates()
-                _assert_equal(bridge_second.get("status"), "up_to_date", "v2.4 bridge must not download repeatedly")
+                _assert_equal(bridge_second.get("status"), "up_to_date", "legacy bridge must not download repeatedly")
                 _assert_equal(
                     len(compat_downloads),
                     first_download_count,
-                    "v2.4 bridge downloaded payload again after reaching up_to_date",
+                    "legacy bridge downloaded payload again after reaching up_to_date",
                 )
             finally:
                 compat._download_first = original_compat_first
