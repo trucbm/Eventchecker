@@ -89,8 +89,7 @@ def _ensure_user_config_template():
         except Exception:
             current = {}
     current.update(desired)
-    with open(cfg_path, "w", encoding="utf-8") as f:
-        json.dump(current, f, indent=2)
+    _write_staged_file(cfg_path, json.dumps(current, indent=2).encode("utf-8"))
     return cfg_path
 
 
@@ -168,9 +167,10 @@ def _load_state():
 
 
 def _save_state(state):
-    os.makedirs(_user_data_dir(), exist_ok=True)
-    with open(_state_path(), "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
+    user_dir = _user_data_dir()
+    os.makedirs(user_dir, exist_ok=True)
+    payload = json.dumps(state, indent=2).encode("utf-8")
+    _write_staged_file(_state_path(), payload)
 
 
 def _sha256_file(path):
