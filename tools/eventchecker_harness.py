@@ -492,12 +492,12 @@ def test_cloudx_sdk_adapter_metadata() -> None:
 
 def test_sdk_check_preset_contract() -> None:
     presets = lc._load_sdk_check_presets()
-    _assert("C-190-Android" in presets, "C-190 Android SDK preset is missing")
+    _assert("C-191-Android" in presets, "C-191 Android SDK preset is missing")
     _assert("C-190-iOS" in presets, "C-190 iOS SDK preset is missing")
     _assert("C-180-Android" in presets, "C-180 Android SDK preset is missing")
     _assert("C-180-iOS" in presets, "C-180 iOS SDK preset is missing")
-    preset = presets["C-190-Android"]
-    _assert_equal(preset.get("platform"), "android", "C-190 Android preset platform changed")
+    preset = presets["C-191-Android"]
+    _assert_equal(preset.get("platform"), "android", "C-191 Android preset platform changed")
     ios_preset = presets["C-190-iOS"]
     _assert_equal(ios_preset.get("platform"), "ios", "C-190 iOS preset platform changed")
     _assert_equal(ios_preset.get("lines"), [], "C-190 iOS preset must remain empty")
@@ -519,26 +519,31 @@ def test_sdk_check_preset_contract() -> None:
     _assert(not any(line.startswith("AdQuality\t") for line in c180_lines), "C-180 AdQuality entry must remain absent")
     _assert(all("http://" not in line and "https://" not in line for line in c180_lines), "C-180 preset must not contain links")
     lines = preset.get("lines") or []
-    _assert_equal(len(lines), 44, "C-190 Android preset line count changed")
-    _assert_equal(lines[0], "Ads Network\tAdapter\tNative", "C-190 preset header changed")
-    _assert(all("http://" not in line and "https://" not in line for line in lines), "C-190 preset must not contain documentation links")
-    _assert("CloudX\t4.5.1\t4.5.1" in lines, "C-190 CloudX entry changed")
-    _assert("Bigo Ads\t5.11.0\t6.0.0" in lines, "C-190 Bigo Ads versions changed")
-    _assert(any(line.startswith("Digital Turbine (fyber) - Cloudx\t") for line in lines), "C-190 Cloudx entries are missing")
-    _assert("Meta Audience Network\t5.4.0\t6.22.0" in lines, "C-190 Meta Audience Network adapter changed")
-    _assert("Mintegral - Cloudx\t17.1.71.1\t17.1.71" in lines, "Mintegral Cloudx native version changed")
-    _assert("Ogury\t5.5.0\t6.3.1" in lines, "C-190 Ogury versions changed")
-    _assert("Yandex\t5.13.0\t8.3.0" in lines, "C-190 Yandex versions changed")
-    _assert("Adverty\t5.2.9\t" in lines, "C-190 Adverty version changed")
-    _assert("Gadsme\t1.12.6\t" in lines, "C-190 Gadsme version changed")
-    _assert("AppMetrica SDK\t\t8.4.1" in lines, "C-190 AppMetrica version changed")
-    cloudx_lines = [line for line in lines if " - Cloudx\t" in line]
-    _assert(cloudx_lines and all(len(line.split("\t")) >= 3 and line.split("\t")[2].strip() for line in cloudx_lines), "Cloudx native versions are missing")
-    _assert("Adjust\t\t5.8.0" in lines, "C-190 single SDK entry changed")
+    _assert_equal(len(lines), 60, "C-191 Android preset line count changed")
+    _assert_equal(lines[0], "Ads Network\tAdapter\tNative", "C-191 preset header changed")
+    _assert(all("http://" not in line and "https://" not in line for line in lines), "C-191 preset must not contain documentation links")
+    _assert("CloudX\t" in lines, "C-191 CloudX entry changed")
+    _assert("AppLovin\t5.9.0\t13.6.4" in lines, "C-191 AppLovin entry changed")
+    _assert("Bigo Ads\t5.11.0\t6.0.0" in lines, "C-191 Bigo Ads versions changed")
+    _assert("Voodoo\t5.7.0\t4.29.2" in lines, "C-191 Voodoo entry changed")
+    _assert("Meta Audience Network\t5.4.0\t6.22.0" in lines, "C-191 Meta Audience Network adapter changed")
+    _assert("MAX / AppLovin - MAX\t\t13.6.4" in lines, "C-191 MAX AppLovin entry changed")
+    _assert(any(line.endswith(" - MAX\t") or " - MAX\t" in line for line in lines), "C-191 MAX entries are missing")
+    _assert("Ogury\t5.5.0\t6.3.1" in lines, "C-191 Ogury versions changed")
+    _assert("Yandex\t5.13.0\t8.3.0" in lines, "C-191 Yandex versions changed")
+    _assert("Adverty\t5.2.9\t" in lines, "C-191 Adverty version changed")
+    _assert("Gadsme\t1.12.6\t" in lines, "C-191 Gadsme version changed")
+    _assert("AppMetrica SDK\t\t8.4.1" in lines, "C-191 AppMetrica version changed")
+    max_lines = [line for line in lines if " - MAX\t" in line]
+    _assert(max_lines and all(len(line.split("\t")) >= 3 for line in max_lines), "MAX entries are missing")
+    _assert("Adjust\t\t5.8.0" in lines, "C-191 single SDK entry changed")
 
     for line in lines[1:]:
         parsed = lc._parse_sdk_expected_line(line)
-        _assert(parsed is not None, f"C-190 Android entry cannot be parsed: {line}")
+        if line.strip().casefold() == "cloudx":
+            _assert_equal(line, "CloudX\t", "C-191 CloudX blank telemetry entry changed")
+            continue
+        _assert(parsed is not None, f"C-191 Android entry cannot be parsed: {line}")
     for line in c180_lines[1:]:
         parsed = lc._parse_sdk_expected_line(line)
         _assert(parsed is not None, f"C-180 Android entry cannot be parsed: {line}")
@@ -1289,9 +1294,9 @@ def test_services_checker_gradle_mapping_contract() -> None:
     gradle_mapping = json.loads((ROOT / "services_checker" / "gradle_lib_mapping.json").read_text(encoding="utf-8"))
     gradle_presets = json.loads((ROOT / "services_checker" / "gradle_check_presets.json").read_text(encoding="utf-8"))
     podfile_presets = json.loads((ROOT / "services_checker" / "podfile_check_presets.json").read_text(encoding="utf-8"))
-    c190_gradle_lines = gradle_presets.get("C-190-Android", {}).get("lines") or []
-    _assert("Voodoo (ADN) Adapter\t5.7.0" in c190_gradle_lines, "C-190 Voodoo adapter version changed")
-    _assert("Voodoo (ADN) SDK\t4.29.2" in c190_gradle_lines, "C-190 Voodoo SDK version changed")
+    c191_gradle_lines = gradle_presets.get("C-191-Android", {}).get("lines") or []
+    _assert("Voodoo (ADN) Adapter\t5.7.0" in c191_gradle_lines, "C-191 Voodoo adapter version changed")
+    _assert("Voodoo (ADN) SDK\t4.29.2" in c191_gradle_lines, "C-191 Voodoo SDK version changed")
     _assert_equal(
         podfile_presets.get("C-180-iOS", {}).get("lines") or [],
         [
@@ -1445,7 +1450,7 @@ def test_services_checker_live_preset_refresh_after_restart() -> None:
         if filename == "gradle_lib_mapping.json":
             return FakeResponse({"Harness Library": f"com.example:harness-{revision['value']}"})
         payload = {
-            "C-190-Android": {
+            "C-191-Android": {
                 "platform": "ios" if filename == "podfile_check_presets.json" else "android",
                 "lines": [f"{filename}:{revision['value']}"],
             }
@@ -1472,7 +1477,7 @@ def test_services_checker_live_preset_refresh_after_restart() -> None:
             _assert_equal(first_response.status_code, 200, "first Services Checker preset request failed")
             first_data = first_response.get_json()
             _assert_equal(
-                first_data["manifest_presets"]["C-190-Android"]["lines"],
+                first_data["manifest_presets"]["C-191-Android"]["lines"],
                 ["manifest_check_presets.json:old"],
                 "first Service Checker start did not load the remote preset",
             )
@@ -1488,7 +1493,7 @@ def test_services_checker_live_preset_refresh_after_restart() -> None:
             _assert_equal(second_response.status_code, 200, "restart Services Checker preset request failed")
             second_data = second_response.get_json()
             _assert_equal(
-                second_data["manifest_presets"]["C-190-Android"]["lines"],
+                second_data["manifest_presets"]["C-191-Android"]["lines"],
                 ["manifest_check_presets.json:new"],
                 "Services Checker restart kept the stale per-user preset cache",
             )
@@ -1572,7 +1577,7 @@ def test_services_checker_git_value_reload_from_real_commit() -> None:
                         payload = {"Harness Library": f"com.example:harness-{revision}"}
                     else:
                         payload = {
-                            "C-190-Android": {
+                            "C-191-Android": {
                                 "platform": "ios" if filename == "podfile_check_presets.json" else "android",
                                 "lines": [f"{filename}:{revision}"],
                                 "harness_marker": revision,
@@ -1612,7 +1617,7 @@ def test_services_checker_git_value_reload_from_real_commit() -> None:
             _assert_equal(first_response.status_code, 200, "real Git preset request failed")
             first_data = first_response.get_json()
             _assert_equal(
-                first_data["manifest_presets"]["C-190-Android"]["harness_marker"],
+                first_data["manifest_presets"]["C-191-Android"]["harness_marker"],
                 "commit-one",
                 "client did not receive the first committed Git value",
             )
@@ -1638,7 +1643,7 @@ def test_services_checker_git_value_reload_from_real_commit() -> None:
             _assert_equal(second_response.status_code, 200, "real Git reload request failed")
             second_data = second_response.get_json()
             _assert_equal(
-                second_data["manifest_presets"]["C-190-Android"]["harness_marker"],
+                second_data["manifest_presets"]["C-191-Android"]["harness_marker"],
                 "commit-two",
                 "client kept the old preset value after a real Git commit changed",
             )
@@ -1704,7 +1709,7 @@ def test_sdk_preset_git_value_reload_from_real_commit() -> None:
 
             def write_preset(revision):
                 payload = {
-                    "C-190-Android": {
+                    "C-191-Android": {
                         "platform": "android",
                         "lines": [f"Ads Network\tHarness-{revision}"],
                         "harness_marker": revision,
@@ -1735,7 +1740,7 @@ def test_sdk_preset_git_value_reload_from_real_commit() -> None:
             first_data = first_response.get_json()
             _assert_equal(first_data.get("source"), "github", "SDK preset did not come from Git HTTP")
             _assert_equal(
-                first_data["presets"]["C-190-Android"]["lines"],
+                first_data["presets"]["C-191-Android"]["lines"],
                 ["Ads Network\tHarness-commit-one"],
                 "client did not receive the first committed SDK preset value",
             )
@@ -1750,7 +1755,7 @@ def test_sdk_preset_git_value_reload_from_real_commit() -> None:
             _assert_equal(second_response.status_code, 200, "real SDK Git reload request failed")
             second_data = second_response.get_json()
             _assert_equal(
-                second_data["presets"]["C-190-Android"]["lines"],
+                second_data["presets"]["C-191-Android"]["lines"],
                 ["Ads Network\tHarness-commit-two"],
                 "client kept the old SDK preset value after a real Git commit changed",
             )

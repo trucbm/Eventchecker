@@ -31,7 +31,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/sdk_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/sdk_check_presets.json"
       ],
-      "sha256": "b47271cf186ad0c5498ffb0b7fc70357233739888f676ef7ca7cdfb750b215be"
+      "sha256": "a0bdb1f0dced0cfab918e06008522a18b602abdc54c5bb9c02a5470aa3ac197c"
     },
     {
       "path": "remote_update_config_v250.json",
@@ -101,7 +101,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/gradle_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/gradle_check_presets.json"
       ],
-      "sha256": "84060b878a8c55f0c38ef7fc9a18ac749cbfd80e89e6b1ef69919d644408a471"
+      "sha256": "cc0650e3fbf0160fae2a100cd8f5cde2db3f1b807cc209611ca911a624619274"
     },
     {
       "path": "services_checker/gradle_lib_mapping.json",
