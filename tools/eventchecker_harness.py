@@ -90,7 +90,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def _payload_path_candidates(manifest_path: Path, item: dict) -> List[Path]:
-    rel_path = str(item.get("path", "")).strip()
+    rel_path = str(item.get("source_path") or item.get("path", "")).strip()
     if not rel_path:
         return []
     payload_dir = manifest_path.parent
@@ -189,6 +189,47 @@ def test_canonical_update_channel_contract() -> None:
         _assert(
             all("/main/" in str(url) or "@main/" in str(url) for url in urls if url),
             f"current release payload must use main: {item.get('path')}",
+        )
+
+
+def test_legacy_bootstrap_contract() -> None:
+    """The current manifest must rescue the already-published v230 Windows shell."""
+    manifest = json.loads((ROOT / "Updates_2_5" / "remote_manifest.json").read_text(encoding="utf-8"))
+    bootstrap = [item for item in manifest.get("files") or [] if item.get("legacy_bootstrap")]
+    _assert_equal(len(bootstrap), 2, "legacy bootstrap must contain exactly two rescue files")
+    expected = {
+        "../updates_v230/Log_checker.py": "Updates_2_5/compat/Log_checker.py",
+        "../updates_v230/remote_update.py": "Updates_2_5/compat/remote_update.py",
+    }
+    for item in bootstrap:
+        target = str(item.get("path"))
+        _assert_equal(item.get("source_path"), expected.get(target), f"wrong legacy bootstrap source for {target}")
+        _assert(target.startswith("../updates_v230/"), f"legacy bootstrap target must stay in v230: {target}")
+        source = ROOT / str(item.get("source_path"))
+        _assert(source.is_file(), f"legacy bootstrap source is missing: {source}")
+        _assert_equal(_sha256_file(source), item.get("sha256"), f"legacy bootstrap hash drifted for {target}")
+
+    # Mirror the path resolution used by the old v250 updater. This verifies
+    # the rescue changes only the two known files in the old payload directory.
+    with tempfile.TemporaryDirectory(prefix="eventinspector_legacy_bootstrap_") as temp_dir:
+        support = Path(temp_dir) / "EventInspector"
+        staging = support / "updates_v250_tmp"
+        active = support / "updates_v230"
+        staging.mkdir(parents=True)
+        active.mkdir(parents=True)
+        (active / "Log_checker.py").write_text("v2.5.0(52)", encoding="utf-8")
+        (active / "remote_update.py").write_text('CHANNEL_ID = "v250"', encoding="utf-8")
+        for item in bootstrap:
+            target = staging / str(item["path"])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ROOT / str(item["source_path"])).read_bytes())
+        _assert(
+            f"v2.5.0({CURRENT_RELEASE_BUILD})" in (active / "Log_checker.py").read_text(encoding="utf-8"),
+            "legacy Log_checker was not rescued",
+        )
+        _assert(
+            'CHANNEL_ID = "v230"' in (active / "remote_update.py").read_text(encoding="utf-8"),
+            "legacy updater was not rescued",
         )
 
 
@@ -1965,7 +2006,7 @@ def test_update_flow_canonical_v25() -> None:
     payloads = {
         str(item["path"]): (ROOT / str(item["path"])).read_bytes()
         for item in manifest.get("files") or []
-        if item.get("path")
+        if item.get("path") and not item.get("legacy_bootstrap")
     }
     original_home = os.environ.get("HOME")
     original_bundle_build = os.environ.get("EVENTINSPECTOR_BUNDLED_BUILD")
@@ -2062,7 +2103,7 @@ def test_windows_portable_update_staging() -> None:
     payloads = {
         str(item["path"]): (ROOT / str(item["path"])).read_bytes()
         for item in manifest.get("files") or []
-        if item.get("path")
+        if item.get("path") and not item.get("legacy_bootstrap")
     }
     original_os_name = updater.os.name
     original_user_data_dir = updater._user_data_dir
@@ -2530,6 +2571,7 @@ TESTS: List[Callable[[], None]] = [
     test_services_checker_git_value_reload_from_real_commit,
     test_sdk_preset_git_value_reload_from_real_commit,
     test_canonical_manifest_build_contract,
+    test_legacy_bootstrap_contract,
     test_legacy_v230_update_bridge,
     test_update_flow_canonical_v25,
     test_windows_portable_update_staging,

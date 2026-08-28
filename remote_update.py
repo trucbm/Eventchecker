@@ -331,6 +331,19 @@ def _default_repo_file_urls(rel_path):
     return [f"{base}/{rel}" for base in _runtime_profile()["file_url_bases"]]
 
 
+def _runtime_manifest_files(manifest_files):
+    """Return payload files for this updater without legacy rescue paths.
+
+    The canonical manifest carries two ``legacy_bootstrap`` entries only for a
+    previously published Windows shell that accidentally installed the v250
+    updater into its v230 payload directory.  That old updater does not know
+    this flag and therefore writes those entries into the old directory.  A
+    current updater must ignore them so it never follows a parent-directory
+    path outside its own staged payload.
+    """
+    return [item for item in (manifest_files or []) if not item.get("legacy_bootstrap")]
+
+
 def _download_first(urls, timeout):
     last_error = None
     for url in _unique_urls(urls):
@@ -493,7 +506,7 @@ def check_for_updates(force_refresh=False):
     state_version = state.get("version")
     manifest_version = manifest.get("version")
     existing_update_dir = state.get("update_dir") or update_dir
-    manifest_files = manifest.get("files", [])
+    manifest_files = _runtime_manifest_files(manifest.get("files", []))
     requested_from_bundle_build = _requested_from_bundle_build()
     manifest_build = _extract_build_number(manifest_version)
     if (
