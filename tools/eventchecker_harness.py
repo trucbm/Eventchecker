@@ -2042,12 +2042,15 @@ def test_windows_release_build_version_contract() -> None:
     bundle_guard = (ROOT / "build" / "windows" / "verify_bundle.ps1").read_text(encoding="utf-8", errors="ignore")
     installer_script = (ROOT / "build" / "windows" / "build_windows.bat").read_text(encoding="utf-8", errors="ignore")
     iss_script = (ROOT / "build" / "windows" / "EventChecker.iss").read_text(encoding="utf-8", errors="ignore")
+    smoke_source = (ROOT / "tools" / "windows_update_smoke.py").read_text(encoding="utf-8", errors="ignore")
 
     _assert('default: "main"' in workflow, "Windows workflow must default to the main source ref")
     _assert("ref: ${{ inputs.source_ref || 'main' }}" in workflow, "Windows workflow must checkout the requested main source ref")
     _assert("Verify Portable ZIP version" in workflow, "Windows workflow must verify the portable ZIP")
     _assert("Verify Windows portable updater" in workflow, "Windows workflow must run the portable updater smoke test")
     _assert("python tools\\windows_update_smoke.py" in workflow, "Windows workflow must execute the Windows updater smoke test")
+    _assert("sys.path.insert(0, str(ROOT))" in smoke_source, "Windows updater smoke must import the root updater from CI")
+    _assert("EVENTINSPECTOR_WINDOWS_SMOKE_SIMULATE" in smoke_source, "Windows updater smoke must support local code-path testing")
     _assert("EventInspector-Windows-v${{ steps.release.outputs.release_version }}" in workflow, "Windows artifacts must be versioned")
     _assert('[switch]$PrintVersion' in source_guard, "Windows source guard must expose the resolved version")
     _assert('ExpectedSeries = "2.5.0"' in source_guard, "Windows source guard must enforce the v2.5 series")
@@ -2060,6 +2063,25 @@ def test_windows_release_build_version_contract() -> None:
         f'#define MyAppVersion "2.5.0.{CURRENT_RELEASE_BUILD}"' in iss_script,
         "Inno Setup fallback must match the current v2.5 release",
     )
+
+
+def test_windows_update_http_smoke() -> None:
+    """Run the same real-HTTP updater smoke used by the Windows release workflow."""
+    smoke_path = ROOT / "tools" / "windows_update_smoke.py"
+    environment = os.environ.copy()
+    if os.name != "nt":
+        environment["EVENTINSPECTOR_WINDOWS_SMOKE_SIMULATE"] = "1"
+    completed = subprocess.run(
+        [sys.executable, str(smoke_path)],
+        cwd=str(ROOT),
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    output = (completed.stdout or "") + (completed.stderr or "")
+    _assert_equal(completed.returncode, 0, f"Windows updater HTTP smoke failed:\n{output}")
+    _assert("windows_update_smoke: PASS" in output, "Windows updater HTTP smoke did not report PASS")
 
 
 def test_windows_update_recovery_script() -> None:
@@ -2330,6 +2352,7 @@ TESTS: List[Callable[[], None]] = [
     test_windows_portable_update_staging,
     test_build_scripts_clean_outputs,
     test_windows_release_build_version_contract,
+    test_windows_update_http_smoke,
     test_windows_update_recovery_script,
     test_services_checker_bridge_contract,
     test_services_checker_resource_contract_is_platform_neutral,

@@ -12,15 +12,17 @@ import copy
 import http.server
 import json
 import os
+import sys
 import tempfile
 import threading
 from pathlib import Path
 from urllib.parse import urlparse
 
-import remote_update as updater
-
-
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import remote_update as updater  # noqa: E402
 
 
 class _PayloadHandler(http.server.BaseHTTPRequestHandler):
@@ -47,8 +49,9 @@ class _PayloadHandler(http.server.BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    if os.name != "nt":
-        raise SystemExit("windows_update_smoke must run on Windows")
+    simulate_windows = os.name != "nt" and os.getenv("EVENTINSPECTOR_WINDOWS_SMOKE_SIMULATE") == "1"
+    if os.name != "nt" and not simulate_windows:
+        raise SystemExit("windows_update_smoke must run on Windows (or set EVENTINSPECTOR_WINDOWS_SMOKE_SIMULATE=1 for local code-path testing)")
 
     manifest = json.loads((ROOT / "Updates_2_5" / "remote_manifest.json").read_text(encoding="utf-8"))
     payloads = {
@@ -72,8 +75,14 @@ def main() -> int:
     original_manifest_candidates = updater._candidate_manifest_urls
     original_download_first = updater._download_first
     original_download_verified = updater._download_verified
+    original_updater_os_name = updater.os.name
     active_handle = None
     try:
+        if simulate_windows:
+            # All standard-library modules used by this script are imported
+            # before this switch.  Only the updater's platform branch is
+            # changed; the HTTP requests and filesystem operations stay real.
+            updater.os.name = "nt"
         with tempfile.TemporaryDirectory(prefix="eventinspector_windows_smoke_") as support_root:
             os.environ["LOCALAPPDATA"] = support_root
             updater._candidate_manifest_urls = lambda _cfg: [f"{base_url}/remote_manifest.json"]
@@ -117,6 +126,7 @@ def main() -> int:
     finally:
         if active_handle is not None:
             active_handle.close()
+        updater.os.name = original_updater_os_name
         updater._candidate_manifest_urls = original_manifest_candidates
         updater._download_first = original_download_first
         updater._download_verified = original_download_verified
