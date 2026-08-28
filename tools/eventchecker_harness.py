@@ -157,36 +157,37 @@ def test_manifest_payload_integrity() -> None:
                 )
 
 
-def test_canonical_update_channel_has_no_legacy_references() -> None:
-    """Keep the build-53 updater on the single canonical main/v250 channel."""
-    legacy_channel_pairs = ((2, 1), (2, 2), (2, 3), (2, 4))
-    legacy_markers = tuple(
-        marker
-        for major, minor in legacy_channel_pairs
-        for marker in (
-            f"Updates_{major}_{minor}",
-            f"remote_update_config_v{major}{minor}0",
-            f"update_state_v{major}{minor}0",
-            f"updates_v{major}{minor}0",
-            f"v{major}{minor}0",
+def test_canonical_update_channel_contract() -> None:
+    """Keep every current release check on the single main/v250 channel."""
+    import remote_update as updater
+
+    _assert_equal(updater.CHANNEL_ID, "v250", "current updater channel changed")
+    _assert_equal(tuple(updater.KNOWN_CHANNELS), ("v250",), "current updater must have one channel")
+    _assert_equal(updater.CONFIG_FILENAME, "remote_update_config_v250.json", "current updater config changed")
+    _assert_equal(updater.STATE_FILENAME, "update_state_v250.json", "current updater state changed")
+    _assert_equal(updater.UPDATES_DIRNAME, "updates_v250", "current updater payload directory changed")
+
+    config_path = ROOT / "remote_update_config_v250.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    _assert(
+        config.get("manifest_url") in updater.DEFAULT_MANIFEST_URLS,
+        "current manifest URL must use the canonical main/v250 URL set",
+    )
+    _assert_equal(
+        set(config.get("manifest_urls") or []),
+        set(updater.DEFAULT_MANIFEST_URLS),
+        "current manifest URL fallbacks changed",
+    )
+    _assert_equal(config.get("min_interval_sec"), 0, "current updater must check without a stale throttle")
+
+    manifest_path = ROOT / "Updates_2_5" / "remote_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for item in manifest.get("files") or []:
+        urls = [item.get("url"), *(item.get("urls") or [])]
+        _assert(
+            all("/main/" in str(url) or "@main/" in str(url) for url in urls if url),
+            f"current release payload must use main: {item.get('path')}",
         )
-    )
-    canonical_paths = (
-        ROOT / "Log_checker.py",
-        ROOT / "desktop_app.py",
-        ROOT / "remote_update.py",
-        ROOT / "remote_update_config_v250.json",
-        ROOT / "Updates_2_5" / "remote_manifest.json",
-        ROOT / "build" / "macos" / "build_macos.sh",
-        ROOT / "build" / "windows" / "build_portable.bat",
-        ROOT / "build" / "windows" / "build_windows.bat",
-        ROOT / "tools" / "reset_update_state_macos.sh",
-        ROOT / "tools" / "reset_update_state_windows.bat",
-    )
-    for path in canonical_paths:
-        source = path.read_text(encoding="utf-8", errors="ignore")
-        for marker in legacy_markers:
-            _assert(marker not in source, f"canonical release file still references legacy updater marker {marker}: {path}")
 
 
 def test_package_code_mapping() -> None:
@@ -715,16 +716,16 @@ def test_default_ad_event_contract() -> None:
     parsed_simple = lc._read_default_ad_event_simple_config(workbook)
     _assert_equal(parsed_simple, simple_events, "AudioAds/InplayAds sheets parsed incorrectly")
 
-    legacy_workbook = Workbook()
-    legacy_workbook.active.title = "events"
-    legacy_normal = lc._read_default_ad_event_config(legacy_workbook)
-    legacy_simple = lc._read_default_ad_event_simple_config(legacy_workbook)
+    empty_workbook = Workbook()
+    empty_workbook.active.title = "events"
+    empty_normal = lc._read_default_ad_event_config(empty_workbook)
+    empty_simple = lc._read_default_ad_event_simple_config(empty_workbook)
     _assert(
-        not any(event_names for providers in legacy_normal.values() for event_names in providers.values()),
+        not any(event_names for providers in empty_normal.values() for event_names in providers.values()),
         "missing provider sheets must not create normal ad-event rows",
     )
     _assert(
-        not any(event_names for providers in legacy_simple.values() for event_names in providers.values()),
+        not any(event_names for providers in empty_simple.values() for event_names in providers.values()),
         "missing AudioAds/InplayAds sheets must not create simple ad-event rows",
     )
 
@@ -1253,32 +1254,32 @@ def test_release_payload_sync() -> None:
 
 def test_update_candidate_does_not_downgrade() -> None:
     candidates = [
-        {"update_dir": "/tmp/v15", "build": 15, "source": "old"},
-        {"update_dir": "/tmp/v16", "build": 16, "source": "current"},
-        {"update_dir": "/tmp/v17", "build": 17, "source": "newer"},
+        {"update_dir": "/tmp/build52", "build": 52, "source": "older"},
+        {"update_dir": "/tmp/build53", "build": 53, "source": "current"},
+        {"update_dir": "/tmp/build54", "build": 54, "source": "newer"},
     ]
-    selected = desktop._select_prepared_update_candidate(candidates, bundled_build=16)
-    _assert_equal(selected["build"], 17, "bundled v16 must select only a newer prepared update")
+    selected = desktop._select_prepared_update_candidate(candidates, bundled_build=53)
+    _assert_equal(selected["build"], 54, "bundled build 53 must select only a newer prepared update")
     _assert_equal(
-        desktop._select_prepared_update_candidate(candidates[:2], bundled_build=16),
+        desktop._select_prepared_update_candidate(candidates[:2], bundled_build=53),
         None,
-        "a stale prepared update must be ignored when no newer payload exists",
+        "a prepared payload at or below the bundled build must be ignored",
     )
     _assert_equal(
         desktop._select_prepared_update_candidate(candidates[:1], bundled_build=None)["build"],
-        15,
-        "legacy clients without a detected bundled build must keep update compatibility",
+        52,
+        "a client without a detected bundled build must keep update compatibility",
     )
-    equal_build_candidate = [{"update_dir": "/tmp/v16-cache", "build": 16, "source": "same_build_cache"}]
+    equal_build_candidate = [{"update_dir": "/tmp/build53-cache", "build": 53, "source": "same_build_cache"}]
     _assert_equal(
-        desktop._select_prepared_update_candidate(equal_build_candidate, bundled_build=16),
+        desktop._select_prepared_update_candidate(equal_build_candidate, bundled_build=53),
         None,
         "a same-build prepared payload must not override the bundled source",
     )
-    compatibility_candidate = [{"update_dir": "/tmp/v25", "build": 55, "source": "channel_state"}]
+    compatibility_candidate = [{"update_dir": "/tmp/build54", "build": 54, "source": "channel_state"}]
     _assert_equal(
-        desktop._select_prepared_update_candidate(compatibility_candidate, bundled_build=47)["build"],
-        55,
+        desktop._select_prepared_update_candidate(compatibility_candidate, bundled_build=53)["build"],
+        54,
         "a newer prepared payload must be accepted over the bundled build",
     )
 
@@ -1405,7 +1406,7 @@ def test_services_checker_gradle_mapping_contract() -> None:
         "preset refresh must not fall back to a stale release branch",
     )
     _assert("'refreshed_sources': refreshed_sources" in service_source, "preset reload must report the GitHub branch used")
-    _assert('id="build-check-preset"' not in service_source, "legacy global build preset selector must be removed")
+    _assert('id="build-check-preset"' not in service_source, "obsolete global build preset selector must be removed")
 
 
 def test_services_checker_live_preset_refresh_after_restart() -> None:
@@ -2071,8 +2072,8 @@ def test_windows_update_recovery_script() -> None:
     _assert('updates_%%C' in text and 'v250' in text, "windows recovery script must clear every update channel")
     _assert('Updates_2_5/remote_manifest.json' in text, "windows recovery script must target the v2.5 manifest")
     _assert('services_checker/bundletool-all-1.18.1.jar' in text, "windows recovery script must preserve the Services Checker payload")
-    legacy_scripts = sorted((ROOT / "tools").glob("bootstrap_windows_to_v*.bat"))
-    _assert(not legacy_scripts, f"remove legacy Windows bootstrap scripts: {[p.name for p in legacy_scripts]}")
+    stale_scripts = sorted((ROOT / "tools").glob("bootstrap_windows_to_v*.bat"))
+    _assert(not stale_scripts, f"remove stale Windows bootstrap scripts: {[p.name for p in stale_scripts]}")
 
 
 def test_services_checker_bridge_contract() -> None:
@@ -2301,7 +2302,7 @@ def test_gradle_comparison_hides_unlisted_preset_rows() -> None:
 TESTS: List[Callable[[], None]] = [
     test_manifest_contract,
     test_manifest_payload_integrity,
-    test_canonical_update_channel_has_no_legacy_references,
+    test_canonical_update_channel_contract,
     test_package_code_mapping,
     test_installation_id_state_machine,
     test_installation_id_log_parsing,
