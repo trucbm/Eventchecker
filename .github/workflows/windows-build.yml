@@ -41,6 +41,12 @@ jobs:
         run: |
           build\windows\build_portable.bat
 
+      - name: Verify Windows portable updater
+        shell: cmd
+        run: |
+          call .venv\Scripts\activate.bat
+          python tools\windows_update_smoke.py
+
       - name: Zip Portable
         shell: pwsh
         run: |

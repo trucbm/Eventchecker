@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-28-1-2.5.0-53",
+  "version": "2026-08-28-2-2.5.0-54",
   "update_enabled": true,
   "update_message": "",
   "files": [
@@ -11,7 +11,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Log_checker.py"
       ],
-      "sha256": "15c48b0891213755fbca3d97fdfd982136c2a23641bf3789b8f4388e201d7e3d"
+      "sha256": "c62731c4d4c1811d52b34a24684209b3cb0f50531aac523af76564ebb6b21cae"
     },
     {
       "path": "remote_update.py",
@@ -21,7 +21,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/remote_update.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/remote_update.py"
       ],
-      "sha256": "c4b49dfa974a006019c2e91d87941e7e240727f6132bb426a4125190e76b37e5"
+      "sha256": "fd0a698c134d6cc7247685bbc43688fbaad97b53236bd1e3315a36d42faa51c9"
     },
     {
       "path": "sdk_check_presets.json",

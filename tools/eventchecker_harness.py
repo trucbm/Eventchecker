@@ -38,8 +38,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-08-28-1-2.5.0-53"
-CURRENT_RELEASE_BUILD = 53
+CURRENT_RELEASE_VERSION = "2026-08-28-2-2.5.0-54"
+CURRENT_RELEASE_BUILD = 54
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -1838,8 +1838,8 @@ def test_update_flow_canonical_v25() -> None:
                 }],
                 bundled_build=50,
             )
-            _assert(selected is not None, "bundle build 50 must accept the prepared build 53 payload")
-            _assert_equal(selected.get("build"), CURRENT_RELEASE_BUILD, "prepared build 53 was not selected")
+            _assert(selected is not None, "bundle build 50 must accept the prepared build 54 payload")
+            _assert_equal(selected.get("build"), CURRENT_RELEASE_BUILD, "prepared build 54 was not selected")
             updated_source = Path(prepared["update_dir"], "Log_checker.py").read_text(
                 encoding="utf-8", errors="ignore"
             )
@@ -1867,6 +1867,78 @@ def test_update_flow_canonical_v25() -> None:
             os.environ.pop("EVENTINSPECTOR_BUNDLED_BUILD_SOURCE", None)
         else:
             os.environ["EVENTINSPECTOR_BUNDLED_BUILD_SOURCE"] = original_bundle_source
+
+
+def test_windows_portable_update_staging() -> None:
+    """Windows must stage a new payload beside, not over, the active payload."""
+    import remote_update as updater
+
+    manifest_path = ROOT / "Updates_2_5" / "remote_manifest.json"
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
+    payloads = {
+        str(item["path"]): (ROOT / str(item["path"])).read_bytes()
+        for item in manifest.get("files") or []
+        if item.get("path")
+    }
+    original_os_name = updater.os.name
+    original_user_data_dir = updater._user_data_dir
+    original_download_first = updater._download_first
+    original_download_verified = updater._download_verified
+    try:
+        with tempfile.TemporaryDirectory(prefix="eventinspector_windows_harness_") as temp_support:
+            updater.os.name = "nt"
+            updater._user_data_dir = lambda: temp_support
+
+            active_dir = os.path.join(temp_support, "updates_v250")
+            os.makedirs(active_dir, exist_ok=True)
+            with open(os.path.join(active_dir, "active_payload.locked"), "w", encoding="utf-8") as handle:
+                handle.write("keep")
+            updater._save_state({
+                "last_check": 0,
+                "version": "2026-08-27-1-2.5.0-52",
+                "update_dir": str(active_dir),
+                "files": ["active_payload.locked"],
+            })
+
+            def fake_download_first(_urls, _timeout):
+                return manifest_bytes, "harness://remote_manifest.json"
+
+            def fake_download_verified(urls, _timeout, _expected_sha256=""):
+                rel_path = next((path for path in payloads if any(url.endswith("/" + path) for url in urls)), None)
+                _assert(rel_path is not None, f"unexpected update payload URL list: {urls}")
+                return payloads[rel_path], f"harness://{rel_path}"
+
+            updater._download_first = fake_download_first
+            updater._download_verified = fake_download_verified
+
+            result = updater.check_for_updates()
+            _assert_equal(result.get("status"), "updated", "Windows portable update must complete without replacing the active directory")
+            prepared = updater.get_prepared_update_info()
+            prepared_dir = prepared["update_dir"]
+            _assert(prepared_dir != active_dir, "Windows update must use a new payload directory")
+            _assert(os.path.basename(prepared_dir).startswith("updates_v250_"), "Windows staged payload name must identify the v2.5 channel")
+            _assert(os.path.exists(os.path.join(active_dir, "active_payload.locked")), "active Windows payload was modified during update")
+            _assert(os.path.exists(os.path.join(prepared_dir, "Log_checker.py")), "Windows staged Log_checker.py is missing")
+            _assert_equal(prepared.get("build"), CURRENT_RELEASE_BUILD, "Windows staged payload build mismatch")
+            selected = desktop._select_prepared_update_candidate(
+                [{
+                    "update_dir": prepared_dir,
+                    "build": prepared.get("build"),
+                    "source": "windows-channel-state",
+                }],
+                bundled_build=53,
+            )
+            _assert(selected is not None, "Windows restart must see the staged build as a usable update")
+            _assert_equal(selected.get("update_dir"), prepared_dir, "Windows restart selected the wrong payload directory")
+
+            second = updater.check_for_updates()
+            _assert_equal(second.get("status"), "up_to_date", "Windows staged payload must not download repeatedly")
+    finally:
+        updater.os.name = original_os_name
+        updater._user_data_dir = original_user_data_dir
+        updater._download_first = original_download_first
+        updater._download_verified = original_download_verified
 
 
 def test_build_scripts_clean_outputs() -> None:
@@ -1973,6 +2045,8 @@ def test_windows_release_build_version_contract() -> None:
     _assert('default: "main"' in workflow, "Windows workflow must default to the main source ref")
     _assert("ref: ${{ inputs.source_ref || 'main' }}" in workflow, "Windows workflow must checkout the requested main source ref")
     _assert("Verify Portable ZIP version" in workflow, "Windows workflow must verify the portable ZIP")
+    _assert("Verify Windows portable updater" in workflow, "Windows workflow must run the portable updater smoke test")
+    _assert("python tools\\windows_update_smoke.py" in workflow, "Windows workflow must execute the Windows updater smoke test")
     _assert("EventInspector-Windows-v${{ steps.release.outputs.release_version }}" in workflow, "Windows artifacts must be versioned")
     _assert('[switch]$PrintVersion' in source_guard, "Windows source guard must expose the resolved version")
     _assert('ExpectedSeries = "2.5.0"' in source_guard, "Windows source guard must enforce the v2.5 series")
@@ -1981,7 +2055,10 @@ def test_windows_release_build_version_contract() -> None:
     _assert("EventInspector.exe" in bundle_guard, "Windows bundle guard must require the executable")
     _assert("-PrintVersion" in installer_script, "Windows installer must derive its version from the source")
     _assert("/DMyAppVersion=%EVENTINSPECTOR_RELEASE_VERSION%" in installer_script, "Inno Setup must receive the source version")
-    _assert('#define MyAppVersion "2.5.0.53"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
+    _assert(
+        f'#define MyAppVersion "2.5.0.{CURRENT_RELEASE_BUILD}"' in iss_script,
+        "Inno Setup fallback must match the current v2.5 release",
+    )
 
 
 def test_windows_update_recovery_script() -> None:
@@ -2249,6 +2326,7 @@ TESTS: List[Callable[[], None]] = [
     test_sdk_preset_git_value_reload_from_real_commit,
     test_canonical_manifest_build_contract,
     test_update_flow_canonical_v25,
+    test_windows_portable_update_staging,
     test_build_scripts_clean_outputs,
     test_windows_release_build_version_contract,
     test_windows_update_recovery_script,
