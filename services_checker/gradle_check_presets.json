@@ -59,21 +59,23 @@
       "Adjust Google LVL\t5.6.1"
     ]
   },
-  "C-190-Android": {
+  "C-191-Android": {
     "platform": "android",
     "lines": [
       "Kidoz adapter\t2.2.0",
-      "Kidoz native\t10.1.8",
-      "Maticoo adapter\t2.0.4.5",
-      "Maticoo sdk\t2.0.6.0",
+      "Kidoz native\t10.1.9",
+      "LINE Ads adapter\t5.4.0",
+      "LINE Ads native\t3.1.1",
+      "Maticoo adapter\t2.0.7.0",
+      "Maticoo sdk\t2.0.7.0",
       "TaurusX adapter\t1.16.3.1",
-      "TaurusX native\t1.18.3",
+      "TaurusX native\t1.18.6",
       "Ascendx Adapter\t0.11.1",
       "Odeeo SDK\t3.10.0",
-      "Firebase Cloud Messaging Unity\t13.15.0",
-      "Firebase Cloud Messaging\t25.1.1",
+      "Firebase Cloud Messaging Unity\t13.16.0",
+      "Firebase Cloud Messaging\t25.1.2",
       "Firebase Installations\t19.1.2",
-      "Firebase Remote Config Unity\t13.15.0",
+      "Firebase Remote Config Unity\t13.16.0",
       "Firebase Remote Config\t23.1.0",
       "Firebase Performance Monitoring Plugin\t2.0.2",
       "Firebase Performance Monitoring\t22.0.6",
@@ -86,8 +88,7 @@
       "Samsung Install Referrer\t3.0.1",
       "Adjust Vivo Referrer\t5.8.0",
       "Adjust Meta Referrer\t5.8.0",
-      "Adjust Google LVL\t5.8.0",
-      "Ascendx Prebid\t1.21.0"
+      "Adjust Google LVL\t5.8.0"
     ]
   }
 }
