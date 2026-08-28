@@ -10,16 +10,16 @@ import tempfile
 import requests
 
 APP_NAME = "EventInspector"
-CHANNEL_ID = "v250"
-CONFIG_FILENAME = "remote_update_config_v250.json"
-STATE_FILENAME = "update_state_v250.json"
-UPDATES_DIRNAME = "updates_v250"
+CHANNEL_ID = "v230"
+CONFIG_FILENAME = "remote_update_config_v230.json"
+STATE_FILENAME = "update_state_v230.json"
+UPDATES_DIRNAME = "updates_v230"
 DOWNLOAD_ATTEMPTS = 3
 DOWNLOAD_RETRY_DELAYS = (0.35, 1.0)
 DEFAULT_MANIFEST_URLS = [
-    "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/remote_manifest.json",
-    "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/remote_manifest.json",
-    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_5/remote_manifest.json",
+    "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_3/remote_manifest.json",
+    "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json",
+    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json",
 ]
 DEFAULT_MANIFEST_URL = DEFAULT_MANIFEST_URLS[0]
 DEFAULT_FILE_URL_BASES = [
@@ -27,7 +27,7 @@ DEFAULT_FILE_URL_BASES = [
     "https://raw.githubusercontent.com/trucbm/Eventchecker/main",
     "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main",
 ]
-KNOWN_CHANNELS = ("v250",)
+KNOWN_CHANNELS = ("v230",)
 
 # A small compatibility profile is intentionally kept on main for clients
 # whose bundled shell still reads the old v230 state directory.  It is not a

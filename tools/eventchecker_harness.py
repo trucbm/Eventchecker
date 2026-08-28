@@ -18,6 +18,7 @@ It does not start the UI or connect to devices.
 from __future__ import annotations
 
 import argparse
+import copy
 import functools
 import http.server
 import importlib.util
@@ -31,8 +32,9 @@ import tempfile
 import threading
 import types
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PosixPath
 from typing import Callable, Iterable, List
+from urllib.parse import urlparse
 
 from openpyxl import Workbook
 
@@ -1779,6 +1781,181 @@ def test_canonical_manifest_build_contract() -> None:
             )
 
 
+def test_legacy_v230_update_bridge() -> None:
+    """A legacy shell must refresh its v230 state with the main v2.5 payload."""
+    import importlib.util
+
+    manifest_path = ROOT / "Updates_2_3" / "remote_manifest.json"
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes)
+    manifest_files = manifest.get("files") or []
+    compat_root = ROOT / "Updates_2_5" / "compat"
+
+    _assert_equal(manifest.get("version"), "2026-08-28-2-2.5.0-54", "legacy bridge must target the current v2.5 release")
+    log_item = next(item for item in manifest_files if item.get("path") == "Log_checker.py")
+    updater_item = next(item for item in manifest_files if item.get("path") == "remote_update.py")
+    marker_item = next(item for item in manifest_files if item.get("path") == "Updates_2_5/compat/legacy_bridge_marker.json")
+    _assert(
+        "/Updates_2_5/compat/Log_checker.py" in str(log_item.get("url")),
+        "legacy bridge must deliver the compatibility Log_checker payload",
+    )
+    _assert(
+        "/Updates_2_5/compat/remote_update.py" in str(updater_item.get("url")),
+        "legacy bridge must deliver the compatibility updater payload",
+    )
+    _assert(marker_item.get("path"), "legacy bridge marker is missing")
+    _assert_equal(_sha256_file(compat_root / "Log_checker.py"), log_item.get("sha256"), "compatibility Log_checker hash drifted")
+    _assert_equal(_sha256_file(compat_root / "remote_update.py"), updater_item.get("sha256"), "compatibility updater hash drifted")
+    _assert_equal(
+        _sha256_file(compat_root / "legacy_bridge_marker.json"),
+        marker_item.get("sha256"),
+        "legacy bridge marker hash drifted",
+    )
+
+    def load_module(name: str, path: Path):
+        spec = importlib.util.spec_from_file_location(name, path)
+        _assert(spec is not None and spec.loader is not None, f"could not load {path.name}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    compat_updater = load_module("eventinspector_legacy_compat_updater", compat_root / "remote_update.py")
+    canonical_updater = load_module("eventinspector_canonical_updater_in_legacy_dir", ROOT / "remote_update.py")
+    class LegacyPayloadHandler(http.server.BaseHTTPRequestHandler):
+        manifest = b""
+
+        def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler API
+            relative = urlparse(self.path).path.lstrip("/")
+            if relative == "Updates_2_3/remote_manifest.json":
+                body = self.manifest
+            else:
+                payload_path = ROOT / relative
+                if not payload_path.is_file():
+                    self.send_error(404)
+                    return
+                body = payload_path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), LegacyPayloadHandler)
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    local_manifest = copy.deepcopy(manifest)
+    for item in local_manifest.get("files") or []:
+        rel_path = str(item["path"])
+        source_path = rel_path
+        if rel_path == "Log_checker.py":
+            source_path = "Updates_2_5/compat/Log_checker.py"
+        elif rel_path == "remote_update.py":
+            source_path = "Updates_2_5/compat/remote_update.py"
+        item["url"] = f"{base_url}/{source_path}"
+        item["urls"] = []
+    LegacyPayloadHandler.manifest = json.dumps(local_manifest).encode("utf-8")
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    original_os_name = os.name
+    original_local_app_data = os.environ.get("LOCALAPPDATA")
+    original_home = os.environ.get("HOME")
+    original_update_dir = os.environ.get("EVENTINSPECTOR_UPDATE_DIR")
+    original_update_channel = os.environ.get("EVENTINSPECTOR_UPDATE_CHANNEL")
+    original_bundle_build = os.environ.get("EVENTINSPECTOR_BUNDLED_BUILD")
+    original_bundle_source = os.environ.get("EVENTINSPECTOR_BUNDLED_BUILD_SOURCE")
+    original_compat_manifest = compat_updater._candidate_manifest_urls
+    original_compat_download_first = compat_updater._download_first
+    original_compat_download_verified = compat_updater._download_verified
+    original_canonical_manifest = canonical_updater._candidate_manifest_urls
+    original_canonical_download_first = canonical_updater._download_first
+
+    def restore_env(name: str, value: str | None) -> None:
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+
+    try:
+        # Exercise the Windows portable handoff while keeping the real
+        # filesystem and payload hashes in use.
+        with tempfile.TemporaryDirectory(prefix="eventinspector_legacy_bridge_") as temp_support:
+            os.name = "nt"
+            os.environ["LOCALAPPDATA"] = temp_support
+            os.environ["EVENTINSPECTOR_BUNDLED_BUILD"] = "52"
+            os.environ["EVENTINSPECTOR_BUNDLED_BUILD_SOURCE"] = "detected"
+            os.environ.pop("EVENTINSPECTOR_UPDATE_DIR", None)
+            os.environ.pop("EVENTINSPECTOR_UPDATE_CHANNEL", None)
+
+            support_dir = PosixPath(temp_support) / "EventInspector"
+            active_dir = support_dir / "updates_v230"
+            active_dir.mkdir(parents=True)
+
+            # This is the failure state seen in the client log: the old
+            # payload has the same release version but lacks the bridge marker
+            # and still contains the canonical updater in the v230 directory.
+            old_files = [item for item in manifest_files if item.get("path") != marker_item.get("path")]
+            for item in old_files:
+                rel_path = str(item["path"])
+                source_path = ROOT / rel_path
+                target = active_dir / rel_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(source_path.read_bytes())
+            locked_path = active_dir / "active_payload.locked"
+            locked_path.write_text("keep", encoding="utf-8")
+            compat_updater._save_state({
+                "last_check": 0,
+                "version": manifest["version"],
+                "update_dir": str(active_dir),
+                "files": [str(item["path"]) for item in old_files],
+            })
+
+            compat_updater._candidate_manifest_urls = lambda _cfg: [
+                f"{base_url}/Updates_2_3/remote_manifest.json"
+            ]
+
+            result = compat_updater.check_for_updates()
+            _assert_equal(result.get("status"), "updated", "legacy v230 payload was not refreshed")
+            prepared = compat_updater.get_prepared_update_info()
+            prepared_dir = prepared.get("update_dir")
+            _assert(prepared_dir and PosixPath(prepared_dir).is_dir(), "legacy bridge did not save a prepared payload")
+            _assert(PosixPath(prepared_dir).name.startswith("updates_v230_"), "legacy bridge left the v230 staging channel")
+            _assert_equal(prepared.get("build"), 54, "legacy bridge prepared the wrong release build")
+            _assert(locked_path.exists(), "legacy bridge modified the active v230 payload")
+            _assert((PosixPath(prepared_dir) / "Updates_2_5/compat/legacy_bridge_marker.json").exists(), "legacy bridge marker was not staged")
+            _assert("CHANNEL_ID = \"v230\"" in (PosixPath(prepared_dir) / "remote_update.py").read_text(encoding="utf-8"), "legacy payload still points to v250 updater")
+
+            # A v2.5 updater already sitting in a v230 directory must also
+            # honor that directory's state instead of silently switching to
+            # update_state_v250.json.
+            os.environ["EVENTINSPECTOR_UPDATE_DIR"] = str(prepared_dir)
+            _assert_equal(canonical_updater._runtime_profile()["channel_id"], "v230", "canonical updater did not detect the legacy runtime")
+            _assert(canonical_updater._state_path().endswith("update_state_v230.json"), "legacy runtime selected v250 state")
+            canonical_updater._candidate_manifest_urls = lambda _cfg: [
+                f"{base_url}/Updates_2_3/remote_manifest.json"
+            ]
+            canonical_result = canonical_updater.check_for_updates()
+            _assert_equal(canonical_result.get("status"), "up_to_date", "canonical updater did not reuse the prepared v230 payload")
+            _assert_equal(canonical_updater.get_prepared_update_info().get("build"), 54, "legacy prepared state was not retained")
+    finally:
+        compat_updater._candidate_manifest_urls = original_compat_manifest
+        compat_updater._download_first = original_compat_download_first
+        compat_updater._download_verified = original_compat_download_verified
+        canonical_updater._candidate_manifest_urls = original_canonical_manifest
+        canonical_updater._download_first = original_canonical_download_first
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=2)
+        os.name = original_os_name
+        restore_env("LOCALAPPDATA", original_local_app_data)
+        restore_env("HOME", original_home)
+        restore_env("EVENTINSPECTOR_UPDATE_DIR", original_update_dir)
+        restore_env("EVENTINSPECTOR_UPDATE_CHANNEL", original_update_channel)
+        restore_env("EVENTINSPECTOR_BUNDLED_BUILD", original_bundle_build)
+        restore_env("EVENTINSPECTOR_BUNDLED_BUILD_SOURCE", original_bundle_source)
+
+
 def test_update_flow_canonical_v25() -> None:
     import remote_update as updater
 
@@ -2353,6 +2530,7 @@ TESTS: List[Callable[[], None]] = [
     test_services_checker_git_value_reload_from_real_commit,
     test_sdk_preset_git_value_reload_from_real_commit,
     test_canonical_manifest_build_contract,
+    test_legacy_v230_update_bridge,
     test_update_flow_canonical_v25,
     test_windows_portable_update_staging,
     test_build_scripts_clean_outputs,

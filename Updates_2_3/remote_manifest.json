@@ -5,23 +5,23 @@
   "files": [
     {
       "path": "Log_checker.py",
-      "url": "https://github.com/trucbm/Eventchecker/raw/main/Log_checker.py",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/compat/Log_checker.py",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/main/Log_checker.py",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Log_checker.py",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Log_checker.py"
+        "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/compat/Log_checker.py",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/compat/Log_checker.py",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_5/compat/Log_checker.py"
       ],
-      "sha256": "c62731c4d4c1811d52b34a24684209b3cb0f50531aac523af76564ebb6b21cae"
+      "sha256": "ce9e2c2f0505dcbac50291cefdfe0ffb69ab34caf7a2f16efa3c19d08cbd2ef0"
     },
     {
       "path": "remote_update.py",
-      "url": "https://github.com/trucbm/Eventchecker/raw/main/remote_update.py",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/compat/remote_update.py",
       "urls": [
-        "https://github.com/trucbm/Eventchecker/raw/main/remote_update.py",
-        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/remote_update.py",
-        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/remote_update.py"
+        "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/compat/remote_update.py",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/compat/remote_update.py",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_5/compat/remote_update.py"
       ],
-      "sha256": "143162567d25005ea7bea576015e9f701aaa94943ff0bd7006e225b90abf5531"
+      "sha256": "dfddd5a8b0b96a227e59aef6e00bfc96b74f3376af63340337328e5b71dba8af"
     },
     {
       "path": "sdk_check_presets.json",
@@ -132,6 +132,16 @@
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/manifest_check_presets.json"
       ],
       "sha256": "df883a282c1b0dc19f17c0018189d3449d68c7b90ae1338eb4496c0748a1a5fd"
+    },
+    {
+      "path": "Updates_2_5/compat/legacy_bridge_marker.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/compat/legacy_bridge_marker.json",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_5/compat/legacy_bridge_marker.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_5/compat/legacy_bridge_marker.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_5/compat/legacy_bridge_marker.json"
+      ],
+      "sha256": "fb975a3fe35c1969e676094b2eeb111e55b1a5a2b5741a883aaee2d047bedbee"
     }
   ]
 }

@@ -21,7 +21,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/remote_update.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/remote_update.py"
       ],
-      "sha256": "143162567d25005ea7bea576015e9f701aaa94943ff0bd7006e225b90abf5531"
+      "sha256": "9c39ff38ee8e15dd568b21ab204896ccb05ae47fd948e7e47376665cd5a2764e"
     },
     {
       "path": "sdk_check_presets.json",
