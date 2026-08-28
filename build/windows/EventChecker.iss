@@ -2,7 +2,7 @@
 
 #define MyAppName "Event Inspector"
 #ifndef MyAppVersion
-#define MyAppVersion "2.5.0.50"
+#define MyAppVersion "2.5.0.53"
 #endif
 #define MyAppPublisher ""
 #define MyAppURL ""

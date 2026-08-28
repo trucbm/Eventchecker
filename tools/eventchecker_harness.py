@@ -38,8 +38,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-08-27-2-2.5.0-52"
-CURRENT_RELEASE_BUILD = 52
+CURRENT_RELEASE_VERSION = "2026-08-28-1-2.5.0-53"
+CURRENT_RELEASE_BUILD = 53
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -158,7 +158,7 @@ def test_manifest_payload_integrity() -> None:
 
 
 def test_canonical_update_channel_has_no_legacy_references() -> None:
-    """Keep the build-52 updater on the single canonical main/v250 channel."""
+    """Keep the build-53 updater on the single canonical main/v250 channel."""
     legacy_channel_pairs = ((2, 1), (2, 2), (2, 3), (2, 4))
     legacy_markers = tuple(
         marker
@@ -656,8 +656,9 @@ def test_default_ad_event_contract() -> None:
     workbook = Workbook()
     workbook.active.title = "events"
 
-    def add_normal_sheet(provider: str) -> None:
+    def add_normal_sheet(provider: str, platform_value=None) -> None:
         worksheet = workbook.create_sheet(provider)
+        platform_value = platform_value or provider
         for column, ad_format in zip((2, 6, 10, 14), lc.DEFAULT_AD_EVENT_FORMATS):
             worksheet.merge_cells(
                 start_row=2,
@@ -670,13 +671,15 @@ def test_default_ad_event_contract() -> None:
             for event_name in normal_events[ad_format]:
                 worksheet.cell(row, column).value = event_name
                 worksheet.cell(row + 1, column + 1).value = "ad_platform"
-                worksheet.cell(row + 1, column + 2).value = provider
+                worksheet.cell(row + 1, column + 2).value = platform_value
                 worksheet.cell(row + 2, column + 1).value = "ad_format"
                 worksheet.cell(row + 2, column + 2).value = ad_format
                 row += 3
 
-    for provider in ("Ironsource", "Cloudx", "Ascendx"):
-        add_normal_sheet(provider)
+    add_normal_sheet("Ironsource", "ironsource")
+    add_normal_sheet("MAX", "max")
+    add_normal_sheet("Cloudx")
+    add_normal_sheet("Ascendx")
 
     def add_simple_sheet(category: str) -> None:
         worksheet = workbook.create_sheet(lc.DEFAULT_AD_EVENT_SIMPLE_CATEGORY_LABELS[category])
@@ -745,13 +748,13 @@ def test_default_ad_event_contract() -> None:
 
         line = (
             'Unity : TrackingService->Track: '
-            '{"eventName":"ad_impression","e":{"ad_platform":"CLOUDX","ad_format":"Rewarded"}}'
+            '{"eventName":"ad_impression","e":{"ad_platform":"max","ad_format":"Rewarded"}}'
         )
         event_name, actual_params, _json_string = lc.find_and_parse_event(line)
         _assert_equal(event_name, "ad_impression", "generic ad event was not parsed")
         _assert_equal(
             actual_params,
-            {"ad_platform": "CLOUDX", "ad_format": "Rewarded"},
+            {"ad_platform": "max", "ad_format": "Rewarded"},
             "generic ad event parameters were not parsed",
         )
         lc._record_default_ad_event_hit(event_name, actual_params, "device-normal")
@@ -762,8 +765,8 @@ def test_default_ad_event_contract() -> None:
         )
         lc._record_default_ad_event_hit(
             "ad_rewarded",
-            {"ad_platform": "Cloudx", "ad_format": "interstitial"},
-            "device-wrong-format",
+            {"ad_platform": "Cloudx", "ad_format": "rewarded"},
+            "device-hidden-provider",
         )
 
         payload = lc._default_ad_event_payload()
@@ -771,11 +774,15 @@ def test_default_ad_event_contract() -> None:
             payload["hits"],
             [{
                 "device_id": "device-normal",
-                "provider": "cloudx",
+                "provider": "max",
                 "ad_format": "rewarded",
                 "event_name": "ad_impression",
             }],
-            "normal ad-event match did not use both ad_platform and ad_format",
+            "MAX ad-event match did not use max ad_platform and ad_format",
+        )
+        _assert(
+            not any(hit.get("provider") in {"cloudx", "ascendx"} for hit in payload["hits"]),
+            "temporarily hidden providers must not create visible coverage hits",
         )
         _assert_equal(
             payload["simple_hits"],
@@ -789,6 +796,18 @@ def test_default_ad_event_contract() -> None:
         )
         _assert_equal(len(emitted), 2, "only matching ad events should emit coverage updates")
 
+        catalog = lc._default_ad_event_catalog_payload()
+        _assert_equal(
+            [provider["key"] for provider in catalog["providers"]],
+            ["ironsource", "max"],
+            "Default Ad Events must expose Ironsource and MAX only",
+        )
+        _assert_equal(
+            [provider["label"] for provider in catalog["providers"]],
+            ["Ironsource", "MAX"],
+            "Default Ad Events provider labels changed",
+        )
+
         rendered = lc.app.test_client().get("/")
         _assert_equal(rendered.status_code, 200, "Default Ad Events UI route must render")
         html = rendered.get_data(as_text=True)
@@ -801,6 +820,7 @@ def test_default_ad_event_contract() -> None:
             "Audiomob",
             "Adverty",
             "Gadsme",
+            "MAX",
             "Simple providers are intentionally rendered as separate blocks",
         ):
             _assert(marker in html, f"Default Ad Events UI contract is missing: {marker}")
@@ -895,6 +915,11 @@ def test_rewarded_bidding_filter_contract() -> None:
 def test_price_rotation_exact_parser() -> None:
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
     _assert('onclick="switchTab(\'PriceRotation\')">Bidding</button>' in source_text, "Price Rotation tab label must be Bidding")
+    _assert(source_text.count('id="priceRotationTypeMax"') == 1, "MAX filter must exist exactly once")
+    _assert('value="max"' in source_text, "MAX filter value is missing")
+    _assert('id="priceRotationTypeAscendx"' not in source_text, "Ascendx Bidding filter must be hidden")
+    _assert('id="priceRotationTypeCloudx"' not in source_text, "Cloudx Bidding filter must be hidden")
+    _assert("rotationType === 'ascendx' || rotationType === 'cloudx'" in source_text, "hidden Bidding types must stay filtered in the UI")
     _assert(source_text.count('id="priceRotationTypeWaterfall"') == 1, "Waterfall filter must exist exactly once")
     _assert(source_text.count('id="priceRotationTypeInterstitialCap"') == 1, "InterstitialCap filter must exist exactly once")
     _assert(source_text.count('id="priceRotationAdTypeAll"') == 1, "Ad type All filter must exist exactly once")
@@ -928,6 +953,60 @@ def test_price_rotation_exact_parser() -> None:
     _assert_equal(interstitial_plain["type"], "InterstitialBidding", "A plain marker must use the InterstitialBidding type")
     _assert(lc._parse_price_rotation_log(valid.replace("[Ad,RewardedBidding,", "[Ad,RewardedBiddingX,"), "device-price") is None, "Price Rotation marker must be exact")
     _assert(lc._parse_price_rotation_log(interstitial_raw.replace("[Ad,InterstitialBidding,", "[Ad,InterstitialBiddingX,"), "device-price") is None, "Interstitial marker must be exact")
+
+    original_paused = lc.is_paused
+    original_emit = lc.socketio.emit
+    original_rows = list(lc.price_rotation_logs)
+    try:
+        lc.is_paused = False
+        lc.price_rotation_logs.clear()
+        lc.socketio.emit = lambda *_args, **_kwargs: None
+        max_rewarded = lc._parse_price_rotation_log(
+            'Unity : [Ad,RewardedBidding, MAX] Raise: {"act":"bid"}',
+            "device-price",
+        )
+        max_rewarded_applovin = lc._parse_price_rotation_log(
+            'Unity : [Ad,RewardedBidding, applovin] Raise: {"act":"bid"}',
+            "device-price",
+        )
+        max_interstitial = lc._parse_price_rotation_log(
+            'Unity : [Ad,InterstitialBidding, MAX] Raise: {"act":"bid"}',
+            "device-price",
+        )
+        max_interstitial_applovin = lc._parse_price_rotation_log(
+            'Unity : [Ad,InterstitialBidding, applovin] Raise: {"act":"bid"}',
+            "device-price",
+        )
+        _assert(
+            all(parsed and parsed["type"] in {"MAX", "applovin"} for parsed in (
+                max_rewarded,
+                max_rewarded_applovin,
+                max_interstitial,
+                max_interstitial_applovin,
+            )),
+            "MAX markers must parse for Rewarded and Interstitial bidding",
+        )
+        for raw_log in (
+            'Unity : [Ad,RewardedBidding, MAX] Raise: {"act":"bid"}',
+            'Unity : [Ad,RewardedBidding, applovin] Raise: {"act":"bid"}',
+            'Unity : [Ad,InterstitialBidding, MAX] Raise: {"act":"bid"}',
+            'Unity : [Ad,InterstitialBidding, applovin] Raise: {"act":"bid"}',
+        ):
+            lc.process_price_rotation_log(raw_log, "device-price")
+        _assert_equal(len(lc.price_rotation_logs), 4, "MAX Bidding variants must remain visible")
+
+        lc.process_price_rotation_log(valid, "device-price")
+        _assert_equal(len(lc.price_rotation_logs), 4, "hidden Cloudx Bidding logs must not be stored")
+        lc.process_price_rotation_log(
+            'Unity : [Ad,InterstitialBidding, Ascendx] Raise: {"act":"bid"}',
+            "device-price",
+        )
+        _assert_equal(len(lc.price_rotation_logs), 4, "hidden Ascendx Bidding logs must not be stored")
+    finally:
+        lc.is_paused = original_paused
+        lc.socketio.emit = original_emit
+        lc.price_rotation_logs.clear()
+        lc.price_rotation_logs.extend(original_rows)
 
 
 def test_load_ads_provider_contract() -> None:
@@ -1759,8 +1838,8 @@ def test_update_flow_canonical_v25() -> None:
                 }],
                 bundled_build=50,
             )
-            _assert(selected is not None, "bundle build 50 must accept the prepared build 52 payload")
-            _assert_equal(selected.get("build"), CURRENT_RELEASE_BUILD, "prepared build 52 was not selected")
+            _assert(selected is not None, "bundle build 50 must accept the prepared build 53 payload")
+            _assert_equal(selected.get("build"), CURRENT_RELEASE_BUILD, "prepared build 53 was not selected")
             updated_source = Path(prepared["update_dir"], "Log_checker.py").read_text(
                 encoding="utf-8", errors="ignore"
             )
@@ -1902,7 +1981,7 @@ def test_windows_release_build_version_contract() -> None:
     _assert("EventInspector.exe" in bundle_guard, "Windows bundle guard must require the executable")
     _assert("-PrintVersion" in installer_script, "Windows installer must derive its version from the source")
     _assert("/DMyAppVersion=%EVENTINSPECTOR_RELEASE_VERSION%" in installer_script, "Inno Setup must receive the source version")
-    _assert('#define MyAppVersion "2.5.0.50"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
+    _assert('#define MyAppVersion "2.5.0.53"' in iss_script, "Inno Setup fallback must match the current v2.5 release")
 
 
 def test_windows_update_recovery_script() -> None:

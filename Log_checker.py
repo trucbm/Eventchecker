@@ -189,9 +189,18 @@ def _resolve_default_params_path():
 
 DEFAULT_PARAMS_XLSX = _resolve_default_params_path()
 DEFAULT_PARAM_FILL = "FFFCE5CD"
-DEFAULT_AD_EVENT_PROVIDERS = ("ironsource", "cloudx", "ascendx")
+# Keep the full provider order here so the two temporarily hidden providers
+# can be restored without changing the parser or table layout again.
+DEFAULT_AD_EVENT_PROVIDER_ORDER = ("ironsource", "max", "cloudx", "ascendx")
+DEFAULT_AD_EVENT_HIDDEN_PROVIDERS = frozenset({"cloudx", "ascendx"})
+DEFAULT_AD_EVENT_PROVIDERS = tuple(
+    provider
+    for provider in DEFAULT_AD_EVENT_PROVIDER_ORDER
+    if provider not in DEFAULT_AD_EVENT_HIDDEN_PROVIDERS
+)
 DEFAULT_AD_EVENT_PROVIDER_LABELS = {
     "ironsource": "Ironsource",
+    "max": "MAX",
     "cloudx": "Cloudx",
     "ascendx": "Ascendx",
 }
@@ -1142,6 +1151,19 @@ PRICE_ROTATION_PREFIXES = (
     ("Rewarded", "[Ad,RewardedBidding"),
     ("Interstitial", "[Ad,InterstitialBidding"),
 )
+PRICE_ROTATION_HIDDEN_TYPES = frozenset({"ascendx", "cloudx"})
+PRICE_ROTATION_TYPE_ALIASES = {
+    "max": "max",
+    "applovin": "max",
+    "applovinmax": "max",
+    "ascendx": "ascendx",
+    "cloudx": "cloudx",
+}
+
+
+def _normalize_price_rotation_type(value):
+    token = re.sub(r"[^a-z0-9]+", "", str(value or "").strip().casefold())
+    return PRICE_ROTATION_TYPE_ALIASES.get(token, token)
 
 # 9. Dữ liệu cho Tab SDK Check
 sdk_check_search_list = []
@@ -2439,6 +2461,8 @@ def process_price_rotation_log(log_entry, device_id):
     parsed = _parse_price_rotation_log(log_entry, device_id)
     if not parsed:
         return
+    if _normalize_price_rotation_type(parsed.get("type")) in PRICE_ROTATION_HIDDEN_TYPES:
+        return
 
     with lock:
         price_rotation_logs.append(parsed)
@@ -2746,6 +2770,9 @@ def _normalize_default_ad_event_provider(value):
     aliases = {
         "ironsource": "ironsource",
         "iron": "ironsource",
+        "max": "max",
+        "applovin": "max",
+        "applovinmax": "max",
         "cloudx": "cloudx",
         "ascendx": "ascendx",
     }
@@ -2897,7 +2924,7 @@ def _read_default_ad_event_config(wb):
     config = _new_default_ad_event_config()
     for ws in wb.worksheets:
         provider = _normalize_default_ad_event_provider(ws.title)
-        if not provider:
+        if provider not in DEFAULT_AD_EVENT_PROVIDERS:
             continue
         parsed = _read_default_ad_event_sheet(ws, provider)
         for ad_format, event_names in parsed.items():
@@ -3442,7 +3469,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(52)</title>
+    <title>Event Inspector v2.5.0(53)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -3524,7 +3551,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(52)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(53)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3737,7 +3764,7 @@ HTML_TEMPLATE = """
                         <label for="defaultAdEventProfileSelect" class="text-xs font-medium text-gray-700">Default File:</label>
                         <select id="defaultAdEventProfileSelect" class="h-9 min-w-[260px] px-3 border rounded-md shadow-sm text-xs"></select>
                         <span id="defaultAdEventProfileGameText" class="text-xs font-medium text-indigo-700"></span>
-                        <span class="text-xs text-gray-500">✓ = 3 bảng đầu khớp ad_platform + ad_format; các bảng platform riêng khớp ad_platform; ô trống = chưa thấy log</span>
+                        <span class="text-xs text-gray-500">✓ = khớp ad_platform + ad_format; các bảng platform riêng khớp ad_platform; ô trống = chưa thấy log</span>
                     </div>
                 </div>
                 <div id="defaultAdEventMatrix" class="space-y-4"></div>
@@ -3952,12 +3979,8 @@ HTML_TEMPLATE = """
                                     <span class="ml-2 text-sm text-gray-900">LevelPlay</span>
                                 </label>
                                 <label class="inline-flex items-center whitespace-nowrap">
-                                    <input id="priceRotationTypeAscendx" name="priceRotationTypeFilter" type="checkbox" value="ascendx" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
-                                    <span class="ml-2 text-sm text-gray-900">Ascendx</span>
-                                </label>
-                                <label class="inline-flex items-center whitespace-nowrap">
-                                    <input id="priceRotationTypeCloudx" name="priceRotationTypeFilter" type="checkbox" value="cloudx" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
-                                    <span class="ml-2 text-sm text-gray-900">Cloudx</span>
+                                    <input id="priceRotationTypeMax" name="priceRotationTypeFilter" type="checkbox" value="max" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                    <span class="ml-2 text-sm text-gray-900">MAX</span>
                                 </label>
                                 <label class="inline-flex items-center whitespace-nowrap">
                                     <input id="priceRotationTypePriceCompare" name="priceRotationTypeFilter" type="checkbox" value="pricecompare" class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
@@ -5347,9 +5370,21 @@ HTML_TEMPLATE = """
                 .map(input => input.value)
                 .filter(value => value !== 'all');
             const textFilter = (filterInput?.value || '').toLowerCase();
+            const priceRotationTypeAliases = {
+                max: new Set(['max', 'applovin', 'applovinmax'])
+            };
+            const normalizePriceRotationType = value => String(value || '')
+                .trim()
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '');
             const filtered = lastPriceRotationData.filter(res => {
                 if (selectedDevice !== 'all' && res.device_id !== selectedDevice) return false;
-                if (selectedTypeFilters.length > 0 && !selectedTypeFilters.includes((res.type || '').trim().toLowerCase())) return false;
+                const rotationType = normalizePriceRotationType(res.type);
+                if (rotationType === 'ascendx' || rotationType === 'cloudx') return false;
+                if (selectedTypeFilters.length > 0 && !selectedTypeFilters.some(value => {
+                    const aliases = priceRotationTypeAliases[value] || new Set([value]);
+                    return aliases.has(rotationType);
+                })) return false;
                 const rawLog = (res.raw_log || '').toLowerCase();
                 if (selectedAdTypeFilters.length > 0 && !selectedAdTypeFilters.some(value => rawLog.includes(value))) return false;
                 if (textFilter && !rawLog.includes(textFilter)) return false;
