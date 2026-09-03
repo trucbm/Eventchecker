@@ -192,45 +192,47 @@ def test_canonical_update_channel_contract() -> None:
         )
 
 
-def test_legacy_bootstrap_contract() -> None:
-    """The current manifest must rescue the already-published v230 Windows shell."""
-    manifest = json.loads((ROOT / "Updates_2_5" / "remote_manifest.json").read_text(encoding="utf-8"))
-    bootstrap = [item for item in manifest.get("files") or [] if item.get("legacy_bootstrap")]
-    _assert_equal(len(bootstrap), 2, "legacy bootstrap must contain exactly two rescue files")
-    expected = {
-        "../updates_v230/Log_checker.py": "Updates_2_5/compat/Log_checker.py",
-        "../updates_v230/remote_update.py": "Updates_2_5/compat/remote_update.py",
-    }
-    for item in bootstrap:
-        target = str(item.get("path"))
-        _assert_equal(item.get("source_path"), expected.get(target), f"wrong legacy bootstrap source for {target}")
-        _assert(target.startswith("../updates_v230/"), f"legacy bootstrap target must stay in v230: {target}")
-        source = ROOT / str(item.get("source_path"))
-        _assert(source.is_file(), f"legacy bootstrap source is missing: {source}")
-        _assert_equal(_sha256_file(source), item.get("sha256"), f"legacy bootstrap hash drifted for {target}")
+def test_no_pre_v25_release_artifacts() -> None:
+    """The checked-out release surface must contain only the v2.5 channel."""
+    forbidden_tokens = (
+        "2" + ".3.0",
+        "2" + ".4.0",
+        "v" + "230",
+        "v" + "240",
+        "Updates_2_" + "3",
+        "Updates_2_" + "4",
+        "updates_v" + "230",
+        "updates_v" + "240",
+        "remote_update_config_v" + "230",
+        "remote_update_config_v" + "240",
+        "branch-2." + "3.0",
+        "branch-2." + "4.0",
+        "checkpoint-v2." + "3.0",
+        "checkpoint-v2." + "4.0",
+    )
+    forbidden_paths = (
+        ROOT / "Updates",
+        ROOT / ("Updates_2_" + "1"),
+        ROOT / ("Updates_2_" + "2"),
+        ROOT / ("Updates_2_" + "3"),
+        ROOT / ("Updates_2_" + "4"),
+        ROOT / "remote_update_config.json",
+        ROOT / ("remote_update_config_v" + "210.json"),
+        ROOT / ("remote_update_config_v" + "220.json"),
+        ROOT / ("remote_update_config_v" + "230.json"),
+    )
+    _assert(not any(path.exists() for path in forbidden_paths), "pre-v2.5 release files/directories are still present")
 
-    # Mirror the path resolution used by the old v250 updater. This verifies
-    # the rescue changes only the two known files in the old payload directory.
-    with tempfile.TemporaryDirectory(prefix="eventinspector_legacy_bootstrap_") as temp_dir:
-        support = Path(temp_dir) / "EventInspector"
-        staging = support / "updates_v250_tmp"
-        active = support / "updates_v230"
-        staging.mkdir(parents=True)
-        active.mkdir(parents=True)
-        (active / "Log_checker.py").write_text("v2.5.0(52)", encoding="utf-8")
-        (active / "remote_update.py").write_text('CHANNEL_ID = "v250"', encoding="utf-8")
-        for item in bootstrap:
-            target = staging / str(item["path"])
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes((ROOT / str(item["source_path"])).read_bytes())
-        _assert(
-            f"v2.5.0({CURRENT_RELEASE_BUILD})" in (active / "Log_checker.py").read_text(encoding="utf-8"),
-            "legacy Log_checker was not rescued",
-        )
-        _assert(
-            'CHANNEL_ID = "v230"' in (active / "remote_update.py").read_text(encoding="utf-8"),
-            "legacy updater was not rescued",
-        )
+    ignored_parts = {".git", ".venv", "dist", "__pycache__"}
+    for path in ROOT.rglob("*"):
+        if not path.is_file() or path.suffix == ".pyc" or any(part in ignored_parts for part in path.parts):
+            continue
+        try:
+            source = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for token in forbidden_tokens:
+            _assert(token not in source, f"pre-v2.5 reference {token!r} remains in {path.relative_to(ROOT)}")
 
 
 def test_package_code_mapping() -> None:
@@ -533,14 +535,228 @@ def test_cloudx_sdk_adapter_metadata() -> None:
         lc.sdk_check_current_network = {}
 
 
+def test_max_sdk_logs() -> None:
+    original_platform = lc.active_platform
+    original_devices = lc.connected_devices_info
+    original_sdk_active = lc.sdk_check_active
+    original_search_list = list(lc.sdk_check_search_list)
+    original_expected_map = lc.sdk_check_expected_map
+    original_expected_order = lc.sdk_check_expected_order
+    original_runtime_state = lc.sdk_check_runtime_state
+    original_current_network = lc.sdk_check_current_network
+    original_emit = lc.socketio.emit
+    try:
+        lc.active_platform = "android"
+        lc.connected_devices_info = []
+        lc.sdk_check_active = True
+        lc.sdk_check_search_list = []
+        lc.sdk_check_expected_map = {}
+        lc.sdk_check_expected_order = []
+        lc.sdk_check_runtime_state = {}
+        lc.sdk_check_current_network = {}
+
+        c191_lines = lc._load_sdk_check_presets()["C-191-Android"]["lines"]
+        max_expected = {}
+        for line in c191_lines:
+            if " - MAX" not in line:
+                continue
+            parsed = lc._parse_sdk_expected_line(line)
+            _assert(parsed is not None, f"MAX entry cannot be parsed: {line}")
+            _assert_equal(parsed.get("source"), "max", f"MAX entry source missing: {line}")
+            max_expected[parsed["network"]] = parsed
+
+        original_emit = lc.socketio.emit
+        lc.socketio.emit = lambda *_args, **_kwargs: None
+        try:
+            lc.sdk_check({"text": "\n".join(c191_lines)})
+        finally:
+            lc.socketio.emit = original_emit
+
+        core_key = lc._normalize_sdk_network_name("MAX / AppLovin - MAX")
+        failed_core_line = (
+            "09-03 14:38:39.685 com.indiez.nonogram 7428 8001 D AppLovinSdk "
+            "[TaskInitializeSdk] AppLovin SDK 99.9.9 initialization failed"
+        )
+        _assert(not lc._process_sdk_max_line(failed_core_line, "max-device"), "failed MAX core init must be ignored")
+        _assert(core_key not in lc.sdk_check_runtime_state.get("max-device", {}), "failed MAX core init created state")
+
+        original_emit = lc.socketio.emit
+        lc.socketio.emit = lambda *_args, **_kwargs: None
+        try:
+            core_line = (
+                "09-03 14:38:39.685\tcom.indiez.nonogram\t7428\t8001\tD\tAppLovinSdk\t"
+                "[TaskInitializeSdk] AppLovin SDK 13.6.4 initialization succeeded in 94ms"
+            )
+            lc._process_sdk_check_line(core_line, "max-device")
+        finally:
+            lc.socketio.emit = original_emit
+
+        core_state = lc.sdk_check_runtime_state["max-device"][core_key]
+        _assert_equal(core_state.get("sdk_version"), "13.6.4", "MAX core SDK version was not parsed")
+        _assert_equal(core_state.get("adapter_version"), "", "MAX core line must update only one SDK version")
+
+        started_core_line = core_line.replace("initialization succeeded", "initialization started").replace("13.6.4", "99.9.9")
+        _assert(not lc._process_sdk_max_line(started_core_line, "max-device"), "MAX core parser accepted a non-succeeded line")
+        _assert_equal(core_state.get("sdk_version"), "13.6.4", "non-succeeded MAX core line overwrote the version")
+
+        facebook_line = (
+            "09-03 13:58:14.758\tcom.indiez.nonogram\t24597\t25054\tD\tAppLovinSdk\t"
+            "[HealthEventsReporter] Reporting signal_collection_success with extra parameters "
+            "collection [{duration_ms=0, ad_format=REWARDED, ad_unit_id=08072f2e4324b79d, "
+            "adapter_version=6.22.0.0, network_name=FACEBOOK_NETWORK, "
+            "adapter_class=com.applovin.mediation.adapters.FacebookMediationAdapter}]"
+        )
+        original_emit = lc.socketio.emit
+        lc.socketio.emit = lambda *_args, **_kwargs: None
+        try:
+            lc._process_sdk_check_line(facebook_line, "max-device")
+        finally:
+            lc.socketio.emit = original_emit
+
+        facebook_key = lc._normalize_sdk_network_name("Meta Audience Network - MAX")
+        facebook_state = lc.sdk_check_runtime_state["max-device"][facebook_key]
+        _assert_equal(facebook_state.get("adapter_version"), "6.22.0.0", "FACEBOOK_NETWORK adapter version was not parsed")
+        _assert_equal(facebook_state.get("observed_network_name"), "FACEBOOK_NETWORK", "MAX network name was not retained")
+        _assert_equal(
+            lc._sdk_result_status(facebook_state.get("adapter_version"), max_expected["Meta Audience Network - MAX"]["adapter"]),
+            "PASSED",
+            "FACEBOOK_NETWORK adapter version did not compare against the preset",
+        )
+
+        alias_cases = [
+            ("IRONSOURCE_NETWORK", "LevelPlay / ironSource - MAX"),
+            ("BIDMACHINE_NETWORK", "BidMachine - MAX"),
+            ("BIGO_NETWORK", "Bigo Ads - MAX"),
+            ("CHARTBOOST_NETWORK", "Chartboost - MAX"),
+            ("DT_EXCHANGE", "Digital Turbine (fyber) - MAX"),
+            ("GOOGLE_AD_MANAGER_NETWORK", "Google (AdMob and Ad Manager) - MAX"),
+            ("INMOBI_NETWORK", "InMobi - MAX"),
+            ("LINE_NETWORK", "LINE Ads - MAX"),
+            ("LIFTOFF_NETWORK", "Liftoff Monetization (vungle) - MAX"),
+            ("MINTEGRAL_NETWORK", "Mintegral - MAX"),
+            ("MOBILEFUSE_NETWORK", "Mobilefuse - MAX"),
+            ("MOLOCO_NETWORK", "Moloco - MAX"),
+            ("OGURY_NETWORK", "Ogury - MAX"),
+            ("PANGLE_NETWORK", "Pangle (Tiktok) - MAX"),
+            ("PUBMATIC_NETWORK", "PubMatic (OpenWrap) - MAX"),
+            ("UNITY_ADS_NETWORK", "UnityAds - MAX"),
+            ("VERVE_NETWORK", "Verve / Pubnative - MAX"),
+            ("YANDEX_NETWORK", "Yandex - MAX"),
+            ("YSO_NETWORK", "YSO - MAX"),
+            ("ASCENDX_NETWORK", "Ascendx - MAX"),
+            ("MATICOO_NETWORK", "Yeahmobi/ Maticoo - MAX"),
+            ("TAURUSX_NETWORK", "TaurusX - MAX"),
+            ("PRADO_NETWORK", "Prado - MAX"),
+            ("BIGO_BIDDING", "Bigo Ads - MAX"),
+            ("BIGO_NATIVE_BIDDING", "Bigo Ads - MAX"),
+            ("CHARTBOOST_BIDDING", "Chartboost - MAX"),
+            ("BIDMACHINE_BIDDING", "BidMachine - MAX"),
+            ("FYBER_BIDDING", "Digital Turbine (fyber) - MAX"),
+            ("INMOBI_NATIVE_BIDDING", "InMobi - MAX"),
+            ("MINTEGRAL_NATIVE_BIDDING", "Mintegral - MAX"),
+            ("TIKTOK_NATIVE_BIDDING", "Pangle (Tiktok) - MAX"),
+            ("OGURY_PRESAGE_BIDDING", "Ogury - MAX"),
+            ("VUNGLE_NATIVE_BIDDING", "Liftoff Monetization (vungle) - MAX"),
+            ("MOLOCO_NATIVE_BIDDING", "Moloco - MAX"),
+        ]
+        for observed_name, display_name in alias_cases:
+            expected = max_expected[display_name]
+            version = expected["adapter"]
+            _assert(version, f"MAX adapter preset is empty: {display_name}")
+            metadata_line = (
+                "[HealthEventsReporter] Reporting signal_collection_success with extra parameters "
+                f"collection [{{adapter_version={version}, network_name={observed_name}, "
+                "adapter_class=com.applovin.mediation.adapters.TestMediationAdapter}}]"
+            )
+            _assert(lc._process_sdk_max_line(metadata_line, "alias-device"), f"MAX metadata did not update: {display_name}")
+            expected_key = lc._normalize_sdk_network_name(display_name)
+            actual = lc.sdk_check_runtime_state["alias-device"][expected_key].get("adapter_version")
+            _assert_equal(actual, version, f"MAX alias mapping failed for {observed_name}")
+            _assert_equal(lc._sdk_result_status(actual, version), "PASSED", f"MAX version compare failed for {display_name}")
+    finally:
+        lc.active_platform = original_platform
+        lc.connected_devices_info = original_devices
+        lc.sdk_check_active = original_sdk_active
+        lc.sdk_check_search_list[:] = original_search_list
+        lc.sdk_check_expected_map = original_expected_map
+        lc.sdk_check_expected_order = original_expected_order
+        lc.sdk_check_runtime_state = original_runtime_state
+        lc.sdk_check_current_network = original_current_network
+        lc.socketio.emit = original_emit
+
+
 def test_sdk_check_preset_contract() -> None:
     presets = lc._load_sdk_check_presets()
     _assert("C-191-Android" in presets, "C-191 Android SDK preset is missing")
     _assert("C-190-iOS" in presets, "C-190 iOS SDK preset is missing")
     _assert("C-180-Android" in presets, "C-180 Android SDK preset is missing")
     _assert("C-180-iOS" in presets, "C-180 iOS SDK preset is missing")
-    preset = presets["C-191-Android"]
-    _assert_equal(preset.get("platform"), "android", "C-191 Android preset platform changed")
+    c191_lines = presets["C-191-Android"].get("lines") or []
+    expected_c191_lines = [
+        "Ads Network\tAdapter\tNative",
+        "IronSource\t9.6.0\t9.6.0",
+        "AppLovin\t5.9.0\t13.6.4",
+        "BidMachine\t5.8.0\t3.8.0",
+        "Bigo Ads\t5.11.0\t6.0.0",
+        "Chartboost\t5.8.0\t9.13.0",
+        "Digital Turbine (fyber)\t5.10.0\t8.4.7",
+        "Google (AdMob and Ad Manager)\t5.9.0\t25.4.0",
+        "HyprMX\t5.3.0\t6.4.6",
+        "InMobi\t5.9.0\t11.4.1",
+        "LINE Ads\t5.4.0\t3.1.1",
+        "Liftoff Monetization (vungle)\t5.14.0\t7.7.8",
+        "Meta Audience Network\t5.4.0\t6.22.0",
+        "Mintegral\t5.19.0\t17.1.81",
+        "Mobilefuse\t5.4.0\t1.12.0",
+        "Moloco\t5.16.0\t4.11.1",
+        "myTarget (VK Ads)\t5.6.0\t5.51.2",
+        "Ogury\t5.5.0\t6.3.1",
+        "Pangle\t5.22.0\t8.2.0.4",
+        "PubMatic (OpenWrap)\t5.9.0\t5.3.0",
+        "SuperAwesome\t5.5.0\t10.3.1",
+        "UnityAds\t5.12.0\t4.20.0",
+        "Verve / Pubnative\t5.7.0\t3.9.1",
+        "Voodoo\t5.7.0\t4.29.2",
+        "Yandex\t5.13.0\t8.3.0",
+        "YSO\t5.6.0\t1.3.8",
+        "LevelPlay / ironSource - MAX\t9.6.0.0.0",
+        "MAX / AppLovin - MAX\t\t13.6.4",
+        "BidMachine - MAX\t3.8.0.0",
+        "Bigo Ads - MAX\t6.0.0.0",
+        "Chartboost - MAX\t9.13.0.0",
+        "Digital Turbine (fyber) - MAX\t8.4.7.0",
+        "Google (AdMob and Ad Manager) - MAX\t25.4.0.0",
+        "InMobi - MAX\t11.4.1.2",
+        "LINE Ads - MAX\t3000.1.1.0",
+        "Liftoff Monetization (vungle) - MAX\t7.7.8.0",
+        "Meta Audience Network - MAX\t6.22.0.0",
+        "Mintegral - MAX\t17.1.81.0",
+        "Mobilefuse - MAX\t1.12.0.0",
+        "Moloco - MAX\t4.11.1.0",
+        "Ogury - MAX\t6.3.1.0",
+        "Pangle (Tiktok) - MAX\t8.2.0.4.0",
+        "PubMatic (OpenWrap) - MAX\t5.3.0.0",
+        "UnityAds - MAX\t4.20.0.0",
+        "Verve / Pubnative - MAX\t3.9.1.0",
+        "Yandex - MAX\t8.3.0.0",
+        "YSO - MAX\t1.3.8.0",
+        "Ascendx - MAX\t1.11.1",
+        "Yeahmobi/ Maticoo - MAX\t2.0.7.0",
+        "TaurusX - MAX\t1.16.3.1",
+        "Prado - MAX\t2.0.2",
+        "Adverty\t5.2.9",
+        "Gadsme\t1.12.6",
+        "AudioMob\t10.2.3",
+        "Adjust\t\t5.8.0",
+        "Firebase Crashlytics\t\t20.1.0",
+        "Facebook SDK\t\t18.3.0",
+        "AppMetrica SDK\t\t8.4.1",
+    ]
+    _assert_equal(c191_lines, expected_c191_lines, "C-191 Android SDK preset does not match the requested list")
+    _assert_equal(presets["C-191-Android"].get("platform"), "android", "C-191 Android preset platform changed")
+    for line in c191_lines[1:]:
+        parsed = lc._parse_sdk_expected_line(line)
+        _assert(parsed is not None, f"C-191 Android entry cannot be parsed: {line}")
     ios_preset = presets["C-190-iOS"]
     _assert_equal(ios_preset.get("platform"), "ios", "C-190 iOS preset platform changed")
     _assert_equal(ios_preset.get("lines"), [], "C-190 iOS preset must remain empty")
@@ -561,32 +777,6 @@ def test_sdk_check_preset_contract() -> None:
     _assert("Appsflyer\t\tRemoved" in c180_lines, "C-180 Appsflyer entry changed")
     _assert(not any(line.startswith("AdQuality\t") for line in c180_lines), "C-180 AdQuality entry must remain absent")
     _assert(all("http://" not in line and "https://" not in line for line in c180_lines), "C-180 preset must not contain links")
-    lines = preset.get("lines") or []
-    _assert_equal(len(lines), 60, "C-191 Android preset line count changed")
-    _assert_equal(lines[0], "Ads Network\tAdapter\tNative", "C-191 preset header changed")
-    _assert(all("http://" not in line and "https://" not in line for line in lines), "C-191 preset must not contain documentation links")
-    _assert("CloudX\t" in lines, "C-191 CloudX entry changed")
-    _assert("AppLovin\t5.9.0\t13.6.4" in lines, "C-191 AppLovin entry changed")
-    _assert("Bigo Ads\t5.11.0\t6.0.0" in lines, "C-191 Bigo Ads versions changed")
-    _assert("Voodoo\t5.7.0\t4.29.2" in lines, "C-191 Voodoo entry changed")
-    _assert("Meta Audience Network\t5.4.0\t6.22.0" in lines, "C-191 Meta Audience Network adapter changed")
-    _assert("MAX / AppLovin - MAX\t\t13.6.4" in lines, "C-191 MAX AppLovin entry changed")
-    _assert(any(line.endswith(" - MAX\t") or " - MAX\t" in line for line in lines), "C-191 MAX entries are missing")
-    _assert("Ogury\t5.5.0\t6.3.1" in lines, "C-191 Ogury versions changed")
-    _assert("Yandex\t5.13.0\t8.3.0" in lines, "C-191 Yandex versions changed")
-    _assert("Adverty\t5.2.9\t" in lines, "C-191 Adverty version changed")
-    _assert("Gadsme\t1.12.6\t" in lines, "C-191 Gadsme version changed")
-    _assert("AppMetrica SDK\t\t8.4.1" in lines, "C-191 AppMetrica version changed")
-    max_lines = [line for line in lines if " - MAX\t" in line]
-    _assert(max_lines and all(len(line.split("\t")) >= 3 for line in max_lines), "MAX entries are missing")
-    _assert("Adjust\t\t5.8.0" in lines, "C-191 single SDK entry changed")
-
-    for line in lines[1:]:
-        parsed = lc._parse_sdk_expected_line(line)
-        if line.strip().casefold() == "cloudx":
-            _assert_equal(line, "CloudX\t", "C-191 CloudX blank telemetry entry changed")
-            continue
-        _assert(parsed is not None, f"C-191 Android entry cannot be parsed: {line}")
     for line in c180_lines[1:]:
         parsed = lc._parse_sdk_expected_line(line)
         _assert(parsed is not None, f"C-180 Android entry cannot be parsed: {line}")
@@ -1822,181 +2012,6 @@ def test_canonical_manifest_build_contract() -> None:
             )
 
 
-def test_legacy_v230_update_bridge() -> None:
-    """A legacy shell must refresh its v230 state with the main v2.5 payload."""
-    import importlib.util
-
-    manifest_path = ROOT / "Updates_2_3" / "remote_manifest.json"
-    manifest_bytes = manifest_path.read_bytes()
-    manifest = json.loads(manifest_bytes)
-    manifest_files = manifest.get("files") or []
-    compat_root = ROOT / "Updates_2_5" / "compat"
-
-    _assert_equal(manifest.get("version"), "2026-08-28-2-2.5.0-54", "legacy bridge must target the current v2.5 release")
-    log_item = next(item for item in manifest_files if item.get("path") == "Log_checker.py")
-    updater_item = next(item for item in manifest_files if item.get("path") == "remote_update.py")
-    marker_item = next(item for item in manifest_files if item.get("path") == "Updates_2_5/compat/legacy_bridge_marker.json")
-    _assert(
-        "/Updates_2_5/compat/Log_checker.py" in str(log_item.get("url")),
-        "legacy bridge must deliver the compatibility Log_checker payload",
-    )
-    _assert(
-        "/Updates_2_5/compat/remote_update.py" in str(updater_item.get("url")),
-        "legacy bridge must deliver the compatibility updater payload",
-    )
-    _assert(marker_item.get("path"), "legacy bridge marker is missing")
-    _assert_equal(_sha256_file(compat_root / "Log_checker.py"), log_item.get("sha256"), "compatibility Log_checker hash drifted")
-    _assert_equal(_sha256_file(compat_root / "remote_update.py"), updater_item.get("sha256"), "compatibility updater hash drifted")
-    _assert_equal(
-        _sha256_file(compat_root / "legacy_bridge_marker.json"),
-        marker_item.get("sha256"),
-        "legacy bridge marker hash drifted",
-    )
-
-    def load_module(name: str, path: Path):
-        spec = importlib.util.spec_from_file_location(name, path)
-        _assert(spec is not None and spec.loader is not None, f"could not load {path.name}")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
-    compat_updater = load_module("eventinspector_legacy_compat_updater", compat_root / "remote_update.py")
-    canonical_updater = load_module("eventinspector_canonical_updater_in_legacy_dir", ROOT / "remote_update.py")
-    class LegacyPayloadHandler(http.server.BaseHTTPRequestHandler):
-        manifest = b""
-
-        def do_GET(self):  # noqa: N802 - BaseHTTPRequestHandler API
-            relative = urlparse(self.path).path.lstrip("/")
-            if relative == "Updates_2_3/remote_manifest.json":
-                body = self.manifest
-            else:
-                payload_path = ROOT / relative
-                if not payload_path.is_file():
-                    self.send_error(404)
-                    return
-                body = payload_path.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/octet-stream")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *_args):
-            return
-
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), LegacyPayloadHandler)
-    base_url = f"http://127.0.0.1:{server.server_port}"
-    local_manifest = copy.deepcopy(manifest)
-    for item in local_manifest.get("files") or []:
-        rel_path = str(item["path"])
-        source_path = rel_path
-        if rel_path == "Log_checker.py":
-            source_path = "Updates_2_5/compat/Log_checker.py"
-        elif rel_path == "remote_update.py":
-            source_path = "Updates_2_5/compat/remote_update.py"
-        item["url"] = f"{base_url}/{source_path}"
-        item["urls"] = []
-    LegacyPayloadHandler.manifest = json.dumps(local_manifest).encode("utf-8")
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
-    original_os_name = os.name
-    original_local_app_data = os.environ.get("LOCALAPPDATA")
-    original_home = os.environ.get("HOME")
-    original_update_dir = os.environ.get("EVENTINSPECTOR_UPDATE_DIR")
-    original_update_channel = os.environ.get("EVENTINSPECTOR_UPDATE_CHANNEL")
-    original_bundle_build = os.environ.get("EVENTINSPECTOR_BUNDLED_BUILD")
-    original_bundle_source = os.environ.get("EVENTINSPECTOR_BUNDLED_BUILD_SOURCE")
-    original_compat_manifest = compat_updater._candidate_manifest_urls
-    original_compat_download_first = compat_updater._download_first
-    original_compat_download_verified = compat_updater._download_verified
-    original_canonical_manifest = canonical_updater._candidate_manifest_urls
-    original_canonical_download_first = canonical_updater._download_first
-
-    def restore_env(name: str, value: str | None) -> None:
-        if value is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = value
-
-    try:
-        # Exercise the Windows portable handoff while keeping the real
-        # filesystem and payload hashes in use.
-        with tempfile.TemporaryDirectory(prefix="eventinspector_legacy_bridge_") as temp_support:
-            os.name = "nt"
-            os.environ["LOCALAPPDATA"] = temp_support
-            os.environ["EVENTINSPECTOR_BUNDLED_BUILD"] = "52"
-            os.environ["EVENTINSPECTOR_BUNDLED_BUILD_SOURCE"] = "detected"
-            os.environ.pop("EVENTINSPECTOR_UPDATE_DIR", None)
-            os.environ.pop("EVENTINSPECTOR_UPDATE_CHANNEL", None)
-
-            support_dir = PosixPath(temp_support) / "EventInspector"
-            active_dir = support_dir / "updates_v230"
-            active_dir.mkdir(parents=True)
-
-            # This is the failure state seen in the client log: the old
-            # payload has the same release version but lacks the bridge marker
-            # and still contains the canonical updater in the v230 directory.
-            old_files = [item for item in manifest_files if item.get("path") != marker_item.get("path")]
-            for item in old_files:
-                rel_path = str(item["path"])
-                source_path = ROOT / rel_path
-                target = active_dir / rel_path
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(source_path.read_bytes())
-            locked_path = active_dir / "active_payload.locked"
-            locked_path.write_text("keep", encoding="utf-8")
-            compat_updater._save_state({
-                "last_check": 0,
-                "version": manifest["version"],
-                "update_dir": str(active_dir),
-                "files": [str(item["path"]) for item in old_files],
-            })
-
-            compat_updater._candidate_manifest_urls = lambda _cfg: [
-                f"{base_url}/Updates_2_3/remote_manifest.json"
-            ]
-
-            result = compat_updater.check_for_updates()
-            _assert_equal(result.get("status"), "updated", "legacy v230 payload was not refreshed")
-            prepared = compat_updater.get_prepared_update_info()
-            prepared_dir = prepared.get("update_dir")
-            _assert(prepared_dir and PosixPath(prepared_dir).is_dir(), "legacy bridge did not save a prepared payload")
-            _assert(PosixPath(prepared_dir).name.startswith("updates_v230_"), "legacy bridge left the v230 staging channel")
-            _assert_equal(prepared.get("build"), 54, "legacy bridge prepared the wrong release build")
-            _assert(locked_path.exists(), "legacy bridge modified the active v230 payload")
-            _assert((PosixPath(prepared_dir) / "Updates_2_5/compat/legacy_bridge_marker.json").exists(), "legacy bridge marker was not staged")
-            _assert("CHANNEL_ID = \"v230\"" in (PosixPath(prepared_dir) / "remote_update.py").read_text(encoding="utf-8"), "legacy payload still points to v250 updater")
-
-            # A v2.5 updater already sitting in a v230 directory must also
-            # honor that directory's state instead of silently switching to
-            # update_state_v250.json.
-            os.environ["EVENTINSPECTOR_UPDATE_DIR"] = str(prepared_dir)
-            _assert_equal(canonical_updater._runtime_profile()["channel_id"], "v230", "canonical updater did not detect the legacy runtime")
-            _assert(canonical_updater._state_path().endswith("update_state_v230.json"), "legacy runtime selected v250 state")
-            canonical_updater._candidate_manifest_urls = lambda _cfg: [
-                f"{base_url}/Updates_2_3/remote_manifest.json"
-            ]
-            canonical_result = canonical_updater.check_for_updates()
-            _assert_equal(canonical_result.get("status"), "up_to_date", "canonical updater did not reuse the prepared v230 payload")
-            _assert_equal(canonical_updater.get_prepared_update_info().get("build"), 54, "legacy prepared state was not retained")
-    finally:
-        compat_updater._candidate_manifest_urls = original_compat_manifest
-        compat_updater._download_first = original_compat_download_first
-        compat_updater._download_verified = original_compat_download_verified
-        canonical_updater._candidate_manifest_urls = original_canonical_manifest
-        canonical_updater._download_first = original_canonical_download_first
-        server.shutdown()
-        server.server_close()
-        server_thread.join(timeout=2)
-        os.name = original_os_name
-        restore_env("LOCALAPPDATA", original_local_app_data)
-        restore_env("HOME", original_home)
-        restore_env("EVENTINSPECTOR_UPDATE_DIR", original_update_dir)
-        restore_env("EVENTINSPECTOR_UPDATE_CHANNEL", original_update_channel)
-        restore_env("EVENTINSPECTOR_BUNDLED_BUILD", original_bundle_build)
-        restore_env("EVENTINSPECTOR_BUNDLED_BUILD_SOURCE", original_bundle_source)
-
-
 def test_update_flow_canonical_v25() -> None:
     import remote_update as updater
 
@@ -2006,7 +2021,7 @@ def test_update_flow_canonical_v25() -> None:
     payloads = {
         str(item["path"]): (ROOT / str(item["path"])).read_bytes()
         for item in manifest.get("files") or []
-        if item.get("path") and not item.get("legacy_bootstrap")
+        if item.get("path")
     }
     original_home = os.environ.get("HOME")
     original_bundle_build = os.environ.get("EVENTINSPECTOR_BUNDLED_BUILD")
@@ -2103,7 +2118,7 @@ def test_windows_portable_update_staging() -> None:
     payloads = {
         str(item["path"]): (ROOT / str(item["path"])).read_bytes()
         for item in manifest.get("files") or []
-        if item.get("path") and not item.get("legacy_bootstrap")
+        if item.get("path")
     }
     original_os_name = updater.os.name
     original_user_data_dir = updater._user_data_dir
@@ -2548,11 +2563,13 @@ TESTS: List[Callable[[], None]] = [
     test_manifest_contract,
     test_manifest_payload_integrity,
     test_canonical_update_channel_contract,
+    test_no_pre_v25_release_artifacts,
     test_package_code_mapping,
     test_installation_id_state_machine,
     test_installation_id_log_parsing,
     test_sdk_exact_contracts,
     test_cloudx_sdk_adapter_metadata,
+    test_max_sdk_logs,
     test_sdk_check_preset_contract,
     test_rendered_sdk_preset_javascript_contract,
     test_default_ad_event_contract,
@@ -2571,8 +2588,6 @@ TESTS: List[Callable[[], None]] = [
     test_services_checker_git_value_reload_from_real_commit,
     test_sdk_preset_git_value_reload_from_real_commit,
     test_canonical_manifest_build_contract,
-    test_legacy_bootstrap_contract,
-    test_legacy_v230_update_bridge,
     test_update_flow_canonical_v25,
     test_windows_portable_update_staging,
     test_build_scripts_clean_outputs,

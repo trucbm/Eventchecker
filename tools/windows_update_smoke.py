@@ -57,7 +57,7 @@ def main() -> int:
     payloads = {
         str(item["path"]): (ROOT / str(item["path"])).read_bytes()
         for item in manifest.get("files") or []
-        if item.get("path") and not item.get("legacy_bootstrap")
+        if item.get("path")
     }
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _PayloadHandler)

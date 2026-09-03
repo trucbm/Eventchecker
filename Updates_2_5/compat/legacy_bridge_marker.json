@@ -1,4 +1,0 @@
-{
-  "purpose": "Keep legacy v230 clients eligible for the canonical v2.5 payload handoff.",
-  "source": "main"
-}

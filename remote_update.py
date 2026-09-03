@@ -29,41 +29,8 @@ DEFAULT_FILE_URL_BASES = [
 ]
 KNOWN_CHANNELS = ("v250",)
 
-# A small compatibility profile is intentionally kept on main for clients
-# whose bundled shell still reads the old v230 state directory.  It is not a
-# release branch: its manifest and every payload URL still resolve from main.
-LEGACY_CHANNEL_ID = "v230"
-LEGACY_CONFIG_FILENAME = "remote_update_config_v230.json"
-LEGACY_STATE_FILENAME = "update_state_v230.json"
-LEGACY_UPDATES_DIRNAME = "updates_v230"
-LEGACY_MANIFEST_URLS = [
-    "https://github.com/trucbm/Eventchecker/raw/main/Updates_2_3/remote_manifest.json",
-    "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Updates_2_3/remote_manifest.json",
-    "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Updates_2_3/remote_manifest.json",
-]
-LEGACY_DEFAULT_MANIFEST_URL = LEGACY_MANIFEST_URLS[0]
-
-
-def _legacy_runtime_enabled():
-    """Detect a legacy shell without changing the canonical release channel."""
-    explicit_channel = str(os.getenv("EVENTINSPECTOR_UPDATE_CHANNEL") or "").strip().lower()
-    if explicit_channel == LEGACY_CHANNEL_ID:
-        return True
-    update_dir = str(os.getenv("EVENTINSPECTOR_UPDATE_DIR") or "").replace("\\", "/").rstrip("/")
-    return os.path.basename(update_dir).lower().startswith(LEGACY_UPDATES_DIRNAME)
-
 
 def _runtime_profile():
-    if _legacy_runtime_enabled():
-        return {
-            "channel_id": LEGACY_CHANNEL_ID,
-            "config_filename": LEGACY_CONFIG_FILENAME,
-            "state_filename": LEGACY_STATE_FILENAME,
-            "updates_dirname": LEGACY_UPDATES_DIRNAME,
-            "manifest_urls": LEGACY_MANIFEST_URLS,
-            "default_manifest_url": LEGACY_DEFAULT_MANIFEST_URL,
-            "file_url_bases": DEFAULT_FILE_URL_BASES,
-        }
     return {
         "channel_id": CHANNEL_ID,
         "config_filename": CONFIG_FILENAME,
@@ -199,12 +166,7 @@ def _create_update_workspace(user_dir, manifest_version):
 
 
 def clear_update_cache(include_all_channels=False):
-    if include_all_channels and _legacy_runtime_enabled():
-        channel_ids = (LEGACY_CHANNEL_ID,)
-    elif include_all_channels:
-        channel_ids = KNOWN_CHANNELS
-    else:
-        channel_ids = (_runtime_profile()["channel_id"],)
+    channel_ids = KNOWN_CHANNELS if include_all_channels else (_runtime_profile()["channel_id"],)
     for channel_id in channel_ids:
         for path in _channel_paths(channel_id).values():
             _remove_path(path)
@@ -329,19 +291,6 @@ def _candidate_manifest_urls(cfg):
 def _default_repo_file_urls(rel_path):
     rel = (rel_path or "").lstrip("/")
     return [f"{base}/{rel}" for base in _runtime_profile()["file_url_bases"]]
-
-
-def _runtime_manifest_files(manifest_files):
-    """Return payload files for this updater without legacy rescue paths.
-
-    The canonical manifest carries two ``legacy_bootstrap`` entries only for a
-    previously published Windows shell that accidentally installed the v250
-    updater into its v230 payload directory.  That old updater does not know
-    this flag and therefore writes those entries into the old directory.  A
-    current updater must ignore them so it never follows a parent-directory
-    path outside its own staged payload.
-    """
-    return [item for item in (manifest_files or []) if not item.get("legacy_bootstrap")]
 
 
 def _download_first(urls, timeout):
@@ -506,7 +455,7 @@ def check_for_updates(force_refresh=False):
     state_version = state.get("version")
     manifest_version = manifest.get("version")
     existing_update_dir = state.get("update_dir") or update_dir
-    manifest_files = _runtime_manifest_files(manifest.get("files", []))
+    manifest_files = manifest.get("files", [])
     requested_from_bundle_build = _requested_from_bundle_build()
     manifest_build = _extract_build_number(manifest_version)
     if (

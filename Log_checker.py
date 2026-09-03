@@ -1384,6 +1384,23 @@ SDK_CLOUDX_NATIVE_METADATA_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SDK_CLOUDX_HTTP_METADATA_PATTERN = re.compile(r'\[CloudXHttpClient\]', re.IGNORECASE)
+SDK_MAX_CORE_INITIALIZATION_PATTERN = re.compile(
+    r'\[TaskInitializeSdk\]\s+AppLovin\s+SDK\s+'
+    r'(?P<version>[0-9]+(?:\.[0-9]+)+)\s+initialization\s+succeeded\b',
+    re.IGNORECASE,
+)
+SDK_MAX_HEALTH_EVENTS_PATTERN = re.compile(
+    r'\[HealthEventsReporter\].*?\bsignal_collection_success\b',
+    re.IGNORECASE,
+)
+SDK_MAX_ADAPTER_VERSION_FIELD_PATTERN = re.compile(
+    r'\badapter_version\s*=\s*["\']?(?P<version>[0-9]+(?:\.[0-9]+)+)',
+    re.IGNORECASE,
+)
+SDK_MAX_NETWORK_NAME_FIELD_PATTERN = re.compile(
+    r'\bnetwork_name\s*=\s*["\']?(?P<network>[A-Za-z0-9_./() -]+?)["\']?\s*(?:,|\]|})',
+    re.IGNORECASE,
+)
 
 # Mapping tên hiển thị cho Callback
 CALLBACK_DISPLAY_NAMES = {
@@ -1866,6 +1883,117 @@ def _cloudx_sdk_match_network(name):
     return CLOUDX_NETWORK_ALIASES.get(normalized, normalized)
 
 
+MAX_SDK_NETWORK_ALIASES = {
+    "maxapplovin": "maxapplovin",
+    "applovin": "maxapplovin",
+    "applovinnetwork": "maxapplovin",
+    "levelplay": "levelplayironsource",
+    "levelplaynetwork": "levelplayironsource",
+    "ironsource": "levelplayironsource",
+    "ironsourcenetwork": "levelplayironsource",
+    "bigo": "bigoads",
+    "bigonetwork": "bigoads",
+    "bigoadsnetwork": "bigoads",
+    "digitalturbine": "digitalturbinefyber",
+    "digitalturbinenetwork": "digitalturbinefyber",
+    "dtexchange": "digitalturbinefyber",
+    "dtexchangenetwork": "digitalturbinefyber",
+    "fyber": "digitalturbinefyber",
+    "fybernetwork": "digitalturbinefyber",
+    "google": "googleadmobandadmanager",
+    "googlenetwork": "googleadmobandadmanager",
+    "admob": "googleadmobandadmanager",
+    "admobnetwork": "googleadmobandadmanager",
+    "googleadmob": "googleadmobandadmanager",
+    "googleadmobnetwork": "googleadmobandadmanager",
+    "googleadmanager": "googleadmobandadmanager",
+    "googleadmanagernetwork": "googleadmobandadmanager",
+    "facebook": "metaaudiencenetwork",
+    "facebooknetwork": "metaaudiencenetwork",
+    "meta": "metaaudiencenetwork",
+    "metanetwork": "metaaudiencenetwork",
+    "line": "lineads",
+    "linenetwork": "lineads",
+    "lineadsnetwork": "lineads",
+    "liftoff": "liftoffmonetizationvungle",
+    "liftoffnetwork": "liftoffmonetizationvungle",
+    "liftoffmonetization": "liftoffmonetizationvungle",
+    "liftoffmonetizationnetwork": "liftoffmonetizationvungle",
+    "vungle": "liftoffmonetizationvungle",
+    "vunglenetwork": "liftoffmonetizationvungle",
+    "pangle": "pangletiktok",
+    "panglenetwork": "pangletiktok",
+    "tiktok": "pangletiktok",
+    "tiktoknetwork": "pangletiktok",
+    "bytedance": "pangletiktok",
+    "bytedancenetwork": "pangletiktok",
+    "pubmatic": "pubmaticopenwrap",
+    "pubmaticnetwork": "pubmaticopenwrap",
+    "openwrap": "pubmaticopenwrap",
+    "openwrapnetwork": "pubmaticopenwrap",
+    "unity": "unityads",
+    "unityads": "unityads",
+    "unityadsnetwork": "unityads",
+    "verve": "vervepubnative",
+    "vervenetwork": "vervepubnative",
+    "pubnative": "vervepubnative",
+    "pubnativenetwork": "vervepubnative",
+    "mintegralnetwork": "mintegral",
+    "inmobinetwork": "inmobi",
+    "chartboostnetwork": "chartboost",
+    "mobilefusenetwork": "mobilefuse",
+    "moloconetwork": "moloco",
+    "ogurynetwork": "ogury",
+    "ogurypresage": "ogury",
+    "ogurypresagenetwork": "ogury",
+    "yandexnetwork": "yandex",
+    "ysonetwork": "yso",
+    "ascendxnetwork": "ascendx",
+    "yeahmobi": "yeahmobimaticoo",
+    "yeahmobinetwork": "yeahmobimaticoo",
+    "maticoo": "yeahmobimaticoo",
+    "maticoonetwork": "yeahmobimaticoo",
+    "taurusxnetwork": "taurusx",
+    "prado": "prado",
+    "pradonetwork": "prado",
+}
+
+
+def _is_max_sdk_network(name):
+    return bool(re.search(r'\s*-\s*max\s*$', str(name or ''), re.IGNORECASE))
+
+
+def _max_sdk_base_name(name):
+    return re.sub(r'\s*-\s*max\s*$', '', str(name or ''), flags=re.IGNORECASE).strip()
+
+
+def _max_sdk_match_network(name):
+    normalized = _normalize_sdk_network_name(_max_sdk_base_name(name))
+    if normalized in MAX_SDK_NETWORK_ALIASES:
+        return MAX_SDK_NETWORK_ALIASES[normalized]
+    if normalized.endswith("network") and normalized[:-7] in MAX_SDK_NETWORK_ALIASES:
+        return MAX_SDK_NETWORK_ALIASES[normalized[:-7]]
+    return normalized
+
+
+def _max_sdk_network_variants(name):
+    normalized = _normalize_sdk_network_name(_max_sdk_base_name(name))
+    if not normalized:
+        return set()
+    variants = {normalized}
+    for variant in tuple(variants):
+        for suffix in ("nativenetwork", "nativebidding", "bidding", "network"):
+            if variant.endswith(suffix) and len(variant) > len(suffix):
+                variants.add(variant[:-len(suffix)])
+        if variant.endswith("presage") and len(variant) > len("presage"):
+            variants.add(variant[:-len("presage")])
+    for variant in tuple(variants):
+        canonical = MAX_SDK_NETWORK_ALIASES.get(variant)
+        if canonical:
+            variants.add(canonical)
+    return {variant for variant in variants if variant}
+
+
 def _match_cloudx_sdk_expected_key(actual_name):
     actual_normalized = _normalize_sdk_network_name(actual_name)
     if not actual_normalized:
@@ -1879,10 +2007,45 @@ def _match_cloudx_sdk_expected_key(actual_name):
     return matches[0] if len(matches) == 1 else ''
 
 
+def _match_max_sdk_expected_key(actual_name):
+    actual_variants = _max_sdk_network_variants(actual_name)
+    if not actual_variants:
+        return ""
+
+    expected_items = [
+        (key, expected)
+        for key, expected in sdk_check_expected_map.items()
+        if expected.get("source") == "max" or _is_max_sdk_network(expected.get("display_name"))
+    ]
+    exact_matches = []
+    for key, expected in expected_items:
+        expected_variants = _max_sdk_network_variants(expected.get("display_name") or key)
+        if actual_variants.intersection(expected_variants):
+            exact_matches.append(key)
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+
+    fuzzy_matches = []
+    for key, expected in expected_items:
+        expected_variants = _max_sdk_network_variants(expected.get("display_name") or key)
+        if any(
+            len(actual_variant) >= 4
+            and len(expected_variant) >= 4
+            and (actual_variant in expected_variant or expected_variant in actual_variant)
+            for actual_variant in actual_variants
+            for expected_variant in expected_variants
+        ):
+            fuzzy_matches.append(key)
+    return fuzzy_matches[0] if len(fuzzy_matches) == 1 else ""
+
+
 def _match_sdk_expected_key(actual_name):
     actual_norm = _normalize_sdk_network_name(actual_name)
     if not actual_norm:
         return ""
+
+    if _is_max_sdk_network(actual_name):
+        return _match_max_sdk_expected_key(actual_name)
 
     is_cloudx = _is_cloudx_sdk_network(actual_name)
     expected_source = "cloudx" if is_cloudx else ""
@@ -1988,26 +2151,35 @@ def _parse_sdk_expected_line(line):
         cols = [col.strip() for col in raw.split("\t")]
         if not cols or not cols[0]:
             return None
-        source = "cloudx" if _is_cloudx_sdk_network(cols[0]) else ""
+        source = "cloudx" if _is_cloudx_sdk_network(cols[0]) else ("max" if _is_max_sdk_network(cols[0]) else "")
         return {
             "network": cols[0],
             "adapter": cols[1] if len(cols) > 1 else "",
             "sdk": cols[2] if len(cols) > 2 else "",
             "log_search": cols[3] if len(cols) > 3 else "",
             "source": source,
-            "match_network": _cloudx_sdk_match_network(cols[0]) if source == "cloudx" else "",
+            "match_network": (
+                _cloudx_sdk_match_network(cols[0])
+                if source == "cloudx"
+                else (_max_sdk_match_network(cols[0]) if source == "max" else "")
+            ),
         }
 
     version_matches = list(re.finditer(r'\b\d+(?:\.\d+)+\b', raw))
     if not version_matches:
-        if _is_cloudx_sdk_network(raw):
+        if _is_cloudx_sdk_network(raw) or _is_max_sdk_network(raw):
+            source = "cloudx" if _is_cloudx_sdk_network(raw) else "max"
             return {
                 "network": raw,
                 "adapter": "",
                 "sdk": "",
                 "log_search": "",
-                "source": "cloudx",
-                "match_network": _cloudx_sdk_match_network(raw),
+                "source": source,
+                "match_network": (
+                    _cloudx_sdk_match_network(raw)
+                    if source == "cloudx"
+                    else _max_sdk_match_network(raw)
+                ),
             }
         return None
 
@@ -2032,8 +2204,16 @@ def _parse_sdk_expected_line(line):
         "adapter": adapter,
         "sdk": sdk,
         "log_search": "",
-        "source": "cloudx" if _is_cloudx_sdk_network(network) else "",
-        "match_network": _cloudx_sdk_match_network(network) if _is_cloudx_sdk_network(network) else "",
+        "source": (
+            "cloudx"
+            if _is_cloudx_sdk_network(network)
+            else ("max" if _is_max_sdk_network(network) else "")
+        ),
+        "match_network": (
+            _cloudx_sdk_match_network(network)
+            if _is_cloudx_sdk_network(network)
+            else (_max_sdk_match_network(network) if _is_max_sdk_network(network) else "")
+        ),
     }
 
 def _extract_sdk_search_pattern(line):
@@ -2142,6 +2322,7 @@ def _ensure_sdk_expected_blocks_for_device(device_id):
                 "sdk_version": "",
                 "adapter_version": "",
                 "native_version": "",
+                "observed_network_name": "",
                 "adapter_missing": False,
                 "verification": "",
                 "expected_key": expected_key,
@@ -2297,6 +2478,66 @@ def _process_sdk_external_line(line, device_id):
             update_block("Firebase Performance Monitoring", sdk_version=firebase_performance_version)
 
     return changed
+
+
+def _update_sdk_max_block(device_id, expected_key, sdk_version=None, adapter_version=None, observed_network_name=""):
+    expected = sdk_check_expected_map.get(expected_key, {})
+    if not expected:
+        return False
+    display_name = expected.get("display_name") or expected_key
+    block = _sdk_check_block_for_device(device_id, display_name)
+    changed = False
+    if sdk_version is not None and block.get("sdk_version") != sdk_version:
+        block["sdk_version"] = sdk_version
+        changed = True
+    if adapter_version is not None and (
+        block.get("adapter_version") != adapter_version or block.get("adapter_missing")
+    ):
+        block["adapter_version"] = adapter_version
+        block["adapter_missing"] = False
+        changed = True
+    if observed_network_name and block.get("observed_network_name") != observed_network_name:
+        block["observed_network_name"] = observed_network_name
+        changed = True
+    block["expected_key"] = expected_key
+    block["display_name"] = display_name
+    block["updated_at"] = time.time()
+    return changed
+
+
+def _process_sdk_max_line(line, device_id):
+    """Parse MAX core initialization and MAX adapter health telemetry."""
+    if active_platform != "android":
+        return False
+    raw_line = str(line or "")
+    changed = False
+
+    core_match = SDK_MAX_CORE_INITIALIZATION_PATTERN.search(raw_line)
+    if core_match:
+        expected_key = _match_max_sdk_expected_key("MAX / AppLovin - MAX")
+        if expected_key:
+            changed = _update_sdk_max_block(
+                device_id,
+                expected_key,
+                sdk_version=core_match.group("version"),
+            ) or changed
+
+    if SDK_MAX_HEALTH_EVENTS_PATTERN.search(raw_line):
+        adapter_match = SDK_MAX_ADAPTER_VERSION_FIELD_PATTERN.search(raw_line)
+        network_match = SDK_MAX_NETWORK_NAME_FIELD_PATTERN.search(raw_line)
+        if adapter_match and network_match:
+            observed_network_name = network_match.group("network").strip().strip("'\"")
+            expected_key = _match_max_sdk_expected_key(observed_network_name)
+            if expected_key:
+                changed = _update_sdk_max_block(
+                    device_id,
+                    expected_key,
+                    adapter_version=adapter_match.group("version"),
+                    observed_network_name=observed_network_name,
+                ) or changed
+
+    return changed
+
 
 # --- HELPER FUNCTIONS FOR FORMATTING ---
 def format_json_html(data):
@@ -8464,6 +8705,7 @@ def _sdk_check_block_for_device(device_id, network_name):
             "sdk_version": "",
             "adapter_version": "",
             "native_version": "",
+            "observed_network_name": "",
             "adapter_missing": False,
             "verification": "",
             "expected_key": expected_key,
@@ -8567,6 +8809,8 @@ def _process_sdk_check_line(line, device_id):
 
     changed = False
     with lock:
+        if _process_sdk_max_line(line, device_id):
+            changed = True
         if _process_sdk_cloudx_http_metadata_line(line, device_id):
             changed = True
         if _process_sdk_cloudx_adapter_metadata_line(line, device_id):
