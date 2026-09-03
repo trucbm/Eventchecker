@@ -40,8 +40,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-08-28-2-2.5.0-54"
-CURRENT_RELEASE_BUILD = 54
+CURRENT_RELEASE_VERSION = "2026-09-03-1-2.5.0-55"
+CURRENT_RELEASE_BUILD = 55
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -1309,6 +1309,65 @@ def test_load_ads_provider_contract() -> None:
         lc.socketio.emit = original_emit
 
 
+def test_load_ads_max_contract() -> None:
+    """MAX Load Ads rows must come from the exact MAX revenue callback fields."""
+    original_platform = lc.active_platform
+    original_recording_state = dict(lc.recording_states["LoadAds"])
+    original_emit = lc.socketio.emit
+    original_send_to_sheet = lc.send_to_sheet
+    original_rows = list(lc.load_ads_events)
+    original_unique = set(lc.unique_load_ads)
+    emitted = []
+    sheet_rows = []
+    try:
+        lc.active_platform = "android"
+        lc.recording_states["LoadAds"].update({"is_recording": True, "current_sheet": "NG381"})
+        lc.load_ads_events.clear()
+        lc.unique_load_ads.clear()
+        lc.socketio.emit = lambda event, payload: emitted.append((event, payload))
+        lc.send_to_sheet = lambda *args: sheet_rows.append(args)
+
+        samples = [
+            "09-03 11:39:34.462\tcom.indiez.nonogram\t13912\t-\tD\tAppLovinSdk\t [MaxInterstitialAd] MaxAdRevenueListener.onAdRevenuePaid(ad=MediatedAd{thirdPartyAdPlacementId=945322059, adUnitId=test_mode_interstitial, format=INTER, networkName='Pangle'}), listener=null",
+            "09-03 11:40:05.062\tcom.indiez.nonogram\t13912\t-\tD\tAppLovinSdk\t [MaxRewardedAd] MaxAdRevenueListener.onAdRevenuePaid(ad=MediatedAd{thirdPartyAdPlacementId=945322060, adUnitId=test_mode_rewarded_TIKTOK_BIDDING, format=REWARDED, networkName='Pangle'}), listener=null",
+            "09-03 11:41:13.494\tcom.indiez.nonogram\t13912\t-\tD\tAppLovinSdk\t [MaxAdView] MaxAdRevenueListener.onAdRevenuePaid(ad=MediatedAd{thirdPartyAdPlacementId=980040498, adUnitId=test_mode_banner, format=BANNER, networkName='Pangle'}), listener=null",
+            "09-03 11:41:23.051\tcom.indiez.nonogram\t13912\t-\tD\tAppLovinSdk\t [MaxAdView] MaxAdRevenueListener.onAdRevenuePaid(ad=MediatedAd{thirdPartyAdPlacementId=980040498, adUnitId=test_mode_banner, format=BANNER, networkName='Pangle'}), listener=null",
+            "09-03 11:41:35.454\tcom.indiez.nonogram\t13912\t-\tD\tAppLovinSdk\t [MaxAdView] MaxAdRevenueListener.onAdRevenuePaid(ad=MediatedAd{thirdPartyAdPlacementId=982160535, adUnitId=test_mode_mrec, format=MREC, networkName='Pangle'}), listener=null",
+        ]
+        for line in samples:
+            lc.process_load_ads_max_log(line, "device-max")
+
+        rows = list(lc.load_ads_events)
+        _assert_equal(len(rows), 4, "MAX Load Ads must keep one row per network/format")
+        _assert_equal({row.get("ad_format") for row in rows}, {"INTER", "REWARDED", "BANNER", "MREC"}, "MAX formats were not parsed from MediatedAd")
+        _assert(all(row.get("provider") == "MAX" for row in rows), "MAX Load Ads provider was not recorded")
+        _assert(all(row.get("ad_network") == "Pangle" for row in rows), "MAX networkName was not parsed from the raw log")
+        _assert(all(lc.MAX_LOAD_ADS_REVENUE_KEYWORD in row.get("raw_log", "") for row in rows), "MAX raw callback log was not preserved")
+        _assert_equal(len(emitted), 4, "MAX Load Ads rows were not emitted to the UI")
+        _assert_equal(len(sheet_rows), 4, "MAX Load Ads rows were not sent to the sheet")
+        _assert(all(args[4:] == ("LoadAds", "MAX") for args in sheet_rows), "MAX sheet payload used the wrong provider or tab")
+
+        # Non-MAX diagnostics and disabled recording must never create rows.
+        lc.process_load_ads_max_log("AppLovinSdk unrelated diagnostic format=BANNER networkName='Pangle'", "device-max")
+        _assert_equal(len(lc.load_ads_events), 4, "unrelated AppLovin diagnostics must be ignored")
+        lc.recording_states["LoadAds"]["is_recording"] = False
+        lc.process_load_ads_max_log(samples[0], "device-max-2")
+        _assert_equal(len(lc.load_ads_events), 4, "MAX rows must respect Load Ads recording state")
+
+        rendered = lc.app.test_client().get("/").get_data(as_text=True)
+        _assert(rendered.count(">Provider</th>") >= 2, "Provider column must be present in both Load Ads tables")
+    finally:
+        lc.active_platform = original_platform
+        lc.recording_states["LoadAds"].clear()
+        lc.recording_states["LoadAds"].update(original_recording_state)
+        lc.load_ads_events.clear()
+        lc.load_ads_events.extend(original_rows)
+        lc.unique_load_ads.clear()
+        lc.unique_load_ads.update(original_unique)
+        lc.socketio.emit = original_emit
+        lc.send_to_sheet = original_send_to_sheet
+
+
 def test_levelplay_impression_data_callback_contract() -> None:
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
     for marker in (
@@ -1494,10 +1553,11 @@ def test_update_candidate_does_not_downgrade() -> None:
     candidates = [
         {"update_dir": "/tmp/build52", "build": 52, "source": "older"},
         {"update_dir": "/tmp/build53", "build": 53, "source": "current"},
-        {"update_dir": "/tmp/build54", "build": 54, "source": "newer"},
+        {"update_dir": "/tmp/build55", "build": 55, "source": "release"},
+        {"update_dir": "/tmp/build54", "build": 54, "source": "older-release"},
     ]
     selected = desktop._select_prepared_update_candidate(candidates, bundled_build=53)
-    _assert_equal(selected["build"], 54, "bundled build 53 must select only a newer prepared update")
+    _assert_equal(selected["build"], 55, "bundled build 53 must select the newest prepared update")
     _assert_equal(
         desktop._select_prepared_update_candidate(candidates[:2], bundled_build=53),
         None,
@@ -1514,10 +1574,10 @@ def test_update_candidate_does_not_downgrade() -> None:
         None,
         "a same-build prepared payload must not override the bundled source",
     )
-    compatibility_candidate = [{"update_dir": "/tmp/build54", "build": 54, "source": "channel_state"}]
+    compatibility_candidate = [{"update_dir": "/tmp/build55", "build": 55, "source": "channel_state"}]
     _assert_equal(
         desktop._select_prepared_update_candidate(compatibility_candidate, bundled_build=53)["build"],
-        54,
+        55,
         "a newer prepared payload must be accepted over the bundled build",
     )
 
@@ -2077,8 +2137,8 @@ def test_update_flow_canonical_v25() -> None:
                 }],
                 bundled_build=50,
             )
-            _assert(selected is not None, "bundle build 50 must accept the prepared build 54 payload")
-            _assert_equal(selected.get("build"), CURRENT_RELEASE_BUILD, "prepared build 54 was not selected")
+            _assert(selected is not None, "bundle build 50 must accept the prepared build 55 payload")
+            _assert_equal(selected.get("build"), CURRENT_RELEASE_BUILD, "prepared build 55 was not selected")
             updated_source = Path(prepared["update_dir"], "Log_checker.py").read_text(
                 encoding="utf-8", errors="ignore"
             )
@@ -2579,6 +2639,7 @@ TESTS: List[Callable[[], None]] = [
     test_rewarded_bidding_filter_contract,
     test_price_rotation_exact_parser,
     test_load_ads_provider_contract,
+    test_load_ads_max_contract,
     test_levelplay_impression_data_callback_contract,
     test_ascendx_cloudx_callback_contract,
     test_release_payload_sync,

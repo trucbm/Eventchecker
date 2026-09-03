@@ -1310,6 +1310,13 @@ def _package_log_db_writer():
 # Pattern cho Load Ads (Unity)
 UNITY_TRACKING_PATTERN = re.compile(r'\[\s*Tracking\s*\]\s*TrackingService->Track:\s*(\{"eventName":"ad_impression".*)')
 
+# Pattern cho Load Ads MAX (AppLovin MAX revenue callback).  MAX writes the
+# ad format and network name inside MediatedAd; keep the marker exact so
+# unrelated AppLovin diagnostics never become Load Ads rows.
+MAX_LOAD_ADS_REVENUE_KEYWORD = "MaxAdRevenueListener.onAdRevenuePaid"
+MAX_LOAD_ADS_FORMAT_PATTERN = re.compile(r"\bformat\s*=\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
+MAX_LOAD_ADS_NETWORK_PATTERN = re.compile(r"\bnetworkName\s*=\s*(['\"])(.*?)\1", re.IGNORECASE)
+
 # Pattern cho Load Ads Ext (AppMetrica)
 METRICA_TRACKING_PATTERN = re.compile(r'Event sent: ad_impression with value\s*(\{.*\})')
 LOAD_ADS_EXT_ADREVENUE_PATTERN = re.compile(r'AdRevenue Received:\s*AdRevenue\{(.*)\}', re.IGNORECASE)
@@ -3710,7 +3717,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(54)</title>
+    <title>Event Inspector v2.5.0(55)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -3792,7 +3799,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(54)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(55)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -3880,13 +3887,16 @@ HTML_TEMPLATE = """
                     <div class="overflow-x-auto">
                         <table id="packageLogTable" class="min-w-full bg-white">
                             <colgroup>
-                                <col class="col-time">
-                                <col class="col-tag">
-                                <col class="col-message">
+                                <col style="width:88px">
+                                <col style="width:100px">
+                                <col style="width:112px">
+                                <col style="width:96px">
+                                <col>
                             </colgroup>
                             <thead class="bg-gray-50 sticky top-0 z-10">
                                 <tr>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Device</th>
+                                    <th class="text-left text-sm font-semibold text-gray-600 py-2 px-2 border-b">Provider</th>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Ad_network</th>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Format</th>
                                     <th class="text-left text-sm font-semibold text-gray-600 py-2 px-3 border-b">Raw Log</th>
@@ -5005,8 +5015,9 @@ HTML_TEMPLATE = """
             if (!tbody) return;
             const filtered = (selectedDevice === 'all') ? data : data.filter(e => e.device_id === selectedDevice);
             
+            const useProvider = id === 'loadAdsTableBody' || id === 'loadAdsExtTableBody';
             const useAdNetwork = id === 'loadAdsExtTableBody';
-            const columnCount = useAdNetwork ? 5 : 4;
+            const columnCount = useProvider ? 5 : 4;
             if (filtered.length === 0) {
                  tbody.innerHTML = `<tr><td colspan="${columnCount}" class="text-center py-4 text-gray-400">Waiting for recording...</td></tr>`;
                  return;
@@ -5015,7 +5026,7 @@ HTML_TEMPLATE = """
             tbody.innerHTML = filtered.map(e => `
                 <tr class="hover:bg-gray-50 border-b text-sm">
                     <td class="py-2 px-2 text-purple-700 text-sm font-medium whitespace-nowrap">${escapeHTML(e.device_name || '')}</td>
-                    ${useAdNetwork ? `<td class="py-2 px-2 text-orange-600 text-sm font-medium whitespace-nowrap">${escapeHTML(e.provider || 'Unknown')}</td>` : ''}
+                    ${useProvider ? `<td class="py-2 px-2 text-orange-600 text-sm font-medium whitespace-nowrap">${escapeHTML(e.provider || (useAdNetwork ? 'Unknown' : ''))}</td>` : ''}
                     <td class="py-2 px-2 text-blue-600 text-sm font-medium whitespace-nowrap">${escapeHTML(useAdNetwork ? (e.ad_network || e.ad_source || '') : (e.ad_source || e.ad_network || ''))}</td>
                     <td class="py-2 px-2 text-green-600 text-sm font-medium whitespace-nowrap">${escapeHTML(e.ad_format || '')}</td>
                     <td class="py-2 px-3 log-cell text-xs font-normal text-gray-600">${escapeHTML(e.raw_log || '')}</td>
@@ -7453,6 +7464,44 @@ def process_load_ads_unity_log(line, device_id):
                         send_to_sheet(d_name, src, fmt, line.strip(), "LoadAds")
         except: pass
 
+
+def process_load_ads_max_log(line, device_id):
+    """Process the exact AppLovin MAX revenue callback for the Load Ads tab."""
+    if active_platform != "android" or not recording_states["LoadAds"]["is_recording"]:
+        return
+    if MAX_LOAD_ADS_REVENUE_KEYWORD not in str(line or ""):
+        return
+
+    raw_line = str(line or "").strip()
+    format_match = MAX_LOAD_ADS_FORMAT_PATTERN.search(raw_line)
+    network_match = MAX_LOAD_ADS_NETWORK_PATTERN.search(raw_line)
+    if not format_match or not network_match:
+        return
+
+    ad_format = format_match.group(1).strip().upper()
+    ad_network = network_match.group(2).strip()
+    if not ad_format or not ad_network:
+        return
+
+    d_name = get_device_name(device_id)
+    provider = "MAX"
+    dedup_key = (device_id, provider.lower(), ad_network.casefold(), ad_format, "max_revenue")
+    with lock:
+        if dedup_key in unique_load_ads:
+            return
+        unique_load_ads.add(dedup_key)
+        load_ads_events.append({
+            "device_id": device_id,
+            "device_name": d_name,
+            "provider": provider,
+            "ad_source": ad_network,
+            "ad_network": ad_network,
+            "ad_format": ad_format,
+            "raw_log": raw_line,
+        })
+        socketio.emit("update_load_ads", list(load_ads_events))
+        send_to_sheet(d_name, ad_network, ad_format, raw_line, "LoadAds", provider)
+
 def process_load_ads_ext_log(line, device_id):
     """Xử lý log cho Tab 2: Load Ads Ext (AppMetrica AdRevenue)"""
     # CHỈ XỬ LÝ NẾU ĐANG GHI (RECORDING)
@@ -8878,7 +8927,8 @@ def adb_log_reader(device_id):
             if active_platform != "android":
                 continue
             
-            # 1. Process Load Ads (Unity) - ONLY IF RECORDING
+            # 1. Process Load Ads (MAX + Unity) - ONLY IF RECORDING
+            process_load_ads_max_log(line, device_id)
             process_load_ads_unity_log(line, device_id)
             
             # 2. Process Load Ads Ext (Metrica) - ONLY IF RECORDING

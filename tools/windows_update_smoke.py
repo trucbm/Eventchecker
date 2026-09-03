@@ -54,6 +54,9 @@ def main() -> int:
         raise SystemExit("windows_update_smoke must run on Windows (or set EVENTINSPECTOR_WINDOWS_SMOKE_SIMULATE=1 for local code-path testing)")
 
     manifest = json.loads((ROOT / "Updates_2_5" / "remote_manifest.json").read_text(encoding="utf-8"))
+    expected_build = updater._extract_build_number(manifest.get("version"))
+    if expected_build is None:
+        raise AssertionError(f"Canonical manifest has no release build: {manifest.get('version')!r}")
     payloads = {
         str(item["path"]): (ROOT / str(item["path"])).read_bytes()
         for item in manifest.get("files") or []
@@ -109,8 +112,8 @@ def main() -> int:
                 raise AssertionError(f"Windows updater did not hand off a new payload directory: {prepared}")
             if not os.path.basename(prepared_dir).startswith("updates_v250_"):
                 raise AssertionError(f"Unexpected Windows staged payload directory: {prepared_dir}")
-            if prepared.get("build") != 54:
-                raise AssertionError(f"Windows staged build mismatch: {prepared}")
+            if prepared.get("build") != expected_build:
+                raise AssertionError(f"Windows staged build mismatch: expected {expected_build}, got {prepared}")
             if not os.path.exists(active_path):
                 raise AssertionError("Windows updater modified the active payload")
             for relative in payloads:
