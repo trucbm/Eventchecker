@@ -86,7 +86,9 @@ def main() -> int:
             # before this switch.  Only the updater's platform branch is
             # changed; the HTTP requests and filesystem operations stay real.
             updater.os.name = "nt"
-        with tempfile.TemporaryDirectory(prefix="eventinspector_windows_smoke_") as support_root:
+        temporary_support = tempfile.TemporaryDirectory(prefix="eventinspector_windows_smoke_")
+        support_root = temporary_support.name
+        try:
             os.environ["LOCALAPPDATA"] = support_root
             updater._candidate_manifest_urls = lambda _cfg: [f"{base_url}/remote_manifest.json"]
 
@@ -126,6 +128,13 @@ def main() -> int:
 
             print("windows_update_smoke: PASS")
             print(json.dumps({"version": prepared.get("version"), "update_dir": prepared_dir}, sort_keys=True))
+        finally:
+            # Windows cannot remove an open file while TemporaryDirectory cleans
+            # up.  Close the deliberately held active-payload handle first.
+            if active_handle is not None:
+                active_handle.close()
+                active_handle = None
+            temporary_support.cleanup()
     finally:
         if active_handle is not None:
             active_handle.close()
