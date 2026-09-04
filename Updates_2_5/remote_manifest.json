@@ -1,5 +1,5 @@
 {
-  "version": "2026-09-03-1-2.5.0-55",
+  "version": "2026-09-04-1-2.5.0-56",
   "update_enabled": true,
   "update_message": "",
   "files": [
@@ -11,7 +11,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Log_checker.py"
       ],
-      "sha256": "4ee3667d96075a85221c2aa60b6056a388ad187078403323a683bb707e6b41e6"
+      "sha256": "f04a36e7299ebb4793987f45725e928d026c6447ebc7a47b0bbf68d9b9c69406"
     },
     {
       "path": "remote_update.py",
@@ -101,7 +101,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/gradle_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/gradle_check_presets.json"
       ],
-      "sha256": "cc0650e3fbf0160fae2a100cd8f5cde2db3f1b807cc209611ca911a624619274"
+      "sha256": "072c97f6f011b67e255bcf4e4f5129fd09c6bb6a5bf0cfaabb24946b58d9e6b1"
     },
     {
       "path": "services_checker/gradle_lib_mapping.json",
@@ -111,7 +111,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/gradle_lib_mapping.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/gradle_lib_mapping.json"
       ],
-      "sha256": "21dde6f2b67f1a677a0c5f1fb0219dbb5417bc5191935e3a5eafa81914c166fc"
+      "sha256": "5aefcb3e1fd755434d90dd8a7d5413078ab36251e7d23567df0769e3ad5700ab"
     },
     {
       "path": "services_checker/podfile_check_presets.json",

@@ -3717,7 +3717,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(55)</title>
+    <title>Event Inspector v2.5.0(56)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -3799,7 +3799,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(55)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(56)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -7466,8 +7466,11 @@ def process_load_ads_unity_log(line, device_id):
 
 
 def process_load_ads_max_log(line, device_id):
-    """Process the exact AppLovin MAX revenue callback for the Load Ads tab."""
-    if active_platform != "android" or not recording_states["LoadAds"]["is_recording"]:
+    """Process the exact AppLovin MAX revenue callback for the visible Load Ads tab."""
+    # The visible Load Ads tab is backed by LoadAdsExt.  LoadAds is the
+    # legacy hidden Unity table, so MAX rows must use the same state, cache,
+    # socket event, and sheet target as the table users actually record.
+    if active_platform != "android" or not recording_states["LoadAdsExt"]["is_recording"]:
         return
     if MAX_LOAD_ADS_REVENUE_KEYWORD not in str(line or ""):
         return
@@ -7487,10 +7490,10 @@ def process_load_ads_max_log(line, device_id):
     provider = "MAX"
     dedup_key = (device_id, provider.lower(), ad_network.casefold(), ad_format, "max_revenue")
     with lock:
-        if dedup_key in unique_load_ads:
+        if dedup_key in unique_load_ads_ext:
             return
-        unique_load_ads.add(dedup_key)
-        load_ads_events.append({
+        unique_load_ads_ext.add(dedup_key)
+        load_ads_ext_events.append({
             "device_id": device_id,
             "device_name": d_name,
             "provider": provider,
@@ -7499,8 +7502,8 @@ def process_load_ads_max_log(line, device_id):
             "ad_format": ad_format,
             "raw_log": raw_line,
         })
-        socketio.emit("update_load_ads", list(load_ads_events))
-        send_to_sheet(d_name, ad_network, ad_format, raw_line, "LoadAds", provider)
+        socketio.emit("update_load_ads_ext", list(load_ads_ext_events))
+        send_to_sheet(d_name, ad_network, ad_format, raw_line, "LoadAdsExt", provider)
 
 def process_load_ads_ext_log(line, device_id):
     """Xử lý log cho Tab 2: Load Ads Ext (AppMetrica AdRevenue)"""
