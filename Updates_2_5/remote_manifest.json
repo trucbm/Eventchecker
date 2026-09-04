@@ -101,7 +101,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/gradle_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/gradle_check_presets.json"
       ],
-      "sha256": "072c97f6f011b67e255bcf4e4f5129fd09c6bb6a5bf0cfaabb24946b58d9e6b1"
+      "sha256": "6974aa0766e47042f6610b5a5c1f08ee414931f4e58bb081f09af3a230d16214"
     },
     {
       "path": "services_checker/gradle_lib_mapping.json",
@@ -111,7 +111,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/gradle_lib_mapping.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/gradle_lib_mapping.json"
       ],
-      "sha256": "5aefcb3e1fd755434d90dd8a7d5413078ab36251e7d23567df0769e3ad5700ab"
+      "sha256": "6aa78e1de11cf3fab82fba3ad2210d991ea50c2531eb76bea297ab225e6a490e"
     },
     {
       "path": "services_checker/podfile_check_presets.json",

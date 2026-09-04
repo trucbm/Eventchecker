@@ -19,6 +19,7 @@
   "Ascendx - MAX": "com.knorex:ascendx-mobile-sdk-max-custom-adapter",
   "Yeahmobi/ Maticoo - MAX": "io.github.maticooads:maticoo-adapter-max",
   "TaurusX - MAX": "com.applovin.mediation:taurusXAdapters",
+  "Prado - MAX": "co.prado.sdk:prado-android-applovin-adapter",
   "Voodoo (ADN) Adapter": "com.unity3d.ads-mediation:voodoo-adapter",
   "Voodoo (ADN) SDK": "io.adn:adn-sdk",
   "Adjust Google LVL": "com.adjust.sdk:adjust-android-google-lvl",

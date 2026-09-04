@@ -64,8 +64,6 @@
     "lines": [
       "Kidoz adapter\t2.2.0",
       "Kidoz native\t10.1.9",
-      "LINE Ads adapter\t5.4.0",
-      "LINE Ads native\t3.1.1",
       "Maticoo adapter\t2.0.7.0",
       "Maticoo sdk\t2.0.7.0",
       "TaurusX adapter\t1.16.3.1",
@@ -75,6 +73,7 @@
       "Ascendx - MAX\t1.11.1",
       "Yeahmobi/ Maticoo - MAX\t2.0.7.0",
       "TaurusX - MAX\t1.16.3.1",
+      "Prado - MAX\t2.0.2",
       "Odeeo SDK\t3.10.0",
       "Firebase Cloud Messaging Unity\t13.16.0",
       "Firebase Cloud Messaging\t25.1.2",

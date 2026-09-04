@@ -1591,6 +1591,8 @@ def test_services_checker_gradle_mapping_contract() -> None:
     c191_gradle_lines = gradle_presets.get("C-191-Android", {}).get("lines") or []
     _assert("Voodoo (ADN) Adapter\t5.7.0" in c191_gradle_lines, "C-191 Voodoo adapter version changed")
     _assert("Voodoo (ADN) SDK\t4.29.2" in c191_gradle_lines, "C-191 Voodoo SDK version changed")
+    _assert("LINE Ads adapter\t5.4.0" not in c191_gradle_lines, "C-191 Gradle preset still contains LINE Ads adapter")
+    _assert("LINE Ads native\t3.1.1" not in c191_gradle_lines, "C-191 Gradle preset still contains LINE Ads native")
     expected_c191_max_lines = {
         "Mobilefuse - MAX\t1.12.0.0",
         "Ascendx - MAX\t1.11.1",
@@ -1606,6 +1608,7 @@ def test_services_checker_gradle_mapping_contract() -> None:
         "Ascendx - MAX": "com.knorex:ascendx-mobile-sdk-max-custom-adapter",
         "Yeahmobi/ Maticoo - MAX": "io.github.maticooads:maticoo-adapter-max",
         "TaurusX - MAX": "com.applovin.mediation:taurusXAdapters",
+        "Prado - MAX": "co.prado.sdk:prado-android-applovin-adapter",
     }
     for library_name, artifact_id in expected_c191_max_mapping.items():
         _assert_equal(
