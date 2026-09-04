@@ -108,6 +108,14 @@
   },
   "C-191-Android": {
     "platform": "android",
+    "manifest": {
+      "Compile SDK Version": "36",
+      "Compile SDK Version Codename": "16",
+      "Min SDK Version": "26",
+      "Platform Build Version Code": "36",
+      "Platform Build Version Name": "16",
+      "Target SDK Version": "36"
+    },
     "permissions": [
       "android.permission.ACCESS_ADSERVICES_AD_ID",
       "android.permission.ACCESS_ADSERVICES_ATTRIBUTION",
@@ -130,6 +138,7 @@
       "com.google.android.gms.permission.AD_ID",
       "{{PACKAGE_NAME}}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
       "{{PACKAGE_NAME}}.permission.C2D_MESSAGE"
-    ]
+    ],
+    "appmetrica_unity_version": "unity-6.10.0"
   }
 }

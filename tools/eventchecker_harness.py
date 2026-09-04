@@ -128,6 +128,30 @@ def test_manifest_contract() -> None:
             _assert(str(item.get("sha256", "")).strip(), f"{manifest_path.name} contains file entry without sha256")
 
 
+def test_c191_manifest_preset_contract() -> None:
+    presets = json.loads((ROOT / "services_checker" / "manifest_check_presets.json").read_text(encoding="utf-8"))
+    c191 = presets.get("C-191-Android") or {}
+    _assert_equal(c191.get("platform"), "android", "C-191 Android manifest preset platform changed")
+    _assert_equal(
+        c191.get("manifest"),
+        {
+            "Compile SDK Version": "36",
+            "Compile SDK Version Codename": "16",
+            "Min SDK Version": "26",
+            "Platform Build Version Code": "36",
+            "Platform Build Version Name": "16",
+            "Target SDK Version": "36",
+        },
+        "C-191 Android manifest fields changed",
+    )
+    _assert_equal(
+        c191.get("appmetrica_unity_version"),
+        "unity-6.10.0",
+        "C-191 Android AppMetrica Unity version changed",
+    )
+    _assert_equal(len(c191.get("permissions") or []), 21, "C-191 Android permission count changed")
+
+
 def test_manifest_payload_integrity() -> None:
     manifests = _manifest_paths()
     _assert(manifests, "No release manifest files found")
@@ -2647,6 +2671,7 @@ def test_gradle_comparison_hides_unlisted_preset_rows() -> None:
 
 TESTS: List[Callable[[], None]] = [
     test_manifest_contract,
+    test_c191_manifest_preset_contract,
     test_manifest_payload_integrity,
     test_canonical_update_channel_contract,
     test_no_pre_v25_release_artifacts,
