@@ -29,5 +29,6 @@
   "Adjust Xiaomi Referrer": "com.adjust.sdk:adjust-android-xiaomi-referrer",
   "Xiaomi Install Referrer": "com.miui.referrer:homereferrer",
   "Samsung Install Referrer": "store.galaxy.samsung.installreferrer:samsung_galaxystore_install_referrer",
-  "Ascendx Prebid": "com.knorex:knorex-sdk-unity"
+  "Ascendx Prebid": "com.knorex:knorex-sdk-unity",
+  "Voodoo - MAX": "io.adn:adn-applovin-adapter"
 }
