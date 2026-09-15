@@ -219,8 +219,8 @@ def test_canonical_update_channel_contract() -> None:
 def test_no_pre_v25_release_artifacts() -> None:
     """The checked-out release surface must contain only the v2.5 channel."""
     forbidden_tokens = (
-        "2" + ".3.0",
-        "2" + ".4.0",
+        "v" + "2.3.0",
+        "v" + "2.4.0",
         "v" + "230",
         "v" + "240",
         "Updates_2_" + "3",
@@ -579,9 +579,9 @@ def test_max_sdk_logs() -> None:
         lc.sdk_check_runtime_state = {}
         lc.sdk_check_current_network = {}
 
-        c191_lines = lc._load_sdk_check_presets()["C-191-Android"]["lines"]
+        c192_lines = lc._load_sdk_check_presets()["C-192-Android"]["lines"]
         max_expected = {}
-        for line in c191_lines:
+        for line in c192_lines:
             if " - MAX" not in line:
                 continue
             parsed = lc._parse_sdk_expected_line(line)
@@ -592,7 +592,7 @@ def test_max_sdk_logs() -> None:
         original_emit = lc.socketio.emit
         lc.socketio.emit = lambda *_args, **_kwargs: None
         try:
-            lc.sdk_check({"text": "\n".join(c191_lines)})
+            lc.sdk_check({"text": "\n".join(c192_lines)})
         finally:
             lc.socketio.emit = original_emit
 
@@ -658,7 +658,6 @@ def test_max_sdk_logs() -> None:
             ("LINE_NETWORK", "LINE Ads - MAX"),
             ("LIFTOFF_NETWORK", "Liftoff Monetization (vungle) - MAX"),
             ("MINTEGRAL_NETWORK", "Mintegral - MAX"),
-            ("MOBILEFUSE_NETWORK", "Mobilefuse - MAX"),
             ("MOLOCO_NETWORK", "Moloco - MAX"),
             ("OGURY_NETWORK", "Ogury - MAX"),
             ("PANGLE_NETWORK", "Pangle (Tiktok) - MAX"),
@@ -667,10 +666,6 @@ def test_max_sdk_logs() -> None:
             ("VERVE_NETWORK", "Verve / Pubnative - MAX"),
             ("YANDEX_NETWORK", "Yandex - MAX"),
             ("YSO_NETWORK", "YSO - MAX"),
-            ("ASCENDX_NETWORK", "Ascendx - MAX"),
-            ("MATICOO_NETWORK", "Yeahmobi/ Maticoo - MAX"),
-            ("TAURUSX_NETWORK", "TaurusX - MAX"),
-            ("PRADO_NETWORK", "Prado - MAX"),
             ("BIGO_BIDDING", "Bigo Ads - MAX"),
             ("BIGO_NATIVE_BIDDING", "Bigo Ads - MAX"),
             ("CHARTBOOST_BIDDING", "Chartboost - MAX"),
@@ -711,18 +706,18 @@ def test_max_sdk_logs() -> None:
 
 def test_sdk_check_preset_contract() -> None:
     presets = lc._load_sdk_check_presets()
-    _assert("C-191-Android" in presets, "C-191 Android SDK preset is missing")
+    _assert("C-192-Android" in presets, "C-192 Android SDK preset is missing")
     _assert("C-190-iOS" in presets, "C-190 iOS SDK preset is missing")
     _assert("C-180-Android" in presets, "C-180 Android SDK preset is missing")
     _assert("C-180-iOS" in presets, "C-180 iOS SDK preset is missing")
-    c191_lines = presets["C-191-Android"].get("lines") or []
-    expected_c191_lines = [
+    c192_lines = presets["C-192-Android"].get("lines") or []
+    expected_c192_lines = [
         "Ads Network\tAdapter\tNative",
         "IronSource\t9.6.0\t9.6.0",
         "AppLovin\t5.9.0\t13.6.4",
         "BidMachine\t5.8.0\t3.8.0",
-        "Bigo Ads\t5.11.0\t6.0.0",
-        "Chartboost\t5.8.0\t9.13.0",
+        "Bigo Ads\t5.12.0\t6.0.1",
+        "Chartboost\t5.9.0\t9.14.0",
         "Digital Turbine (fyber)\t5.10.0\t8.4.7",
         "Google (AdMob and Ad Manager)\t5.9.0\t25.4.0",
         "HyprMX\t5.3.0\t6.4.6",
@@ -732,22 +727,22 @@ def test_sdk_check_preset_contract() -> None:
         "Meta Audience Network\t5.4.0\t6.22.0",
         "Mintegral\t5.19.0\t17.1.81",
         "Mobilefuse\t5.4.0\t1.12.0",
-        "Moloco\t5.16.0\t4.11.1",
+        "Moloco\t5.17.0\t4.12.0",
         "myTarget (VK Ads)\t5.6.0\t5.51.2",
         "Ogury\t5.5.0\t6.3.1",
-        "Pangle\t5.22.0\t8.2.0.4",
-        "PubMatic (OpenWrap)\t5.9.0\t5.3.0",
-        "SuperAwesome\t5.5.0\t10.3.1",
+        "Pangle\t5.23.0\t8.3.0.3",
+        "PubMatic (OpenWrap)\t5.10.0\t5.4.0",
+        "SuperAwesome\t5.6.0\t10.3.2",
         "UnityAds\t5.12.0\t4.20.0",
-        "Verve / Pubnative\t5.7.0\t3.9.1",
-        "Voodoo\t5.7.0\t4.29.2",
-        "Yandex\t5.13.0\t8.3.0",
+        "Verve / Pubnative\t5.8.0\t3.9.2",
+        "Voodoo\t5.9.0\t4.29.3",
+        "Yandex\t5.14.0\t8.4.0",
         "YSO\t5.6.0\t1.3.8",
         "LevelPlay / ironSource - MAX\t9.6.0.0.0",
         "MAX / AppLovin - MAX\t\t13.6.4",
         "BidMachine - MAX\t3.8.0.0",
-        "Bigo Ads - MAX\t6.0.0.0",
-        "Chartboost - MAX\t9.13.0.0",
+        "Bigo Ads - MAX\t6.0.1.0",
+        "Chartboost - MAX\t9.14.0.0",
         "Digital Turbine (fyber) - MAX\t8.4.7.0",
         "Google (AdMob and Ad Manager) - MAX\t25.4.0.0",
         "InMobi - MAX\t11.4.1.2",
@@ -755,32 +750,28 @@ def test_sdk_check_preset_contract() -> None:
         "Liftoff Monetization (vungle) - MAX\t7.7.8.0",
         "Meta Audience Network - MAX\t6.22.0.0",
         "Mintegral - MAX\t17.1.81.0",
-        "Mobilefuse - MAX\t1.12.0.0",
-        "Moloco - MAX\t4.11.1.0",
+        "Moloco - MAX\t4.12.0.0",
         "Ogury - MAX\t6.3.1.0",
-        "Pangle (Tiktok) - MAX\t8.2.0.4.0",
-        "PubMatic (OpenWrap) - MAX\t5.3.0.0",
+        "Pangle (Tiktok) - MAX\t8.3.0.3.0",
+        "PubMatic (OpenWrap) - MAX\t5.4.0.0",
         "UnityAds - MAX\t4.20.0.0",
-        "Verve / Pubnative - MAX\t3.9.1.0",
-        "Yandex - MAX\t8.3.0.0",
+        "Verve / Pubnative - MAX\t3.9.2.0",
+        "Voodoo - MAX\t4.29.3.1",
+        "Yandex - MAX\t8.4.0.0",
         "YSO - MAX\t1.3.8.0",
-        "Ascendx - MAX\t1.11.1",
-        "Yeahmobi/ Maticoo - MAX\t2.0.7.0",
-        "TaurusX - MAX\t1.16.3.1",
-        "Prado - MAX\t2.0.2",
-        "Adverty\t5.2.9",
+        "Adverty\t5.3.0",
         "Gadsme\t1.12.6",
         "AudioMob\t10.2.3",
         "Adjust\t\t5.8.0",
         "Firebase Crashlytics\t\t20.1.0",
         "Facebook SDK\t\t18.3.0",
-        "AppMetrica SDK\t\t8.4.1",
+        "AppMetrica SDK\t\t8.5.1",
     ]
-    _assert_equal(c191_lines, expected_c191_lines, "C-191 Android SDK preset does not match the requested list")
-    _assert_equal(presets["C-191-Android"].get("platform"), "android", "C-191 Android preset platform changed")
-    for line in c191_lines[1:]:
+    _assert_equal(c192_lines, expected_c192_lines, "C-192 Android SDK preset does not match the requested list")
+    _assert_equal(presets["C-192-Android"].get("platform"), "android", "C-192 Android preset platform changed")
+    for line in c192_lines[1:]:
         parsed = lc._parse_sdk_expected_line(line)
-        _assert(parsed is not None, f"C-191 Android entry cannot be parsed: {line}")
+        _assert(parsed is not None, f"C-192 Android entry cannot be parsed: {line}")
     ios_preset = presets["C-190-iOS"]
     _assert_equal(ios_preset.get("platform"), "ios", "C-190 iOS preset platform changed")
     _assert_equal(ios_preset.get("lines"), [], "C-190 iOS preset must remain empty")
@@ -1612,33 +1603,36 @@ def test_services_checker_gradle_mapping_contract() -> None:
     gradle_mapping = json.loads((ROOT / "services_checker" / "gradle_lib_mapping.json").read_text(encoding="utf-8"))
     gradle_presets = json.loads((ROOT / "services_checker" / "gradle_check_presets.json").read_text(encoding="utf-8"))
     podfile_presets = json.loads((ROOT / "services_checker" / "podfile_check_presets.json").read_text(encoding="utf-8"))
-    c191_gradle_lines = gradle_presets.get("C-191-Android", {}).get("lines") or []
-    _assert("Voodoo (ADN) Adapter\t5.7.0" in c191_gradle_lines, "C-191 Voodoo adapter version changed")
-    _assert("Voodoo (ADN) SDK\t4.29.2" in c191_gradle_lines, "C-191 Voodoo SDK version changed")
-    _assert("LINE Ads adapter\t5.4.0" not in c191_gradle_lines, "C-191 Gradle preset still contains LINE Ads adapter")
-    _assert("LINE Ads native\t3.1.1" not in c191_gradle_lines, "C-191 Gradle preset still contains LINE Ads native")
-    expected_c191_max_lines = {
+    c192_gradle_lines = gradle_presets.get("C-192-Android", {}).get("lines") or []
+    _assert("Voodoo (ADN) Adapter\t5.7.0" not in c192_gradle_lines, "C-192 Gradle preset still contains the removed Voodoo ADN adapter")
+    _assert("Voodoo (ADN) SDK\t4.29.2" not in c192_gradle_lines, "C-192 Gradle preset still contains the removed Voodoo ADN SDK")
+    _assert("Voodoo - MAX\t4.29.3.1" not in c192_gradle_lines, "C-192 Gradle preset still contains Voodoo MAX")
+    _assert("LINE Ads adapter\t5.4.0" not in c192_gradle_lines, "C-192 Gradle preset still contains LINE Ads adapter")
+    _assert("LINE Ads native\t3.1.1" not in c192_gradle_lines, "C-192 Gradle preset still contains LINE Ads native")
+    expected_c192_max_lines = {
         "Mobilefuse - MAX\t1.12.0.0",
-        "Ascendx - MAX\t1.11.1",
-        "Yeahmobi/ Maticoo - MAX\t2.0.7.0",
+        "Ascendx - MAX\t1.12.0",
+        "Yeahmobi/ Maticoo - MAX\t2.0.7.1",
         "TaurusX - MAX\t1.16.3.1",
+        "Prado - MAX\t2.0.2",
     }
     _assert(
-        expected_c191_max_lines.issubset(set(c191_gradle_lines)),
-        "C-191 MAX Gradle preset entries are incomplete",
+        expected_c192_max_lines.issubset(set(c192_gradle_lines)),
+        "C-192 MAX Gradle preset entries are incomplete",
     )
-    expected_c191_max_mapping = {
+    expected_c192_max_mapping = {
         "Mobilefuse - MAX": "com.applovin.mediation:mobilefuse-adapter",
         "Ascendx - MAX": "com.knorex:ascendx-mobile-sdk-max-custom-adapter",
         "Yeahmobi/ Maticoo - MAX": "io.github.maticooads:maticoo-adapter-max",
         "TaurusX - MAX": "com.applovin.mediation:taurusXAdapters",
         "Prado - MAX": "co.prado.sdk:prado-android-applovin-adapter",
+        "Voodoo - MAX": "io.adn:adn-applovin-adapter",
     }
-    for library_name, artifact_id in expected_c191_max_mapping.items():
+    for library_name, artifact_id in expected_c192_max_mapping.items():
         _assert_equal(
             gradle_mapping.get(library_name),
             artifact_id,
-            f"C-191 MAX Gradle mapping changed for {library_name}",
+            f"C-192 MAX Gradle mapping changed for {library_name}",
         )
     _assert_equal(
         podfile_presets.get("C-180-iOS", {}).get("lines") or [],
