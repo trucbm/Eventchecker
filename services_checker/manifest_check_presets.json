@@ -106,7 +106,7 @@
     ],
     "appmetrica_unity_version": "unity-6.10.0"
   },
-  "C-191-Android": {
+  "C-192-Android": {
     "platform": "android",
     "manifest": {
       "Compile SDK Version": "36",
