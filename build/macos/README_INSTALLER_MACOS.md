@@ -7,15 +7,16 @@ Mục tiêu: tạo `EventInspector.app` và `EventInspector.dmg` để người 
 bash build/macos/build_macos.sh
 ```
 
-Build macOS mặc định dùng `universal2`, nên một file DMG chạy được trên cả
-Mac Intel (`x86_64`) và Apple Silicon (`arm64`). Có thể kiểm tra binary sau
-khi build bằng:
+Build macOS mặc định dùng kiến trúc của máy đang build. Workflow GitHub
+Actions dùng Apple Silicon và tạo bản `arm64`; máy Intel có thể build bản
+`x86_64`. Có thể kiểm tra binary sau khi build bằng:
 
 ```bash
 lipo -info dist/EventInspector.app/Contents/MacOS/EventInspector
 ```
 
-Kết quả cần có cả `x86_64` và `arm64`.
+Kết quả trên workflow phải có `arm64`. Bản universal2 cần build riêng với
+dependency native tương thích cả hai kiến trúc.
 
 Kết quả:
 - `dist/EventInspector.app`

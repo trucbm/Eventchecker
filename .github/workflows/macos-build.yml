@@ -1,0 +1,93 @@
+name: Build macOS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Release ref to build"
+        required: false
+        type: string
+        default: "main"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-macos:
+    # macos-14 is an Apple Silicon runner. The build script is explicitly
+    # pinned to arm64 below so the artifact matches the target Macs.
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Resolve release version
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          marker="$(grep -Eo 'v[0-9]+\.[0-9]+\.[0-9]+\([0-9]+\)' Log_checker.py | head -n 1)"
+          if [[ ! "$marker" =~ ^v[0-9]+\.[0-9]+\.[0-9]+\([0-9]+\)$ ]]; then
+            echo "Could not find a valid release marker in Log_checker.py" >&2
+            exit 1
+          fi
+          version="${marker#v}"
+          build_number="${marker##*\(}"
+          build_number="${build_number%\)}"
+          echo "release_marker=$marker" >> "$GITHUB_OUTPUT"
+          echo "release_version=$version" >> "$GITHUB_OUTPUT"
+          echo "build_number=$build_number" >> "$GITHUB_OUTPUT"
+          echo "Building release $marker"
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Build Apple Silicon DMG
+        env:
+          MACOS_TARGET_ARCH: arm64
+          VENV_DIR: ${{ runner.temp }}/eventinspector-macos-venv
+          PYTHON_BIN: python3
+        run: bash build/macos/build_macos.sh
+
+      - name: Verify macOS artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="dist/EventInspector.app"
+          dmg_path="dist/EventInspector.dmg"
+          test -d "$app_path"
+          test -s "$dmg_path"
+
+          short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Contents/Info.plist")"
+          build_number="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_path/Contents/Info.plist")"
+          test "$short_version" = "2.5.0"
+          test "$build_number" = "${{ steps.release.outputs.build_number }}"
+
+          binary_info="$(file "$app_path/Contents/MacOS/EventInspector")"
+          echo "$binary_info"
+          [[ "$binary_info" == *arm64* ]]
+
+          hdiutil verify "$dmg_path"
+          shasum -a 256 "$dmg_path"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EventInspector-macOS-arm64-v${{ steps.release.outputs.release_version }}
+          path: dist/EventInspector.dmg
+          if-no-files-found: error
+          retention-days: 14

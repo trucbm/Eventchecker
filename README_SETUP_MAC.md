@@ -81,7 +81,23 @@ Output:
 - `dist/EventInspector.dmg`
 
 
-## 7. Thu muc local state tren macOS
+## 7. Build tu Windows qua GitHub Actions
+
+Khong can may Mac de build ban Apple Silicon. Moi lan push vao `main`, GitHub
+Actions se tu dong chay workflow `Build macOS` tren runner macOS arm64 va tao:
+
+- `EventInspector-macOS-arm64-v<version>`: DMG cho Mac Apple Silicon
+- `Build Windows`: portable ZIP va installer Windows
+
+Artifact nam trong tab `Actions` cua repository. Co the chay lai thu cong bang
+cach vao `Actions`, chon workflow, chon `Run workflow`, roi nhap `source_ref`
+neu muon build mot branch/ref cu the.
+
+Repo public dung runner macOS tieu chuan mien phi; repo private phu thuoc quota
+GitHub Actions cua tai khoan.
+
+
+## 8. Thu muc local state tren macOS
 
 App state nam o:
 
@@ -96,7 +112,7 @@ ls -la "$HOME/Library/Application Support/EventInspector"
 ```
 
 
-## 8. Neu update bi ket
+## 9. Neu update bi ket
 
 Co the clear state local bang tay:
 
@@ -108,7 +124,7 @@ rm -rf "$HOME/Library/Application Support/EventInspector/updates_v250_tmp"
 ```
 
 
-## 9. Quy trinh dev tren macOS
+## 10. Quy trinh dev tren macOS
 
 ```bash
 git checkout main
