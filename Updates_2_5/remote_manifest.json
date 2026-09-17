@@ -31,7 +31,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/sdk_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/sdk_check_presets.json"
       ],
-      "sha256": "eda291ad4160b058e19a57999fbf67575f40610c806ce7742cf121dd9d4dbccc"
+      "sha256": "32b05117b74e9fa1a362f23122a96e0d8ad66bd7e0a869cdd11c2cc54ccfe01d"
     },
     {
       "path": "remote_update_config_v250.json",
@@ -131,7 +131,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/manifest_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/manifest_check_presets.json"
       ],
-      "sha256": "47ed764bec33b3a82a814a4ccba54ef4b584512c69f45eb81376fd6652b49194"
+      "sha256": "cbcfb840fba54465c05a27fff106638c3b3e7560e5e884517245edf1f09a5fc3"
     }
   ]
 }
