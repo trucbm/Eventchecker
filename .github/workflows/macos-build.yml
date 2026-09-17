@@ -61,7 +61,20 @@ jobs:
           MACOS_TARGET_ARCH: arm64
           VENV_DIR: ${{ runner.temp }}/eventinspector-macos-venv
           PYTHON_BIN: python3
-        run: bash build/macos/build_macos.sh
+          PIP_DEFAULT_TIMEOUT: "120"
+          PIP_RETRIES: "5"
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            if bash build/macos/build_macos.sh; then
+              exit 0
+            fi
+            if [[ "$attempt" -eq 1 ]]; then
+              echo "macOS build attempt failed; retrying once for a transient runner or network error..."
+              sleep 10
+            fi
+          done
+          exit 1
 
       - name: Verify macOS artifact
         shell: bash
