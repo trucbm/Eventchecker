@@ -1397,15 +1397,17 @@ SDK_MAX_CORE_INITIALIZATION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SDK_MAX_HEALTH_EVENTS_PATTERN = re.compile(
-    r'\[HealthEventsReporter\].*?\bsignal_collection_success\b',
+    r'\[(?:AL)?HealthEventsReporter\].*?\bsignal_collection_success\b',
     re.IGNORECASE,
 )
 SDK_MAX_ADAPTER_VERSION_FIELD_PATTERN = re.compile(
-    r'\badapter_version\s*=\s*["\']?(?P<version>[0-9]+(?:\.[0-9]+)+)',
+    r'["\']?\badapter_version["\']?\s*(?:=|:)\s*["\']?'
+    r'(?P<version>[0-9]+(?:\.[0-9]+)+)',
     re.IGNORECASE,
 )
 SDK_MAX_NETWORK_NAME_FIELD_PATTERN = re.compile(
-    r'\bnetwork_name\s*=\s*["\']?(?P<network>[A-Za-z0-9_./() -]+?)["\']?\s*(?:,|\]|})',
+    r'["\']?\bnetwork_name["\']?\s*(?:=|:)\s*["\']?'
+    r'(?P<network>[A-Za-z0-9_./() -]+?)["\']?\s*(?:[,;\]}])',
     re.IGNORECASE,
 )
 
@@ -1812,6 +1814,30 @@ def _normalize_ios_log_line(raw_line, device_id):
         "platform": "ios",
     }
 
+
+IOS_LOG_RECORD_START_PATTERN = re.compile(
+    r'^[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?\s+',
+)
+
+
+def _process_ios_log_record(raw_log, device_id):
+    """Dispatch one complete iOS syslog record, including continuation lines."""
+    if not raw_log or active_platform != "ios":
+        return
+    log_obj = _normalize_ios_log_line(raw_log, device_id)
+    process_ios_package_log_line(log_obj)
+    process_load_ads_ext_log(log_obj["raw_log"], device_id)
+    process_adrevenue_log(log_obj["raw_log"], device_id)
+    process_price_rotation_log(log_obj["raw_log"], device_id)
+    _process_sdk_check_line(log_obj["raw_log"], device_id)
+    process_callback_and_ad_event_log(log_obj["raw_log"], device_id)
+    event_name, params, json_string = find_and_parse_event(log_obj["raw_log"])
+    if event_name:
+        _record_default_ad_event_hit(event_name, params, device_id)
+        process_event_validator_log(event_name, params, json_string, log_obj["raw_log"], device_id)
+        cache_specific_event_log(event_name, params, json_string, log_obj["raw_log"], device_id)
+        process_callback_and_ad_event_log(log_obj["raw_log"], device_id, event_name, params, json_string)
+
 def _normalize_sdk_search_text(text):
     if text is None:
         return ""
@@ -1922,6 +1948,7 @@ MAX_SDK_NETWORK_ALIASES = {
     "line": "lineads",
     "linenetwork": "lineads",
     "lineadsnetwork": "lineads",
+    "lineadsfivead": "lineads",
     "liftoff": "liftoffmonetizationvungle",
     "liftoffnetwork": "liftoffmonetizationvungle",
     "liftoffmonetization": "liftoffmonetizationvungle",
@@ -1961,6 +1988,8 @@ MAX_SDK_NETWORK_ALIASES = {
     "maticoo": "yeahmobimaticoo",
     "maticoonetwork": "yeahmobimaticoo",
     "taurusxnetwork": "taurusx",
+    "voodoo": "voodoo",
+    "voodoonetwork": "voodoo",
     "prado": "prado",
     "pradonetwork": "prado",
 }
@@ -2514,7 +2543,7 @@ def _update_sdk_max_block(device_id, expected_key, sdk_version=None, adapter_ver
 
 def _process_sdk_max_line(line, device_id):
     """Parse MAX core initialization and MAX adapter health telemetry."""
-    if active_platform != "android":
+    if active_platform not in {"android", "ios"}:
         return False
     raw_line = str(line or "")
     changed = False
@@ -3723,7 +3752,7 @@ HTML_TEMPLATE = """
     <style>
         body { font-family: 'Inter', sans-serif; }
         .log-cell { max-width: 500px; word-wrap: break-word; font-family: monospace; font-size: 0.75rem; color: #6b7280; }
-        .message-cell { white-space: nowrap; }
+        .message-cell { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
         #packageLogTable { table-layout: fixed; width: 100%; }
         #packageLogTable col.col-time { width: 110px; }
         #packageLogTable col.col-tag { width: 90px; }
@@ -5772,7 +5801,8 @@ HTML_TEMPLATE = """
             const msgClass = isErrorLevel ? 'text-red-500' : (isWarningLevel ? 'text-amber-500' : '');
             const rowKey = getPackageRowKey(l);
             const selectedClass = selectedPackageRowKeys.has(rowKey) ? 'selected' : '';
-            return `<tr class="package-log-row hover:bg-gray-50 ${rowClass} ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${idx}"><td class="py-1.5 px-2 font-mono text-[11px] leading-4 time-cell col-time">${escapeHTML(l.time_display || l.time || '')}</td><td class="py-1.5 pr-1 pl-2 font-mono text-[11px] leading-4 tag-cell col-tag" title="${escapeHTML(l.tag || '')}">${escapeHTML(l.tag || '')}</td><td class="py-1.5 pl-1 pr-3 font-mono text-[11px] leading-4 log-cell message-cell col-message ${msgClass}">${escapeHTML(msgText)}</td></tr>`;
+            const fullLogText = l.log || msgText;
+            return `<tr class="package-log-row hover:bg-gray-50 ${rowClass} ${selectedClass}" data-row-key="${encodeURIComponent(rowKey)}" data-row-index="${idx}"><td class="py-1.5 px-2 font-mono text-[11px] leading-4 time-cell col-time">${escapeHTML(l.time_display || l.time || '')}</td><td class="py-1.5 pr-1 pl-2 font-mono text-[11px] leading-4 tag-cell col-tag" title="${escapeHTML(l.tag || '')}">${escapeHTML(l.tag || '')}</td><td class="py-1.5 pl-1 pr-3 font-mono text-[11px] leading-4 log-cell message-cell col-message ${msgClass}" title="${escapeHTML(fullLogText)}">${escapeHTML(msgText)}</td></tr>`;
         }
 
         function getPackageSourceLogs(state) {
@@ -8987,6 +9017,7 @@ def ios_log_reader(device_id):
             active_ios_log_last_seen[device_id] = time.time()
             active_ios_log_commands[device_id] = os.path.basename(cmd[0])
 
+        pending_record = ""
         for raw_line in iter(proc.stdout.readline, ''):
             if not raw_line:
                 break
@@ -8994,19 +9025,20 @@ def ios_log_reader(device_id):
                 active_ios_log_last_seen[device_id] = time.time()
             if active_platform != "ios":
                 continue
-            log_obj = _normalize_ios_log_line(raw_line, device_id)
-            process_ios_package_log_line(log_obj)
-            process_load_ads_ext_log(log_obj["raw_log"], device_id)
-            process_adrevenue_log(log_obj["raw_log"], device_id)
-            process_price_rotation_log(log_obj["raw_log"], device_id)
-            _process_sdk_check_line(log_obj["raw_log"], device_id)
-            process_callback_and_ad_event_log(log_obj["raw_log"], device_id)
-            event_name, params, json_string = find_and_parse_event(log_obj["raw_log"])
-            if event_name:
-                _record_default_ad_event_hit(event_name, params, device_id)
-                process_event_validator_log(event_name, params, json_string, log_obj["raw_log"], device_id)
-                cache_specific_event_log(event_name, params, json_string, log_obj["raw_log"], device_id)
-                process_callback_and_ad_event_log(log_obj["raw_log"], device_id, event_name, params, json_string)
+            line = raw_line.rstrip("\r\n")
+            if IOS_LOG_RECORD_START_PATTERN.match(line):
+                if pending_record:
+                    _process_ios_log_record(pending_record, device_id)
+                pending_record = line
+            elif pending_record:
+                # idevicesyslog/tidevice prints the structured payload on
+                # indented continuation lines. Keep it attached to the
+                # timestamped record so SDK fields are parsed together.
+                pending_record += "\n" + line
+            else:
+                pending_record = line
+        if pending_record and active_platform == "ios":
+            _process_ios_log_record(pending_record, device_id)
     except Exception as e:
         print(f"iOS log reader error {device_id}: {e}")
     finally:

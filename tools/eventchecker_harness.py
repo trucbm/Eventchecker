@@ -704,6 +704,153 @@ def test_max_sdk_logs() -> None:
         lc.socketio.emit = original_emit
 
 
+def test_ios_max_sdk_logs() -> None:
+    original_platform = lc.active_platform
+    original_devices = lc.connected_devices_info
+    original_sdk_active = lc.sdk_check_active
+    original_search_list = list(lc.sdk_check_search_list)
+    original_expected_map = lc.sdk_check_expected_map
+    original_expected_order = lc.sdk_check_expected_order
+    original_runtime_state = lc.sdk_check_runtime_state
+    original_current_network = lc.sdk_check_current_network
+    original_emit = lc.socketio.emit
+    try:
+        lc.active_platform = "ios"
+        lc.connected_devices_info = []
+        lc.sdk_check_active = True
+        lc.sdk_check_search_list = []
+        lc.sdk_check_expected_map = {}
+        lc.sdk_check_expected_order = []
+        lc.sdk_check_runtime_state = {}
+        lc.sdk_check_current_network = {}
+
+        ios_lines = lc._load_sdk_check_presets()["C-192-iOS"]["lines"]
+        original_emit = lc.socketio.emit
+        lc.socketio.emit = lambda *_args, **_kwargs: None
+        try:
+            lc.sdk_check({"text": "\n".join(ios_lines)})
+        finally:
+            lc.socketio.emit = original_emit
+
+        core_line = (
+            "Sep 18 16:54:48 iPhone--11--pro PixelArt(AppLovinSDK)[1871] <Notice>: "
+            "[TaskInitializeSdk] AppLovin SDK 13.6.4 initialization succeeded"
+        )
+        facebook_line = (
+            "Sep 18 16:54:49 iPhone--11--pro PixelArt(AppLovinSDK)[1871] <Notice>: "
+            "[AppLovinSdk] DEBUG [ALHealthEventsReporter] Reporting signal_collection_success "
+            "with extra parameters {\n"
+            "    \"adapter_version\" = \"6.22.0.3\";\n"
+            "    \"network_name\" = \"FACEBOOK_NETWORK\";\n"
+            "    \"adapter_class\" = \"com.applovin.mediation.adapters.FacebookMediationAdapter\";\n"
+            "}"
+        )
+        voodoo_line = (
+            "Sep 18 16:54:50 iPhone--11--pro PixelArt(AppLovinSDK)[1871] <Notice>: "
+            "[AppLovinSdk] DEBUG [ALHealthEventsReporter] Reporting signal_collection_success "
+            "with extra parameters { \"adapter_version\" = \"3.17.1.1\"; "
+            "\"network_name\" = \"VOODOO_NETWORK\"; }"
+        )
+        line_line = (
+            "Sep 18 16:54:51 iPhone--11--pro PixelArt(AppLovinSDK)[1871] <Notice>: "
+            "[AppLovinSdk] DEBUG [ALHealthEventsReporter] Reporting signal_collection_success "
+            "with extra parameters { \"adapter_version\" = \"3.1.1.1\"; "
+            "\"network_name\" = \"LINE_NETWORK\"; }"
+        )
+        original_emit = lc.socketio.emit
+        lc.socketio.emit = lambda *_args, **_kwargs: None
+        try:
+            lc._process_sdk_check_line(core_line, "ios-device")
+            lc._process_sdk_check_line(facebook_line, "ios-device")
+            lc._process_sdk_check_line(voodoo_line, "ios-device")
+            lc._process_sdk_check_line(line_line, "ios-device")
+        finally:
+            lc.socketio.emit = original_emit
+
+        core_key = lc._normalize_sdk_network_name("MAX / AppLovin - MAX")
+        _assert_equal(
+            lc.sdk_check_runtime_state["ios-device"][core_key].get("sdk_version"),
+            "13.6.4",
+            "iOS MAX core SDK version was not parsed",
+        )
+        facebook_key = lc._normalize_sdk_network_name("Meta Audience Network - MAX")
+        _assert_equal(
+            lc.sdk_check_runtime_state["ios-device"][facebook_key].get("adapter_version"),
+            "6.22.0.3",
+            "iOS MAX adapter_version/network_name metadata was not parsed",
+        )
+        _assert_equal(
+            lc.sdk_check_runtime_state["ios-device"][facebook_key].get("observed_network_name"),
+            "FACEBOOK_NETWORK",
+            "iOS MAX network_name was not retained",
+        )
+        voodoo_key = lc._normalize_sdk_network_name("Voodoo - MAX")
+        _assert_equal(
+            lc.sdk_check_runtime_state["ios-device"][voodoo_key].get("adapter_version"),
+            "3.17.1.1",
+            "Voodoo MAX network alias was not parsed on iOS",
+        )
+        line_key = lc._normalize_sdk_network_name("LINE Ads/FiveAd - MAX")
+        _assert_equal(
+            lc.sdk_check_runtime_state["ios-device"][line_key].get("adapter_version"),
+            "3.1.1.1",
+            "LINE Ads/FiveAd MAX network alias was not parsed on iOS",
+        )
+    finally:
+        lc.active_platform = original_platform
+        lc.connected_devices_info = original_devices
+        lc.sdk_check_active = original_sdk_active
+        lc.sdk_check_search_list[:] = original_search_list
+        lc.sdk_check_expected_map = original_expected_map
+        lc.sdk_check_expected_order = original_expected_order
+        lc.sdk_check_runtime_state = original_runtime_state
+        lc.sdk_check_current_network = original_current_network
+        lc.socketio.emit = original_emit
+
+
+def test_ios_package_log_keeps_full_message() -> None:
+    original_platform = lc.active_platform
+    original_target_package = lc.target_package_name
+    original_paused = lc.is_paused
+    original_cache = list(lc.package_log_cache)
+    try:
+        lc.active_platform = "ios"
+        lc.target_package_name = "PixelArt"
+        lc.is_paused = False
+        lc.package_log_cache.clear()
+        raw_line = (
+            "Sep 18 16:54:49 iPhone-11-pro PixelArt(AppLovinSDK)[2014] <Notice>: "
+            "[AppLovinSdk] DEBUG [ALHealthEventsReporter] Reporting signal_collection_success "
+            "with extra parameters {\n"
+            "    \"ad_format\" = BANNER;\n"
+            "    \"adapter_version\" = \"6.22.0.3\";\n"
+            "    \"network_name\" = \"FACEBOOK_NETWORK\";\n"
+            "}"
+        )
+        _assert(lc.IOS_LOG_RECORD_START_PATTERN.match(raw_line) is not None, "iOS multiline record start was not recognized")
+        lc._process_ios_log_record(raw_line, "ios-device")
+        _assert_equal(len(lc.package_log_cache), 1, "iOS package log line was not recorded")
+        row = lc.package_log_cache[-1]
+        _assert_equal(row.get("log"), raw_line, "iOS package log raw message was truncated")
+        _assert("network_name" in row.get("message", ""), "iOS package log message lost the metadata payload")
+
+        source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+        _assert(
+            ".message-cell { white-space: pre-wrap;" in source_text,
+            "live Package Log message cells must wrap instead of clipping long iOS lines",
+        )
+        _assert(
+            'const fullLogText = l.log || msgText;' in source_text,
+            "live Package Log rows must retain the complete raw log for inspection",
+        )
+    finally:
+        lc.active_platform = original_platform
+        lc.target_package_name = original_target_package
+        lc.is_paused = original_paused
+        lc.package_log_cache.clear()
+        lc.package_log_cache.extend(original_cache)
+
+
 def test_sdk_check_preset_contract() -> None:
     presets = lc._load_sdk_check_presets()
     _assert("C-192-Android" in presets, "C-192 Android SDK preset is missing")
@@ -716,7 +863,7 @@ def test_sdk_check_preset_contract() -> None:
         "IronSource\t9.6.0\t9.6.0",
         "AppLovin\t5.9.0\t13.6.4",
         "BidMachine\t5.8.0\t3.8.0",
-        "Bigo Ads\t5.12.0\t6.0.1",
+        "Bigo Ads\t5.13.0\t6.1.0",
         "Chartboost\t5.9.0\t9.14.0",
         "Digital Turbine (fyber)\t5.10.0\t8.4.7",
         "Google (AdMob and Ad Manager)\t5.9.0\t25.4.0",
@@ -733,7 +880,7 @@ def test_sdk_check_preset_contract() -> None:
         "Pangle\t5.23.0\t8.3.0.3",
         "PubMatic (OpenWrap)\t5.10.0\t5.4.0",
         "SuperAwesome\t5.6.0\t10.3.2",
-        "UnityAds\t5.12.0\t4.20.0",
+        "UnityAds\t5.13.0\t4.20.1",
         "Verve / Pubnative\t5.8.0\t3.9.2",
         "Voodoo\t5.9.0\t4.29.3",
         "Yandex\t5.14.0\t8.4.0",
@@ -741,7 +888,7 @@ def test_sdk_check_preset_contract() -> None:
         "LevelPlay / ironSource - MAX\t9.6.0.0.0",
         "MAX / AppLovin - MAX\t\t13.6.4",
         "BidMachine - MAX\t3.8.0.0",
-        "Bigo Ads - MAX\t6.0.1.0",
+        "Bigo Ads - MAX\t6.1.0.0",
         "Chartboost - MAX\t9.14.0.0",
         "Digital Turbine (fyber) - MAX\t8.4.7.0",
         "Google (AdMob and Ad Manager) - MAX\t25.4.0.0",
@@ -754,12 +901,12 @@ def test_sdk_check_preset_contract() -> None:
         "Ogury - MAX\t6.3.1.0",
         "Pangle (Tiktok) - MAX\t8.3.0.3.0",
         "PubMatic (OpenWrap) - MAX\t5.4.0.0",
-        "UnityAds - MAX\t4.20.0.0",
+        "UnityAds - MAX\t4.20.1.0",
         "Verve / Pubnative - MAX\t3.9.2.0",
         "Voodoo - MAX\t4.29.3.1",
         "Yandex - MAX\t8.4.0.0",
         "YSO - MAX\t1.3.8.0",
-        "Adverty\t5.3.0",
+        "Adverty\t5.2.9",
         "Gadsme\t1.12.6",
         "AudioMob\t10.2.3",
         "Adjust\t\t5.8.0",
@@ -772,6 +919,74 @@ def test_sdk_check_preset_contract() -> None:
     for line in c192_lines[1:]:
         parsed = lc._parse_sdk_expected_line(line)
         _assert(parsed is not None, f"C-192 Android entry cannot be parsed: {line}")
+    c192_ios_lines = presets["C-192-iOS"].get("lines") or []
+    expected_c192_ios_lines = [
+        "Ads Network\tAdapter\tNative",
+        "LevelPlay / ironSource\t9.6.0.0\t9.6.0",
+        "MAX / AppLovin\t\t13.6.4",
+        "BidMachine\t\t3.8.0",
+        "Bigo Ads\t5.10.0.0\t5.3.0",
+        "Chartboost\t5.7.0.0\t9.14.0",
+        "Digital Turbine (fyber)\t5.12.0.0\t8.4.10",
+        "Google (AdMob and Ad Manager)\t5.14.0.0\t13.9.0",
+        "HyprMX\t5.4.0.0\t6.4.6",
+        "InMobi\t5.9.0.0\t11.4.1",
+        "LINE Ads/FiveAd\t5.8.0.0\t3.1.1",
+        "Liftoff Monetization\t\t7.7.7",
+        "Meta Audience Network\t5.4.0.0\t6.22.0",
+        "Mintegral\t5.20.0.0\t8.1.7",
+        "Mobilefuse\t5.5.0.0\t1.12.0",
+        "Moloco\t5.18.0.0\t4.10.0",
+        "myTarget (VK Ads)\t5.13.0.0\t5.46.0",
+        "Ogury\t5.8.0.0\t5.3.0",
+        "Pangle\t5.34.0.0\t8.3.0.6",
+        "PubMatic (OpenWrap)\t5.10.0.0\t5.4.0",
+        "SuperAwesome\t5.1.0.0\t9.4.0",
+        "UnityAds\t5.12.0.0\t4.20.1",
+        "Verve / Pubnative\t5.5.0.0\t3.8.1",
+        "Yandex\t5.14.0.0\t8.5.0",
+        "YSO\t5.2.0.0\t1.2.1",
+        "ironSource - MAX\t9.6.0.0.1",
+        "MAX / AppLovin - MAX\t\t13.6.4",
+        "BidMachine - MAX\t3.8.0.0.1",
+        "Bigo Ads - MAX\t5.3.0.0",
+        "Chartboost - MAX\t9.14.0.1",
+        "Digital Turbine (fyber) - MAX\t8.4.10.1",
+        "Google (AdMob and Ad Manager) - MAX\t13.9.0.3",
+        "InMobi - MAX\t11.4.1.3",
+        "LINE Ads/FiveAd - MAX\t3.1.1.1",
+        "Liftoff Monetization - MAX\t7.7.7.1",
+        "Meta Audience Network - MAX\t6.22.0.3",
+        "Mintegral - MAX\t8.1.7.0.1",
+        "Mobilefuse - MAX\t1.12.0.1",
+        "Moloco - MAX\t4.10.0.1",
+        "Ogury - MAX\t5.3.0.1",
+        "Pangle - MAX\t8.3.0.6.1",
+        "PubMatic (OpenWrap) - MAX\t5.4.0.1",
+        "UnityAds - MAX\t4.20.1.0",
+        "Verve / Pubnative - MAX\t3.8.1.0",
+        "Voodoo - MAX\t3.17.1.1",
+        "Yandex - MAX\t8.5.0.1",
+        "YSO - MAX\t1.2.1.0",
+        "Ascendx - MAX\t1.9.0",
+        "Yeahmobi/ Maticoo - MAX\t2.3.0",
+        "TaurusX - MAX\t1.19.0",
+        "Prado - MAX\t2.0.1",
+        "Adverty\t5.2.9",
+        "Gadsme\t1.12.6",
+        "AudioMob\t10.2.3",
+        "Adjust\t5.8.0",
+        "Facebook SDK\t18.1.0\t18.1.0",
+        "Firebase Analytics\t\t12.18.0",
+        "Firebase Cloud Messaging\t\t12.18.0",
+        "Firebase Crashlytics\t\t12.18.0",
+    ]
+    _assert("C-192-iOS" in presets, "C-192 iOS SDK preset is missing")
+    _assert_equal(c192_ios_lines, expected_c192_ios_lines, "C-192 iOS SDK preset does not match the requested list")
+    _assert_equal(presets["C-192-iOS"].get("platform"), "ios", "C-192 iOS preset platform changed")
+    for line in c192_ios_lines[1:]:
+        parsed = lc._parse_sdk_expected_line(line)
+        _assert(parsed is not None, f"C-192 iOS entry cannot be parsed: {line}")
     ios_preset = presets["C-190-iOS"]
     _assert_equal(ios_preset.get("platform"), "ios", "C-190 iOS preset platform changed")
     _assert_equal(ios_preset.get("lines"), [], "C-190 iOS preset must remain empty")
@@ -2675,6 +2890,8 @@ TESTS: List[Callable[[], None]] = [
     test_sdk_exact_contracts,
     test_cloudx_sdk_adapter_metadata,
     test_max_sdk_logs,
+    test_ios_max_sdk_logs,
+    test_ios_package_log_keeps_full_message,
     test_sdk_check_preset_contract,
     test_rendered_sdk_preset_javascript_contract,
     test_default_ad_event_contract,
