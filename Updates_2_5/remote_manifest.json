@@ -91,7 +91,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/apk_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/apk_check_presets.json"
       ],
-      "sha256": "833e184bb781a5ec2ef94da923bf5432526c6fef2f77349d522c4b35f5c4cd14"
+      "sha256": "fd75de835252ab04f8df5b4082089c359e35b39667ca68c5303136b82b152e3a"
     },
     {
       "path": "services_checker/gradle_check_presets.json",
