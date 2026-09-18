@@ -1815,8 +1815,18 @@ def _normalize_ios_log_line(raw_line, device_id):
     }
 
 
+IOS_LOG_TIMESTAMP_PATTERN = (
+    r'(?:'
+    r'[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?'
+    r'|\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?'
+    r'|\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?'
+    r')'
+)
 IOS_LOG_RECORD_START_PATTERN = re.compile(
-    r'^[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?\s+',
+    rf'^{IOS_LOG_TIMESTAMP_PATTERN}\s+',
+)
+IOS_LOG_TIMESTAMP_CAPTURE_PATTERN = re.compile(
+    rf'^(?P<timestamp>{IOS_LOG_TIMESTAMP_PATTERN})\s+',
 )
 
 
@@ -3746,7 +3756,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(57)</title>
+    <title>Event Inspector v2.5.0(58)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -3828,7 +3838,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(57)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(58)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -9036,7 +9046,10 @@ def ios_log_reader(device_id):
                 # timestamped record so SDK fields are parsed together.
                 pending_record += "\n" + line
             else:
-                pending_record = line
+                # Keep the legacy line-by-line behavior for preambles or
+                # unexpected syslog formats. A malformed timestamp must not
+                # stall every iOS tab behind one never-ending buffer.
+                _process_ios_log_record(line, device_id)
         if pending_record and active_platform == "ios":
             _process_ios_log_record(pending_record, device_id)
     except Exception as e:
@@ -9190,7 +9203,7 @@ def process_ios_package_log_line(log_obj):
 
     time_str = ""
     time_display = ""
-    match = re.match(r'^([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})', raw_log.strip())
+    match = IOS_LOG_TIMESTAMP_CAPTURE_PATTERN.match(raw_log.strip())
     if match:
         time_str = match.group(1)
         time_display = time_str.split()[-1]
@@ -9203,9 +9216,10 @@ def process_ios_package_log_line(log_obj):
     tag = log_obj.get("tag", "")
     message = log_obj.get("message", raw_log).strip()
     ios_process_match = re.match(
-        r'^[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\S+\s+'
+        rf'^{IOS_LOG_TIMESTAMP_PATTERN}\s+\S+\s+'
         r'([^\s(\[]+)(?:\([^)]*\))?\[\d+\]\s+<[^>]+>:\s*(.*)$',
-        raw_log.strip()
+        raw_log.strip(),
+        re.DOTALL,
     )
     if ios_process_match:
         tag = ios_process_match.group(1).strip()

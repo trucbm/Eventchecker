@@ -40,8 +40,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-04-1-2.5.0-57"
-CURRENT_RELEASE_BUILD = 57
+CURRENT_RELEASE_VERSION = "2026-09-04-1-2.5.0-58"
+CURRENT_RELEASE_BUILD = 58
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -852,6 +852,25 @@ def test_ios_package_log_keeps_full_message() -> None:
         row = lc.package_log_cache[-1]
         _assert_equal(row.get("log"), raw_line, "iOS package log raw message was truncated")
         _assert("network_name" in row.get("message", ""), "iOS package log message lost the metadata payload")
+
+        iso_raw_line = raw_line.replace(
+            "Sep 18 16:54:49",
+            "2026-09-18 16:54:49.123456+0700",
+        )
+        _assert(
+            lc.IOS_LOG_RECORD_START_PATTERN.match(iso_raw_line) is not None,
+            "tidevice ISO iOS record start was not recognized",
+        )
+        lc.package_log_cache.clear()
+        lc._process_ios_log_record(iso_raw_line, "ios-device")
+        _assert_equal(len(lc.package_log_cache), 1, "ISO iOS package log line was not recorded")
+        iso_row = lc.package_log_cache[-1]
+        _assert_equal(
+            iso_row.get("time"),
+            "2026-09-18 16:54:49.123456+0700",
+            "ISO iOS package log timestamp was not parsed",
+        )
+        _assert_equal(iso_row.get("tag"), "PixelArt", "ISO iOS package log process tag was not parsed")
 
         source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
         _assert(
