@@ -757,6 +757,18 @@ def test_ios_max_sdk_logs() -> None:
             "with extra parameters { \"adapter_version\" = \"3.1.1.1\"; "
             "\"network_name\" = \"LINE_NETWORK\"; }"
         )
+        yandex_line = (
+            "Sep 18 17:10:59 iPhone-11-pro PixelArt(AppLovinSDK)[2014] <Notice>: "
+            "[AppLovinSdk] DEBUG [ALHealthEventsReporter] Reporting signal_collection_success "
+            "with extra parameters {\n"
+            "    \"ad_format\" = BANNER;\n"
+            "    \"ad_unit_id\" = 4ffa27b3e6066b41;\n"
+            "    \"adapter_class\" = ALYandexMediationAdapter;\n"
+            "    \"adapter_version\" = \"8.5.0.1\";\n"
+            "    \"duration_ms\" = 79;\n"
+            "    \"network_name\" = \"YANDEX_BIDDING\";\n"
+            "}"
+        )
         original_emit = lc.socketio.emit
         lc.socketio.emit = lambda *_args, **_kwargs: None
         try:
@@ -764,6 +776,7 @@ def test_ios_max_sdk_logs() -> None:
             lc._process_sdk_check_line(facebook_line, "ios-device")
             lc._process_sdk_check_line(voodoo_line, "ios-device")
             lc._process_sdk_check_line(line_line, "ios-device")
+            lc._process_sdk_check_line(yandex_line, "ios-device")
         finally:
             lc.socketio.emit = original_emit
 
@@ -795,6 +808,12 @@ def test_ios_max_sdk_logs() -> None:
             lc.sdk_check_runtime_state["ios-device"][line_key].get("adapter_version"),
             "3.1.1.1",
             "LINE Ads/FiveAd MAX network alias was not parsed on iOS",
+        )
+        yandex_key = lc._normalize_sdk_network_name("Yandex - MAX")
+        _assert_equal(
+            lc.sdk_check_runtime_state["ios-device"][yandex_key].get("adapter_version"),
+            "8.5.0.1",
+            "multiline YANDEX_BIDDING MAX metadata was not parsed on iOS",
         )
     finally:
         lc.active_platform = original_platform
