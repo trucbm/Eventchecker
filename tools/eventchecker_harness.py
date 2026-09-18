@@ -40,8 +40,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-04-1-2.5.0-56"
-CURRENT_RELEASE_BUILD = 56
+CURRENT_RELEASE_VERSION = "2026-09-04-1-2.5.0-57"
+CURRENT_RELEASE_BUILD = 57
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
