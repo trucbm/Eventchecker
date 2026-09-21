@@ -43,6 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CURRENT_RELEASE_VERSION = "2026-09-04-1-2.5.0-60"
 CURRENT_RELEASE_BUILD = 60
 ROLLBACK_SOURCE_BUILD = 56
+RELEASE_SOURCE_BUILD = CURRENT_RELEASE_BUILD
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -1318,8 +1319,8 @@ def test_sdk_failed_groups_sort_first() -> None:
 def test_release_build_marker() -> None:
     text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
     _assert(
-        f"v2.5.0({ROLLBACK_SOURCE_BUILD})" in text,
-        f"Log_checker.py must be prepared for v2.5.0({ROLLBACK_SOURCE_BUILD})",
+        f"v2.5.0({RELEASE_SOURCE_BUILD})" in text,
+        f"Log_checker.py must be prepared for v2.5.0({RELEASE_SOURCE_BUILD})",
     )
 
 
@@ -1714,7 +1715,7 @@ def test_release_payload_sync() -> None:
 
     markers = {
         "release_badge": r"v2\.5\.0\((\d+)\)",
-        "html_title": rf"<title>Event Inspector v2\.5\.0\({ROLLBACK_SOURCE_BUILD}\)</title>",
+        "html_title": rf"<title>Event Inspector v2\.5\.0\({RELEASE_SOURCE_BUILD}\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
         "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
@@ -2351,7 +2352,7 @@ def test_update_flow_canonical_v25() -> None:
             )
             _assert("Default Ad Events" in updated_source, "prepared payload does not contain Default Ad Events")
             _assert(
-                f"v2.5.0({ROLLBACK_SOURCE_BUILD})" in updated_source,
+                f"v2.5.0({RELEASE_SOURCE_BUILD})" in updated_source,
                 "prepared payload carries the wrong UI build marker",
             )
 
@@ -2569,7 +2570,7 @@ def test_windows_release_build_version_contract() -> None:
     _assert("-PrintVersion" in installer_script, "Windows installer must derive its version from the source")
     _assert("/DMyAppVersion=%EVENTINSPECTOR_RELEASE_VERSION%" in installer_script, "Inno Setup must receive the source version")
     _assert(
-        f'#define MyAppVersion "2.5.0.{ROLLBACK_SOURCE_BUILD}"' in iss_script,
+        f'#define MyAppVersion "2.5.0.{RELEASE_SOURCE_BUILD}"' in iss_script,
         "Inno Setup fallback must match the current v2.5 release",
     )
 
