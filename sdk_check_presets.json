@@ -102,7 +102,6 @@
       "Liftoff Monetization - MAX\t7.7.7.1",
       "Meta Audience Network - MAX\t6.22.0.3",
       "Mintegral - MAX\t8.1.7.0.1",
-      "Mobilefuse - MAX\t1.12.0.1",
       "Moloco - MAX\t4.10.0.1",
       "Ogury - MAX\t5.3.0.1",
       "Pangle - MAX\t8.3.0.6.1",
@@ -112,10 +111,6 @@
       "Voodoo - MAX\t3.17.1.1",
       "Yandex - MAX\t8.5.0.1",
       "YSO - MAX\t1.2.1.0",
-      "Ascendx - MAX\t1.9.0",
-      "Yeahmobi/ Maticoo - MAX\t2.3.0",
-      "TaurusX - MAX\t1.19.0",
-      "Prado - MAX\t2.0.1",
       "Adverty\t5.2.9",
       "Gadsme\t1.12.6",
       "AudioMob\t10.2.3",
@@ -126,10 +121,7 @@
       "Firebase Crashlytics\t\t12.18.0"
     ]
   },
-  "C-190-iOS": {
-    "platform": "ios",
-    "lines": []
-  },
+
   "C-180-Android": {
     "platform": "android",
     "lines": [
