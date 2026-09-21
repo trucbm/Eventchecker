@@ -968,7 +968,6 @@ def test_sdk_base_name_matching() -> None:
 def test_sdk_check_preset_contract() -> None:
     presets = lc._load_sdk_check_presets()
     _assert("C-191-Android" in presets, "C-191 Android SDK preset is missing")
-    _assert("C-190-iOS" in presets, "C-190 iOS SDK preset is missing")
     _assert("C-180-Android" in presets, "C-180 Android SDK preset is missing")
     _assert("C-180-iOS" in presets, "C-180 iOS SDK preset is missing")
     c191_lines = presets["C-191-Android"].get("lines") or []
@@ -1041,7 +1040,7 @@ def test_sdk_check_preset_contract() -> None:
     c192_ios = presets.get("C-192-iOS") or {}
     c192_ios_lines = c192_ios.get("lines") or []
     _assert_equal(c192_ios.get("platform"), "ios", "C-192 iOS preset platform changed")
-    _assert_equal(len(c192_ios_lines), 59, "C-192 iOS preset line count changed")
+    _assert_equal(len(c192_ios_lines), 54, "C-192 iOS preset line count changed")
     _assert_equal(c192_ios_lines[0], "Ads Network\tAdapter\tNative", "C-192 iOS preset header changed")
     for required_line in (
         "MAX / AppLovin\t\t13.6.4",
@@ -1057,9 +1056,6 @@ def test_sdk_check_preset_contract() -> None:
         parsed = lc._parse_sdk_expected_line(line)
         _assert(parsed is not None, f"C-192 iOS entry cannot be parsed: {line}")
 
-    ios_preset = presets["C-190-iOS"]
-    _assert_equal(ios_preset.get("platform"), "ios", "C-190 iOS preset platform changed")
-    _assert_equal(ios_preset.get("lines"), [], "C-190 iOS preset must remain empty")
     c180_ios_preset = presets["C-180-iOS"]
     _assert_equal(c180_ios_preset.get("platform"), "ios", "C-180 iOS preset platform changed")
     c180_ios_lines = c180_ios_preset.get("lines") or []
