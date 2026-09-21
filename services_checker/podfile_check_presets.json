@@ -16,8 +16,26 @@
       "Adjust/AdjustGoogleOd\t5.6.2"
     ]
   },
-  "C-190-iOS": {
+  "C-192-iOS": {
     "platform": "ios",
-    "lines": []
+    "lines": [
+      "Kidoz Adapter\tSkip",
+      "Kidoz SDK\tSkip",
+      "Yeahmobi/ Maticoo Adapter\t2.3.1",
+      "Yeahmobi/ Maticoo SDK\t2.3.1",
+      "TaurusX SDK\t1.19.0",
+      "TaurusX Adapter\t1.19.0",
+      "Odeeo SDK\t3.10.0",
+      "AppMetrica Analytics\t6.6.0",
+      "Google UMP SDK\t3.1.0",
+      "Ascendx adapter\t0.11.0",
+      "Voodoo Adapter\t5.5.0.0",
+      "Adjust/AdjustGoogleOd\t5.8.0",
+      "Mobilefuse - MAX\t1.12.0.1",
+      "Ascendx - MAX\t1.9.0",
+      "Yeahmobi/ Maticoo - MAX\t2.3.0",
+      "TaurusX - MAX\t1.19.0",
+      "Prado - MAX\t2.0.1"
+    ]
   }
 }
