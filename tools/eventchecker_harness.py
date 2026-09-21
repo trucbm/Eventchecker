@@ -40,8 +40,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-04-1-2.5.0-60"
-CURRENT_RELEASE_BUILD = 60
+CURRENT_RELEASE_VERSION = "2026-09-21-1-2.5.0-61"
+CURRENT_RELEASE_BUILD = 61
 ROLLBACK_SOURCE_BUILD = 56
 RELEASE_SOURCE_BUILD = CURRENT_RELEASE_BUILD
 if str(ROOT) not in sys.path:
@@ -71,6 +71,10 @@ def _reset_runtime_state() -> None:
     lc.sdk_check_search_list.clear()
     lc.sdk_check_current_network.clear()
     lc.is_paused = False
+    lc.target_package_name = ""
+    lc.package_log_cache.clear()
+    lc.active_ios_package_log_buffers.clear()
+    lc.active_ios_package_log_frame_buffers.clear()
 
 
 def _assert(condition: bool, message: str) -> None:
@@ -769,8 +773,13 @@ def test_ios_max_sdk_search_only() -> None:
 
         source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
         _assert(
-            "log_obj = _normalize_ios_log_line(raw_line, device_id)" in source_text,
-            "MAX SDK change must keep the legacy iOS line reader",
+            "process_ios_package_log_stream_chunk(device_id, raw_chunk)" in source_text,
+            "iOS reader must keep tidevice framing isolated to Package Log",
+        )
+        _assert(
+            "if not uses_nul_framing:" in source_text
+            and "process_ios_package_log_stream_line(device_id, log_obj)" in source_text,
+            "iOS reader must keep the legacy line-based fallback",
         )
         _assert("pending_record" not in source_text, "MAX SDK change must not add a shared iOS log buffer")
     finally:
@@ -784,6 +793,112 @@ def test_ios_max_sdk_search_only() -> None:
         lc.sdk_max_ios_pending_lines = original_pending
         lc.sdk_max_ios_core_pending_lines = original_core_pending
         lc.socketio.emit = original_emit
+
+
+def test_ios_package_log_preserves_multiline_records() -> None:
+    """Package Log keeps iOS continuation lines while other tabs stay line-based."""
+    original_platform = lc.active_platform
+    original_target = lc.target_package_name
+    original_paused = lc.is_paused
+    original_cache = list(lc.package_log_cache)
+    original_buffers = dict(lc.active_ios_package_log_buffers)
+    try:
+        lc.active_platform = "ios"
+        lc.target_package_name = "PixelArt"
+        lc.is_paused = False
+        lc.package_log_cache.clear()
+        lc.active_ios_package_log_buffers.clear()
+
+        record_lines = [
+            (
+                "Sep 18 17:10:59 iPhone-11-pro PixelArt(AppLovinSDK)[2014] <Notice>: "
+                "[AppLovinSdk] DEBUG [ALHealthEventsReporter] Reporting signal_collection_success "
+                "with extra parameters {"
+            ),
+            '    "adapter_version" = "8.5.0.1";',
+            '    "network_name" = "YANDEX_BIDDING";',
+            "}",
+        ]
+        for line in record_lines:
+            log_obj = lc._normalize_ios_log_line(line, "ios-device")
+            lc.process_ios_package_log_stream_line("ios-device", log_obj)
+
+        _assert_equal(len(lc.package_log_cache), 0, "iOS package record should wait for its record boundary")
+
+        next_record = (
+            "Sep 18 17:11:00 iPhone-11-pro PixelArt(AppLovinSDK)[2014] <Notice>: "
+            "next record"
+        )
+        lc.process_ios_package_log_stream_line(
+            "ios-device",
+            lc._normalize_ios_log_line(next_record, "ios-device"),
+        )
+        _assert_equal(len(lc.package_log_cache), 1, "completed iOS package record was not emitted")
+        row = lc.package_log_cache[-1]
+        _assert('"adapter_version" = "8.5.0.1";' in row["log"], "adapter_version continuation was dropped")
+        _assert('"network_name" = "YANDEX_BIDDING";' in row["message"], "network_name continuation was dropped")
+        _assert_equal(row["tag"], "PixelArt", "iOS package process tag was not preserved")
+
+        lc._flush_ios_package_log_buffer("ios-device")
+        _assert_equal(len(lc.package_log_cache), 2, "last iOS package record was not flushed")
+    finally:
+        lc.active_platform = original_platform
+        lc.target_package_name = original_target
+        lc.is_paused = original_paused
+        lc.package_log_cache.clear()
+        lc.package_log_cache.extend(original_cache)
+        lc.active_ios_package_log_buffers.clear()
+        lc.active_ios_package_log_buffers.update(original_buffers)
+
+
+def test_ios_package_log_tidevice_nul_framing() -> None:
+    """Package Log consumes tidevice's NUL-delimited multiline records intact."""
+    original_platform = lc.active_platform
+    original_target = lc.target_package_name
+    original_paused = lc.is_paused
+    original_cache = list(lc.package_log_cache)
+    original_buffers = dict(lc.active_ios_package_log_frame_buffers)
+    try:
+        lc.active_platform = "ios"
+        lc.target_package_name = "PixelArt"
+        lc.is_paused = False
+        lc.package_log_cache.clear()
+        lc.active_ios_package_log_frame_buffers.clear()
+
+        first_record = (
+            "Sep 18 17:10:59 iPhone-11-pro PixelArt(AppLovinSDK)[2014] <Notice>: "
+            "[AppLovinSdk] DEBUG [ALHealthEventsReporter] Reporting signal_collection_success "
+            "with extra parameters {\n"
+            '    "adapter_version" = "8.5.0.1";\n'
+            '    "network_name" = "YANDEX_BIDDING";\n'
+            "}"
+        )
+        second_record = (
+            "Sep 18 17:11:00 iPhone-11-pro PixelArt(AppLovinSDK)[2014] <Notice>: "
+            "next record"
+        )
+
+        # The first record is completed by NUL; the second stays buffered until
+        # the next record boundary or reader shutdown.
+        lc.process_ios_package_log_stream_chunk(
+            "ios-device",
+            first_record + "\x00" + second_record,
+        )
+        _assert_equal(len(lc.package_log_cache), 1, "NUL-framed iOS package record was not emitted")
+        row = lc.package_log_cache[-1]
+        _assert('"adapter_version" = "8.5.0.1";' in row["log"], "NUL-framed adapter_version was dropped")
+        _assert('"network_name" = "YANDEX_BIDDING";' in row["message"], "NUL-framed network_name was dropped")
+
+        lc._flush_ios_package_log_frame_buffer("ios-device")
+        _assert_equal(len(lc.package_log_cache), 2, "NUL-framed final package record was not flushed")
+    finally:
+        lc.active_platform = original_platform
+        lc.target_package_name = original_target
+        lc.is_paused = original_paused
+        lc.package_log_cache.clear()
+        lc.package_log_cache.extend(original_cache)
+        lc.active_ios_package_log_frame_buffers.clear()
+        lc.active_ios_package_log_frame_buffers.update(original_buffers)
 
 
 def test_sdk_base_name_matching() -> None:
@@ -2843,6 +2958,8 @@ TESTS: List[Callable[[], None]] = [
     test_cloudx_sdk_adapter_metadata,
     test_max_sdk_logs,
     test_ios_max_sdk_search_only,
+    test_ios_package_log_preserves_multiline_records,
+    test_ios_package_log_tidevice_nul_framing,
     test_sdk_base_name_matching,
     test_sdk_check_preset_contract,
     test_rendered_sdk_preset_javascript_contract,

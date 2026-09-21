@@ -1132,6 +1132,8 @@ PACKAGE_LOG_UI_MAX_ROWS_IOS = 12000
 target_package_name = ""
 active_package_pids = {}
 active_logcat_processes = {}
+active_ios_package_log_buffers = {}
+active_ios_package_log_frame_buffers = {}
 active_package_log_session_id = None
 package_log_db_queue = Queue()
 
@@ -1831,6 +1833,21 @@ def _normalize_ios_log_line(raw_line, device_id):
         "raw_log": raw,
         "platform": "ios",
     }
+
+
+IOS_LOG_TIMESTAMP_PATTERN = (
+    r'(?:'
+    r'[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?'
+    r'|\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?'
+    r'|\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?'
+    r')'
+)
+IOS_LOG_RECORD_START_PATTERN = re.compile(
+    rf'^{IOS_LOG_TIMESTAMP_PATTERN}\s+',
+)
+IOS_LOG_TIMESTAMP_CAPTURE_PATTERN = re.compile(
+    rf'^(?P<timestamp>{IOS_LOG_TIMESTAMP_PATTERN})\s+',
+)
 
 def _normalize_sdk_search_text(text):
     if text is None:
@@ -3810,13 +3827,13 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(60)</title>
+    <title>Event Inspector v2.5.0(61)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
         body { font-family: 'Inter', sans-serif; }
         .log-cell { max-width: 500px; word-wrap: break-word; font-family: monospace; font-size: 0.75rem; color: #6b7280; }
-        .message-cell { white-space: nowrap; }
+        .message-cell { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
         #packageLogTable { table-layout: fixed; width: 100%; }
         #packageLogTable col.col-time { width: 110px; }
         #packageLogTable col.col-tag { width: 90px; }
@@ -3892,7 +3909,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(60)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(61)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -9080,29 +9097,45 @@ def ios_log_reader(device_id):
             active_ios_log_last_seen[device_id] = time.time()
             active_ios_log_commands[device_id] = os.path.basename(cmd[0])
 
-        for raw_line in iter(proc.stdout.readline, ''):
-            if not raw_line:
+        uses_nul_framing = os.path.basename(cmd[0]).lower() == "tidevice"
+        for raw_chunk in iter(proc.stdout.readline, ''):
+            if not raw_chunk:
                 break
             with lock:
                 active_ios_log_last_seen[device_id] = time.time()
             if active_platform != "ios":
                 continue
-            log_obj = _normalize_ios_log_line(raw_line, device_id)
-            process_ios_package_log_line(log_obj)
-            process_load_ads_ext_log(log_obj["raw_log"], device_id)
-            process_adrevenue_log(log_obj["raw_log"], device_id)
-            process_price_rotation_log(log_obj["raw_log"], device_id)
-            _process_sdk_check_line(log_obj["raw_log"], device_id)
-            process_callback_and_ad_event_log(log_obj["raw_log"], device_id)
-            event_name, params, json_string = find_and_parse_event(log_obj["raw_log"])
-            if event_name:
-                _record_default_ad_event_hit(event_name, params, device_id)
-                process_event_validator_log(event_name, params, json_string, log_obj["raw_log"], device_id)
-                cache_specific_event_log(event_name, params, json_string, log_obj["raw_log"], device_id)
-                process_callback_and_ad_event_log(log_obj["raw_log"], device_id, event_name, params, json_string)
+            if uses_nul_framing:
+                # tidevice frames complete syslog records with NUL. Keep that
+                # framing for Package Log so multiline payloads stay together,
+                # while the other iOS tabs continue to receive physical lines.
+                process_ios_package_log_stream_chunk(device_id, raw_chunk)
+                logical_lines = raw_chunk.replace("\x00", "\n").splitlines()
+            else:
+                logical_lines = raw_chunk.splitlines()
+
+            for raw_line in logical_lines:
+                if not raw_line:
+                    continue
+                log_obj = _normalize_ios_log_line(raw_line, device_id)
+                if not uses_nul_framing:
+                    process_ios_package_log_stream_line(device_id, log_obj)
+                process_load_ads_ext_log(log_obj["raw_log"], device_id)
+                process_adrevenue_log(log_obj["raw_log"], device_id)
+                process_price_rotation_log(log_obj["raw_log"], device_id)
+                _process_sdk_check_line(log_obj["raw_log"], device_id)
+                process_callback_and_ad_event_log(log_obj["raw_log"], device_id)
+                event_name, params, json_string = find_and_parse_event(log_obj["raw_log"])
+                if event_name:
+                    _record_default_ad_event_hit(event_name, params, device_id)
+                    process_event_validator_log(event_name, params, json_string, log_obj["raw_log"], device_id)
+                    cache_specific_event_log(event_name, params, json_string, log_obj["raw_log"], device_id)
+                    process_callback_and_ad_event_log(log_obj["raw_log"], device_id, event_name, params, json_string)
     except Exception as e:
         print(f"iOS log reader error {device_id}: {e}")
     finally:
+        _flush_ios_package_log_frame_buffer(device_id)
+        _flush_ios_package_log_buffer(device_id)
         with lock:
             active_ios_log_processes.pop(device_id, None)
             active_ios_log_readers.pop(device_id, None)
@@ -9251,9 +9284,9 @@ def process_ios_package_log_line(log_obj):
 
     time_str = ""
     time_display = ""
-    match = re.match(r'^([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})', raw_log.strip())
+    match = IOS_LOG_TIMESTAMP_CAPTURE_PATTERN.match(raw_log.strip())
     if match:
-        time_str = match.group(1)
+        time_str = match.group("timestamp")
         time_display = time_str.split()[-1]
     level = ""
     level_match = re.search(r'<(Error|Fault|Warning|Notice|Debug|Info)>', raw_log, re.IGNORECASE)
@@ -9264,9 +9297,10 @@ def process_ios_package_log_line(log_obj):
     tag = log_obj.get("tag", "")
     message = log_obj.get("message", raw_log).strip()
     ios_process_match = re.match(
-        r'^[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\S+\s+'
+        rf'^{IOS_LOG_TIMESTAMP_PATTERN}\s+\S+\s+'
         r'([^\s(\[]+)(?:\([^)]*\))?\[\d+\]\s+<[^>]+>:\s*(.*)$',
-        raw_log.strip()
+        raw_log.strip(),
+        re.DOTALL,
     )
     if ios_process_match:
         tag = ios_process_match.group(1).strip()
@@ -9281,6 +9315,67 @@ def process_ios_package_log_line(log_obj):
         message,
         is_error
     )
+
+
+def _flush_ios_package_log_buffer(device_id):
+    """Flush one buffered iOS syslog record into Package Log only."""
+    with lock:
+        raw_record = active_ios_package_log_buffers.pop(device_id, "")
+    if not raw_record or active_platform != "ios":
+        return
+    process_ios_package_log_line(_normalize_ios_log_line(raw_record, device_id))
+
+
+def _flush_ios_package_log_frame_buffer(device_id):
+    """Flush one NUL-framed tidevice record into Package Log only."""
+    with lock:
+        raw_record = active_ios_package_log_frame_buffers.pop(device_id, "")
+    if not raw_record or active_platform != "ios":
+        return
+    process_ios_package_log_line(_normalize_ios_log_line(raw_record.strip("\r\n"), device_id))
+
+
+def process_ios_package_log_stream_chunk(device_id, raw_chunk):
+    """Consume tidevice's NUL-framed stream without losing multiline records."""
+    if is_paused or active_platform != "ios":
+        return
+    if not raw_chunk:
+        return
+
+    with lock:
+        buffered = active_ios_package_log_frame_buffers.get(device_id, "")
+        frames = (buffered + raw_chunk).split("\x00")
+        active_ios_package_log_frame_buffers[device_id] = frames.pop()
+
+    for frame in frames:
+        frame = frame.strip("\r\n")
+        if frame:
+            process_ios_package_log_line(_normalize_ios_log_line(frame, device_id))
+
+
+def process_ios_package_log_stream_line(device_id, log_obj):
+    """Keep iOS multiline records intact without changing other iOS tabs."""
+    if is_paused or active_platform != "ios":
+        return
+    raw_line = (log_obj.get("raw_log", "") or "").rstrip("\r\n")
+    if not raw_line:
+        return
+
+    if IOS_LOG_RECORD_START_PATTERN.match(raw_line):
+        _flush_ios_package_log_buffer(device_id)
+        with lock:
+            active_ios_package_log_buffers[device_id] = raw_line
+        return
+
+    with lock:
+        current = active_ios_package_log_buffers.get(device_id)
+        if current is not None:
+            active_ios_package_log_buffers[device_id] = f"{current}\n{raw_line}"
+            return
+
+    # Preserve the old behavior for unstructured/prelude lines that arrive
+    # before the first timestamped syslog record.
+    process_ios_package_log_line(log_obj)
 
 def package_log_consumer(device_id, logcat_process):
     try:
@@ -9449,7 +9544,7 @@ def _reset_runtime_for_platform_switch():
         adrevenue_logs.clear(); adrevenue_log_cache.clear()
         callback_ad_logs.clear(); incomplete_impression_logs.clear(); incomplete_ios_adrevenue_logs.clear(); incomplete_ios_load_ads_ext_logs.clear(); incomplete_adjust_adrevenue_logs.clear()
         price_rotation_logs.clear()
-        package_log_cache.clear(); active_package_pids.clear()
+        package_log_cache.clear(); active_package_pids.clear(); active_ios_package_log_buffers.clear(); active_ios_package_log_frame_buffers.clear()
         installation_id_state.clear()
         for proc in active_ios_log_processes.values():
             try:
@@ -9701,6 +9796,10 @@ def stop_sdk_check():
 def spl(d):
     global target_package_name, active_package_log_session_id
     pid = d.get('package_id', '').strip()
+    for device_id in list(active_ios_package_log_frame_buffers):
+        _flush_ios_package_log_frame_buffer(device_id)
+    for device_id in list(active_ios_package_log_buffers):
+        _flush_ios_package_log_buffer(device_id)
     with lock:
         if active_package_log_session_id:
             _finish_package_log_session(active_package_log_session_id)
@@ -9709,6 +9808,8 @@ def spl(d):
         if pid:
             active_package_log_session_id = _start_package_log_session(pid)
         package_log_cache.clear()
+        active_ios_package_log_buffers.clear()
+        active_ios_package_log_frame_buffers.clear()
         socketio.emit('package_log_cache', [])
     socketio.emit('package_log_cache', [])
 
