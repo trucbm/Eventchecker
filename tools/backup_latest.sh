@@ -3,6 +3,17 @@ set -euo pipefail
 
 BACKUP_TAG="${BACKUP_TAG:-backup-latest}"
 
+# These files are independent data releases. An app-code rollback must never
+# replace them with the versions from the older backup commit.
+PROTECTED_PRESET_PATHS=(
+    "sdk_check_presets.json"
+    "services_checker/apk_check_presets.json"
+    "services_checker/gradle_check_presets.json"
+    "services_checker/gradle_lib_mapping.json"
+    "services_checker/podfile_check_presets.json"
+    "services_checker/manifest_check_presets.json"
+)
+
 usage() {
     cat <<'USAGE'
 Usage:
@@ -12,7 +23,8 @@ Usage:
 
 The repository keeps one managed backup ref: backup-latest.
 `set` moves that ref and therefore replaces the previous backup.
-`revert` is deliberately guarded because it resets the current worktree.
+`revert` is deliberately guarded; it resets app code while preserving the
+protected preset files listed in BACKUP_POLICY.md.
 USAGE
 }
 
@@ -29,6 +41,33 @@ require_clean_worktree() {
         echo "Commit or stash changes before this operation." >&2
         exit 1
     fi
+}
+
+snapshot_protected_presets() {
+    local snapshot_root="$1"
+    local path
+    for path in "${PROTECTED_PRESET_PATHS[@]}"; do
+        if [[ -e "$path" ]]; then
+            mkdir -p "$snapshot_root/$(dirname "$path")"
+            cp -p "$path" "$snapshot_root/$path"
+        else
+            mkdir -p "$snapshot_root/$(dirname "$path")"
+            : > "$snapshot_root/$path.__missing__"
+        fi
+    done
+}
+
+restore_protected_presets() {
+    local snapshot_root="$1"
+    local path
+    for path in "${PROTECTED_PRESET_PATHS[@]}"; do
+        if [[ -f "$snapshot_root/$path.__missing__" ]]; then
+            rm -f -- "$path"
+            continue
+        fi
+        mkdir -p "$(dirname "$path")"
+        cp -p "$snapshot_root/$path" "$path"
+    done
 }
 
 show_backup() {
@@ -69,7 +108,16 @@ revert_to_backup() {
         echo "No managed backup exists: $BACKUP_TAG" >&2
         exit 1
     fi
+    local preset_snapshot
+    preset_snapshot="$(mktemp -d "${TMPDIR:-/tmp}/eventchecker-presets.XXXXXX")"
+    trap 'rm -rf -- "$preset_snapshot"' EXIT
+    snapshot_protected_presets "$preset_snapshot"
     git reset --hard "$commit"
+    restore_protected_presets "$preset_snapshot"
+    trap - EXIT
+    rm -rf -- "$preset_snapshot"
+    echo "Preserved independent preset files:"
+    printf '  %s\n' "${PROTECTED_PRESET_PATHS[@]}"
     echo "Reverted to managed backup: $BACKUP_TAG -> $(git rev-parse --short "$commit")"
 }
 

@@ -1502,6 +1502,26 @@ def test_release_build_marker() -> None:
     )
 
 
+def test_preset_revert_protection_contract() -> None:
+    script = (ROOT / "tools" / "backup_latest.sh").read_text(encoding="utf-8", errors="ignore")
+    policy = (ROOT / "BACKUP_POLICY.md").read_text(encoding="utf-8", errors="ignore")
+    protected_paths = (
+        "sdk_check_presets.json",
+        "services_checker/apk_check_presets.json",
+        "services_checker/gradle_check_presets.json",
+        "services_checker/gradle_lib_mapping.json",
+        "services_checker/podfile_check_presets.json",
+        "services_checker/manifest_check_presets.json",
+    )
+    snapshot_index = script.index("snapshot_protected_presets")
+    reset_index = script.index('git reset --hard "$commit"')
+    restore_index = script.index("restore_protected_presets", reset_index)
+    _assert(snapshot_index < reset_index < restore_index, "preset files must be restored after an app-code revert")
+    for path in protected_paths:
+        _assert(path in script, f"revert protection is missing for {path}")
+        _assert(path in policy, f"preset policy is missing for {path}")
+
+
 def test_rewarded_bidding_filter_contract() -> None:
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
     needle = 'data-message-needle="[Ad,RewardedBidding"'
@@ -3031,6 +3051,7 @@ TESTS: List[Callable[[], None]] = [
     test_installation_id_copy_contract,
     test_sdk_failed_groups_sort_first,
     test_release_build_marker,
+    test_preset_revert_protection_contract,
     test_rewarded_bidding_filter_contract,
     test_price_rotation_exact_parser,
     test_load_ads_provider_contract,
