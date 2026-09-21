@@ -121,7 +121,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/podfile_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/podfile_check_presets.json"
       ],
-      "sha256": "9793f68c44a3f01c1fe03a5f6317ab2b274eac23c533cba4340bd885acd9ed0c"
+      "sha256": "722bd302058ef0641f3545ca9ad3181419475e9a94ca2075ed9f674b73e40196"
     },
     {
       "path": "services_checker/podfile_lib_mapping.json",
