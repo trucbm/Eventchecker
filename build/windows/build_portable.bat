@@ -64,6 +64,7 @@ pyinstaller --noconfirm --clean --windowed --icon assets\app.ico --name "EventIn
   --add-data "services_checker\gradle_check_presets.json;services_checker" ^
   --add-data "services_checker\gradle_lib_mapping.json;services_checker" ^
   --add-data "services_checker\podfile_check_presets.json;services_checker" ^
+  --add-data "services_checker\podfile_lib_mapping.json;services_checker" ^
   --add-data "services_checker\manifest_check_presets.json;services_checker" ^
   --add-data "services_checker\my-key.keystore;services_checker" ^
   desktop_app.py

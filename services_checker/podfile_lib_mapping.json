@@ -1,0 +1,17 @@
+{
+  "Kidoz Adapter": "KidozIronSourceAdapter",
+  "Kidoz SDK": "KidozSDK",
+  "Yeahmobi/ Maticoo Adapter": "ISzMaticooAdapter",
+  "Yeahmobi/ Maticoo SDK": "zMaticoo",
+  "TaurusX SDK": "TaurusxAdsSDK",
+  "TaurusX Adapter": "TaurusxAdsSDK/IronSourceAdapter",
+  "AppMetrica Analytics": "AppMetricaAnalytics",
+  "Google UMP SDK": "GoogleUserMessagingPlatform",
+  "Odeeo SDK": "OdeeoSDK",
+  "Ascendx adapter": "AscendXLevelPlayV9Adapter",
+  "Voodoo Adapter": "IronSourceVoodooAdapter",
+  "Firebase Performance Monitoring": "FirebasePerformance",
+  "AdQuality Adapter": "IronSourceAdQualityUnityBridge",
+  "AdQuality Sdk": "IronSourceAdQualitySDK",
+  "Adjust/AdjustGoogleOd": "Adjust/AdjustGoogleOdm"
+}

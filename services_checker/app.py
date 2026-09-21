@@ -418,35 +418,10 @@ TARGET_METADATA_KEYS_MAP = {
     "io.appmetrica.analytics.plugin_id": "Appmetrica Unity version"
 }
 
-# --- Mapping for Gradle Verification ---
-# The user-facing library-to-artifact mapping lives in
-# ``gradle_lib_mapping.json`` so adding or removing a library is a data
-# refresh, not a Services Checker code release. The bundled JSON remains the
-# offline fallback when GitHub is unavailable.
-
-# --- Mapping for Podfile Verification ---
-# Maps a user-friendly name to the Pod name
-PODFILE_LIB_MAPPING = {
-    "Kidoz Adapter": "KidozIronSourceAdapter",
-    "Kidoz SDK": "KidozSDK",
-    "Yeahmobi/ Maticoo Adapter": "ISzMaticooAdapter",
-    "Yeahmobi/ Maticoo SDK": "zMaticoo",
-    "TaurusX SDK": "TaurusxAdsSDK",
-    "TaurusX Adapter": "TaurusxAdsSDK/IronSourceAdapter",
-    "AppMetrica Analytics": "AppMetricaAnalytics",
-    "Google UMP SDK": "GoogleUserMessagingPlatform",
-    #"Firebase Remote Config": "Firebase/RemoteConfig",
-    "Odeeo SDK": "OdeeoSDK",
-    "Ascendx adapter": "AscendXLevelPlayV9Adapter",
-    "Voodoo Adapter": "IronSourceVoodooAdapter",
-    "Firebase Performance Monitoring":"FirebasePerformance",
-    "AdQuality Adapter": "IronSourceAdQualityUnityBridge",
-    "AdQuality Sdk": "IronSourceAdQualitySDK",
-    "Adjust/AdjustGoogleOd": "Adjust/AdjustGoogleOdm",
-
-
-}
-
+# --- External library mappings ---
+# The user-facing Gradle and Podfile mappings live in JSON files so adding or
+# removing a library is a data refresh, not a Services Checker code release.
+# The bundled JSON files remain the offline fallback when GitHub is unavailable.
 
 # --- Hardcoded Keystore Information ---
 # WARNING: Hardcoding passwords in source code is a security risk.
@@ -1962,6 +1937,7 @@ GRADLE_CHECK_PRESETS_FILENAME = "gradle_check_presets.json"
 PODFILE_CHECK_PRESETS_FILENAME = "podfile_check_presets.json"
 MANIFEST_CHECK_PRESETS_FILENAME = "manifest_check_presets.json"
 GRADLE_LIB_MAPPING_FILENAME = "gradle_lib_mapping.json"
+PODFILE_LIB_MAPPING_FILENAME = "podfile_lib_mapping.json"
 
 # Presets are live data. The Service Checker always refreshes these files when
 # its page starts, and the Reload buttons repeat the same operation. `main` is
@@ -1985,6 +1961,7 @@ SERVICES_CHECKER_PRESET_FILENAMES = (
 SERVICES_CHECKER_REMOTE_DATA_FILENAMES = (
     *SERVICES_CHECKER_PRESET_FILENAMES,
     GRADLE_LIB_MAPPING_FILENAME,
+    PODFILE_LIB_MAPPING_FILENAME,
 )
 
 # Keep the payload returned by the most recent successful Git refresh in
@@ -2117,6 +2094,8 @@ def _fetch_remote_preset(filename, revision=None):
                 raise ValueError("preset_root_must_be_object")
             if filename == GRADLE_LIB_MAPPING_FILENAME and not _normalize_gradle_lib_mapping(decoded):
                 raise ValueError("gradle_mapping_must_contain_group_artifact_entries")
+            if filename == PODFILE_LIB_MAPPING_FILENAME and not _normalize_podfile_lib_mapping(decoded):
+                raise ValueError("podfile_mapping_must_contain_pod_entries")
             return payload, branch
         except Exception as exc:
             last_error = exc
@@ -2299,6 +2278,45 @@ def _load_gradle_lib_mapping():
 
     for _source, payload in payload_candidates:
         mapping = _normalize_gradle_lib_mapping(payload)
+        if mapping:
+            return mapping
+    return {}
+
+
+def _normalize_podfile_lib_mapping(payload):
+    """Return a safe display-name -> CocoaPods name mapping from JSON."""
+    if not isinstance(payload, dict):
+        return {}
+
+    mapping = {}
+    for raw_name, raw_pod in payload.items():
+        name = str(raw_name or "").strip()
+        pod_name = str(raw_pod or "").strip()
+        if not name or not pod_name:
+            continue
+        mapping[name] = pod_name
+    return mapping
+
+
+def _load_podfile_lib_mapping():
+    """Load the latest remote Podfile mapping, with cache and bundled fallbacks."""
+    payload_candidates = []
+    live_payload = _live_remote_preset_payloads.get(PODFILE_LIB_MAPPING_FILENAME)
+    if live_payload is not None:
+        try:
+            payload_candidates.append(("<live-remote>", json.loads(live_payload.decode("utf-8"))))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            pass
+
+    for path in _preset_file_candidates(PODFILE_LIB_MAPPING_FILENAME):
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                payload_candidates.append((path, json.load(handle)))
+        except Exception as exc:
+            logger.warning("Podfile mapping file unavailable (%s): %s", path, exc)
+
+    for _source, payload in payload_candidates:
+        mapping = _normalize_podfile_lib_mapping(payload)
         if mapping:
             return mapping
     return {}
@@ -2566,8 +2584,10 @@ def analyze_podfile():
     try:
         podfile_content = file.read().decode('utf-8')
 
-        # Use the predefined mapping to find versions
-        found_versions = scan_podfile_for_versions(podfile_content, PODFILE_LIB_MAPPING)
+        # Load the latest Git mapping so Pod additions/removals do not require
+        # changing or rebuilding the Services Checker code.
+        podfile_mapping = _load_podfile_lib_mapping()
+        found_versions = scan_podfile_for_versions(podfile_content, podfile_mapping)
 
         return jsonify({
             'success': True,

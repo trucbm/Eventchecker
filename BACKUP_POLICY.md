@@ -33,6 +33,7 @@ Preset data is independent from app code and is never part of an app-code rollba
 - `services_checker/gradle_check_presets.json`
 - `services_checker/gradle_lib_mapping.json`
 - `services_checker/podfile_check_presets.json`
+- `services_checker/podfile_lib_mapping.json`
 - `services_checker/manifest_check_presets.json`
 
 When a preset list changes, update the files directly on Git and keep that update. `backup_latest.sh revert --confirm` snapshots and restores these files after reverting the app code, so an app revert must not roll back, overwrite, or delete them.

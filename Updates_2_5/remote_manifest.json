@@ -51,7 +51,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/app.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/app.py"
       ],
-      "sha256": "5a2753f14e94441bea8c516767e2b38ddf5cfacd22c5618713e1ae7f134593c0"
+      "sha256": "2bffa1933ad6cf79db38324b737d5efd37fe98e104178c2b470aeb1b40ac7fb8"
     },
     {
       "path": "services_checker/bundletool-all-1.18.1.jar",
@@ -122,6 +122,16 @@
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/podfile_check_presets.json"
       ],
       "sha256": "9793f68c44a3f01c1fe03a5f6317ab2b274eac23c533cba4340bd885acd9ed0c"
+    },
+    {
+      "path": "services_checker/podfile_lib_mapping.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/services_checker/podfile_lib_mapping.json",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/main/services_checker/podfile_lib_mapping.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/podfile_lib_mapping.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/podfile_lib_mapping.json"
+      ],
+      "sha256": "875af0d89da76e9cae8dcddc076282484c96ca42cb3c800ef417173ae85cbd9f"
     },
     {
       "path": "services_checker/manifest_check_presets.json",

@@ -1507,6 +1507,7 @@ def test_preset_revert_protection_contract() -> None:
         "services_checker/gradle_check_presets.json",
         "services_checker/gradle_lib_mapping.json",
         "services_checker/podfile_check_presets.json",
+        "services_checker/podfile_lib_mapping.json",
         "services_checker/manifest_check_presets.json",
     )
     snapshot_index = script.index("snapshot_protected_presets")
@@ -1967,6 +1968,7 @@ def test_services_checker_gradle_mapping_contract() -> None:
     gradle_mapping = json.loads((ROOT / "services_checker" / "gradle_lib_mapping.json").read_text(encoding="utf-8"))
     gradle_presets = json.loads((ROOT / "services_checker" / "gradle_check_presets.json").read_text(encoding="utf-8"))
     podfile_presets = json.loads((ROOT / "services_checker" / "podfile_check_presets.json").read_text(encoding="utf-8"))
+    podfile_mapping = json.loads((ROOT / "services_checker" / "podfile_lib_mapping.json").read_text(encoding="utf-8"))
     c191_gradle_lines = gradle_presets.get("C-191-Android", {}).get("lines") or []
     _assert("Voodoo (ADN) Adapter\t5.7.0" in c191_gradle_lines, "C-191 Voodoo adapter version changed")
     _assert("Voodoo (ADN) SDK\t4.29.2" in c191_gradle_lines, "C-191 Voodoo SDK version changed")
@@ -2010,9 +2012,22 @@ def test_services_checker_gradle_mapping_contract() -> None:
         ],
         "C-180 iOS Podfile preset changed",
     )
+    _assert_equal(
+        podfile_mapping.get("TaurusX Adapter"),
+        "TaurusxAdsSDK/IronSourceAdapter",
+        "Podfile TaurusX mapping changed",
+    )
+    _assert_equal(
+        podfile_mapping.get("Adjust/AdjustGoogleOd"),
+        "Adjust/AdjustGoogleOdm",
+        "Podfile Adjust mapping changed",
+    )
     _assert("gradle_lib_mapping.json" in service_source, "Services Checker Gradle mapping file is missing")
+    _assert("podfile_lib_mapping.json" in service_source, "Services Checker Podfile mapping file is missing")
     _assert("def _load_gradle_lib_mapping(" in service_source, "Services Checker Gradle mapping loader is missing")
+    _assert("def _load_podfile_lib_mapping(" in service_source, "Services Checker Podfile mapping loader is missing")
     _assert("GRADLE_LIB_MAPPING =" not in service_source, "Gradle mapping must not remain hardcoded in app.py")
+    _assert("PODFILE_LIB_MAPPING =" not in service_source, "Podfile mapping must not remain hardcoded in app.py")
     _assert_equal(
         service_source.count("def scan_gradle_for_versions("),
         1,
@@ -2144,6 +2159,8 @@ def test_services_checker_live_preset_refresh_after_restart() -> None:
         filename = url.split("/services_checker/", 1)[1].split("?", 1)[0]
         if filename == "gradle_lib_mapping.json":
             return FakeResponse({"Harness Library": f"com.example:harness-{revision['value']}"})
+        if filename == "podfile_lib_mapping.json":
+            return FakeResponse({"Harness Pod": f"PodHarness{revision['value']}"})
         payload = {
             "C-191-Android": {
                 "platform": "ios" if filename == "podfile_check_presets.json" else "android",
@@ -2181,6 +2198,11 @@ def test_services_checker_live_preset_refresh_after_restart() -> None:
                 "com.example:harness-old",
                 "first Services Checker start did not load the remote Gradle mapping",
             )
+            _assert_equal(
+                first._load_podfile_lib_mapping().get("Harness Pod"),
+                "PodHarnessold",
+                "first Services Checker start did not load the remote Podfile mapping",
+            )
 
             revision["value"] = "new"
             second = load_service_module("eventinspector_services_checker_refresh_two")
@@ -2198,12 +2220,18 @@ def test_services_checker_live_preset_refresh_after_restart() -> None:
                 "Services Checker restart kept the stale Gradle mapping cache",
             )
             _assert_equal(
+                second._load_podfile_lib_mapping().get("Harness Pod"),
+                "PodHarnessnew",
+                "Services Checker restart kept the stale Podfile mapping cache",
+            )
+            _assert_equal(
                 set(second_data["refreshed_files"]),
                 {
                     "apk_check_presets.json",
                     "gradle_check_presets.json",
                     "gradle_lib_mapping.json",
                     "podfile_check_presets.json",
+                    "podfile_lib_mapping.json",
                     "manifest_check_presets.json",
                 },
                 "restart did not refresh all Services Checker preset files",
@@ -2238,6 +2266,7 @@ def test_services_checker_git_value_reload_from_real_commit() -> None:
         "gradle_check_presets.json",
         "gradle_lib_mapping.json",
         "podfile_check_presets.json",
+        "podfile_lib_mapping.json",
         "manifest_check_presets.json",
     )
     original_cache_dir = os.environ.get("EVENTINSPECTOR_PRESET_CACHE_DIR")
@@ -2270,6 +2299,8 @@ def test_services_checker_git_value_reload_from_real_commit() -> None:
                 for filename in preset_filenames:
                     if filename == "gradle_lib_mapping.json":
                         payload = {"Harness Library": f"com.example:harness-{revision}"}
+                    elif filename == "podfile_lib_mapping.json":
+                        payload = {"Harness Pod": f"PodHarness{revision}"}
                     else:
                         payload = {
                             "C-191-Android": {
@@ -2321,6 +2352,11 @@ def test_services_checker_git_value_reload_from_real_commit() -> None:
                 "com.example:harness-commit-one",
                 "client did not receive the first committed Gradle mapping",
             )
+            _assert_equal(
+                module._load_podfile_lib_mapping().get("Harness Pod"),
+                "PodHarnesscommit-one",
+                "client did not receive the first committed Podfile mapping",
+            )
             first_digest = first_data["loaded_preset_files"]["manifest_check_presets.json"]["sha256"]
             _assert_equal(
                 first_data["refreshed_sources"]["manifest_check_presets.json"],
@@ -2346,6 +2382,11 @@ def test_services_checker_git_value_reload_from_real_commit() -> None:
                 module._load_gradle_lib_mapping().get("Harness Library"),
                 "com.example:harness-commit-two",
                 "client kept the old Gradle mapping after a real Git commit changed",
+            )
+            _assert_equal(
+                module._load_podfile_lib_mapping().get("Harness Pod"),
+                "PodHarnesscommit-two",
+                "client kept the old Podfile mapping after a real Git commit changed",
             )
             second_digest = second_data["loaded_preset_files"]["manifest_check_presets.json"]["sha256"]
             _assert(first_digest != second_digest, "client preset hash did not change after Git commit")
@@ -2527,6 +2568,10 @@ def test_update_flow_canonical_v25() -> None:
                 "prepared Gradle mapping payload missing",
             )
             _assert(
+                os.path.exists(os.path.join(prepared["update_dir"], "services_checker", "podfile_lib_mapping.json")),
+                "prepared Podfile mapping payload missing",
+            )
+            _assert(
                 os.path.exists(os.path.join(prepared["update_dir"], "services_checker", "axml_fallback.py")),
                 "prepared dependency-free AXML fallback payload missing",
             )
@@ -2673,6 +2718,7 @@ def test_build_scripts_clean_outputs() -> None:
         "services_checker/gradle_check_presets.json",
         "services_checker/gradle_lib_mapping.json",
         "services_checker/podfile_check_presets.json",
+        "services_checker/podfile_lib_mapping.json",
         "services_checker/manifest_check_presets.json",
         "services_checker/my-key.keystore",
     ):
@@ -2699,6 +2745,7 @@ def test_build_scripts_clean_outputs() -> None:
         "services_checker\\gradle_check_presets.json",
         "services_checker\\gradle_lib_mapping.json",
         "services_checker\\podfile_check_presets.json",
+        "services_checker\\podfile_lib_mapping.json",
         "services_checker\\manifest_check_presets.json",
         "services_checker\\my-key.keystore",
     ):
@@ -2718,6 +2765,7 @@ def test_build_scripts_clean_outputs() -> None:
         "services_checker/gradle_check_presets.json",
         "services_checker/gradle_lib_mapping.json",
         "services_checker/podfile_check_presets.json",
+        "services_checker/podfile_lib_mapping.json",
         "services_checker/manifest_check_presets.json",
         "services_checker/my-key.keystore",
     ):

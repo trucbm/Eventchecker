@@ -11,6 +11,7 @@ PROTECTED_PRESET_PATHS=(
     "services_checker/gradle_check_presets.json"
     "services_checker/gradle_lib_mapping.json"
     "services_checker/podfile_check_presets.json"
+    "services_checker/podfile_lib_mapping.json"
     "services_checker/manifest_check_presets.json"
 )
 

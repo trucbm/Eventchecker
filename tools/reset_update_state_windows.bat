@@ -78,6 +78,7 @@ echo Wrote: %APP_SUPPORT_DIR%\remote_update_config_v250.json
   echo     "services_checker/gradle_check_presets.json",
   echo     "services_checker/gradle_lib_mapping.json",
   echo     "services_checker/podfile_check_presets.json",
+  echo     "services_checker/podfile_lib_mapping.json",
   echo     "services_checker/manifest_check_presets.json"
   echo   ]
   echo }
