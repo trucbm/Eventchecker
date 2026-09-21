@@ -40,8 +40,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-04-1-2.5.0-59"
-CURRENT_RELEASE_BUILD = 59
+CURRENT_RELEASE_VERSION = "2026-09-04-1-2.5.0-60"
+CURRENT_RELEASE_BUILD = 60
 ROLLBACK_SOURCE_BUILD = 56
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -686,6 +686,169 @@ def test_max_sdk_logs() -> None:
         lc.socketio.emit = original_emit
 
 
+def test_ios_max_sdk_search_only() -> None:
+    """iOS MAX search must be isolated from the legacy iOS log reader."""
+    original_platform = lc.active_platform
+    original_sdk_active = lc.sdk_check_active
+    original_search_list = list(lc.sdk_check_search_list)
+    original_expected_map = lc.sdk_check_expected_map
+    original_expected_order = lc.sdk_check_expected_order
+    original_runtime_state = lc.sdk_check_runtime_state
+    original_current_network = lc.sdk_check_current_network
+    original_pending = dict(lc.sdk_max_ios_pending_lines)
+    original_core_pending = dict(lc.sdk_max_ios_core_pending_lines)
+    original_emit = lc.socketio.emit
+    try:
+        lc.active_platform = "ios"
+        lc.sdk_check_active = False
+        lc.sdk_check_search_list = []
+        lc.sdk_check_expected_map = {}
+        lc.sdk_check_expected_order = []
+        lc.sdk_check_runtime_state = {}
+        lc.sdk_check_current_network = {}
+        lc.sdk_max_ios_pending_lines = {}
+        lc.sdk_max_ios_core_pending_lines = {}
+        lc.socketio.emit = lambda *_args, **_kwargs: None
+
+        lc.sdk_check({
+            "text": (
+                "Ads Network\tAdapter\tNative\n"
+                "MAX / AppLovin - MAX\t\t13.6.4\n"
+                "Yandex - MAX\t8.5.0.1\t"
+            )
+        })
+
+        core_line = (
+            "Sep 18 17:10:58 iPhone-11-pro PixelArt(AppLovinSDK)[2014] <Notice>: "
+            "[TaskInitializeSdk] AppLovin SDK 13.6.4 initialization succeeded"
+        )
+        lc._process_sdk_check_line(core_line, "ios-device")
+
+        max_lines = [
+            (
+                "Sep 18 17:10:59 iPhone-11-pro PixelArt(AppLovinSDK)[2014] <Notice>: "
+                "[AppLovinSdk] DEBUG [ALHealthEventsReporter] Reporting signal_collection_success "
+                "with extra parameters {"
+            ),
+            '    "adapter_version" = "8.5.0.1";',
+            '    "network_name" = "YANDEX_BIDDING";',
+            "}",
+        ]
+        for line in max_lines:
+            lc._process_sdk_check_line(line, "ios-device")
+
+        core_key = lc._normalize_sdk_network_name("MAX / AppLovin - MAX")
+        core_state = lc.sdk_check_runtime_state["ios-device"][core_key]
+        _assert_equal(core_state.get("sdk_version"), "13.6.4", "iOS MAX core SDK version was not parsed")
+
+        yandex_key = lc._normalize_sdk_network_name("Yandex - MAX")
+        yandex_state = lc.sdk_check_runtime_state["ios-device"][yandex_key]
+        _assert_equal(yandex_state.get("adapter_version"), "8.5.0.1", "iOS MAX adapter version was not parsed")
+        _assert_equal(
+            yandex_state.get("observed_network_name"),
+            "YANDEX_BIDDING",
+            "iOS MAX network name was not parsed",
+        )
+
+        core_block_lines = [
+            "Sep 18 18:29:05 iPhone-11-pro PixelArt(AppLovinSDK)[2628] <Notice>: [AppLovinSdk] DEBUG [AppLovinSdk]",
+            "========================================",
+            "=====AppLovin SDK=====",
+            "===SDK Versions===",
+            "Version: 13.6.4",
+        ]
+        for line in core_block_lines:
+            lc._process_sdk_check_line(line, "ios-core-device")
+        core_block = lc.sdk_check_runtime_state["ios-core-device"][core_key]
+        _assert_equal(
+            core_block.get("sdk_version"),
+            "13.6.4",
+            "iOS MAX AppLovin SDK version block was not parsed",
+        )
+
+        source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+        _assert(
+            "log_obj = _normalize_ios_log_line(raw_line, device_id)" in source_text,
+            "MAX SDK change must keep the legacy iOS line reader",
+        )
+        _assert("pending_record" not in source_text, "MAX SDK change must not add a shared iOS log buffer")
+    finally:
+        lc.active_platform = original_platform
+        lc.sdk_check_active = original_sdk_active
+        lc.sdk_check_search_list[:] = original_search_list
+        lc.sdk_check_expected_map = original_expected_map
+        lc.sdk_check_expected_order = original_expected_order
+        lc.sdk_check_runtime_state = original_runtime_state
+        lc.sdk_check_current_network = original_current_network
+        lc.sdk_max_ios_pending_lines = original_pending
+        lc.sdk_max_ios_core_pending_lines = original_core_pending
+        lc.socketio.emit = original_emit
+
+
+def test_sdk_base_name_matching() -> None:
+    """Standard names may share a base label; the trailing - MAX rows stay separate."""
+    original_expected_map = lc.sdk_check_expected_map
+    original_expected_order = lc.sdk_check_expected_order
+    try:
+        lc.sdk_check_expected_map = {}
+        lc.sdk_check_expected_order = []
+        for line in (
+            "LevelPlay / ironSource\t9.6.0.0\t9.6.0",
+            "MAX / AppLovin\t\t13.6.4",
+            "LINE Ads/FiveAd\t5.8.0.0\t3.1.1",
+            "ironSource - MAX\t9.6.0.0.1",
+            "MAX / AppLovin - MAX\t\t13.6.4",
+            "LINE Ads/FiveAd - MAX\t3.1.1.1",
+        ):
+            parsed = lc._parse_sdk_expected_line(line)
+            _assert(parsed is not None, f"SDK row cannot be parsed: {line}")
+            lc._register_sdk_expected(
+                parsed["network"],
+                adapter=parsed.get("adapter", ""),
+                sdk=parsed.get("sdk", ""),
+                source=parsed.get("source", ""),
+                match_network=parsed.get("match_network", ""),
+            )
+
+        _assert_equal(
+            lc._match_sdk_expected_key("IronSource"),
+            lc._normalize_sdk_network_name("LevelPlay / ironSource"),
+            "IronSource must match the standard LevelPlay / ironSource row",
+        )
+        _assert_equal(
+            lc._match_sdk_expected_key("AppLovin"),
+            lc._normalize_sdk_network_name("MAX / AppLovin"),
+            "AppLovin must match the standard MAX / AppLovin row",
+        )
+        _assert_equal(
+            lc._match_sdk_expected_key("Line"),
+            lc._normalize_sdk_network_name("LINE Ads/FiveAd"),
+            "Line must match the standard LINE Ads/FiveAd row",
+        )
+        _assert_equal(
+            lc._match_sdk_expected_key("IronSource - MAX"),
+            lc._normalize_sdk_network_name("ironSource - MAX"),
+            "IronSource - MAX must match only the MAX row",
+        )
+        _assert_equal(
+            lc._match_sdk_expected_key("AppLovin - MAX"),
+            lc._normalize_sdk_network_name("MAX / AppLovin - MAX"),
+            "AppLovin - MAX must match only the MAX row",
+        )
+        _assert_equal(
+            lc._match_sdk_expected_key("Line - MAX"),
+            lc._normalize_sdk_network_name("LINE Ads/FiveAd - MAX"),
+            "Line - MAX must match only the LINE Ads/FiveAd MAX row",
+        )
+        _assert(
+            lc._match_sdk_expected_key("AppLovin") != lc._normalize_sdk_network_name("MAX / AppLovin - MAX"),
+            "standard AppLovin must not match the trailing - MAX row",
+        )
+    finally:
+        lc.sdk_check_expected_map = original_expected_map
+        lc.sdk_check_expected_order = original_expected_order
+
+
 def test_sdk_check_preset_contract() -> None:
     presets = lc._load_sdk_check_presets()
     _assert("C-191-Android" in presets, "C-191 Android SDK preset is missing")
@@ -758,6 +921,26 @@ def test_sdk_check_preset_contract() -> None:
     for line in c191_lines[1:]:
         parsed = lc._parse_sdk_expected_line(line)
         _assert(parsed is not None, f"C-191 Android entry cannot be parsed: {line}")
+
+    c192_ios = presets.get("C-192-iOS") or {}
+    c192_ios_lines = c192_ios.get("lines") or []
+    _assert_equal(c192_ios.get("platform"), "ios", "C-192 iOS preset platform changed")
+    _assert_equal(len(c192_ios_lines), 59, "C-192 iOS preset line count changed")
+    _assert_equal(c192_ios_lines[0], "Ads Network\tAdapter\tNative", "C-192 iOS preset header changed")
+    for required_line in (
+        "MAX / AppLovin\t\t13.6.4",
+        "Yandex\t5.14.0.0\t8.5.0",
+        "ironSource - MAX\t9.6.0.0.1",
+        "MAX / AppLovin - MAX\t\t13.6.4",
+        "Yandex - MAX\t8.5.0.1",
+        "Voodoo - MAX\t3.17.1.1",
+        "Firebase Crashlytics\t\t12.18.0",
+    ):
+        _assert(required_line in c192_ios_lines, f"C-192 iOS preset entry is missing: {required_line}")
+    for line in c192_ios_lines[1:]:
+        parsed = lc._parse_sdk_expected_line(line)
+        _assert(parsed is not None, f"C-192 iOS entry cannot be parsed: {line}")
+
     ios_preset = presets["C-190-iOS"]
     _assert_equal(ios_preset.get("platform"), "ios", "C-190 iOS preset platform changed")
     _assert_equal(ios_preset.get("lines"), [], "C-190 iOS preset must remain empty")
@@ -2658,6 +2841,8 @@ TESTS: List[Callable[[], None]] = [
     test_sdk_exact_contracts,
     test_cloudx_sdk_adapter_metadata,
     test_max_sdk_logs,
+    test_ios_max_sdk_search_only,
+    test_sdk_base_name_matching,
     test_sdk_check_preset_contract,
     test_rendered_sdk_preset_javascript_contract,
     test_default_ad_event_contract,

@@ -1174,6 +1174,8 @@ sdk_check_expected_map = {}
 sdk_check_runtime_state = {}
 sdk_check_current_network = {}
 sdk_check_expected_order = []
+sdk_max_ios_pending_lines = {}
+sdk_max_ios_core_pending_lines = {}
 active_platform = "android"
 
 # Dữ liệu hệ thống chung
@@ -1396,17 +1398,35 @@ SDK_MAX_CORE_INITIALIZATION_PATTERN = re.compile(
     r'(?P<version>[0-9]+(?:\.[0-9]+)+)\s+initialization\s+succeeded\b',
     re.IGNORECASE,
 )
+SDK_MAX_CORE_VERSION_PATTERN = re.compile(
+    r'\bAppLovin\s+SDK\b.*?\bVersion\s*:\s*'
+    r'(?P<version>[0-9]+(?:\.[0-9]+)+)',
+    re.IGNORECASE | re.DOTALL,
+)
+SDK_MAX_IOS_CORE_MARKER_PATTERN = re.compile(
+    r'={3,}\s*AppLovin\s+SDK\s*={3,}',
+    re.IGNORECASE,
+)
 SDK_MAX_HEALTH_EVENTS_PATTERN = re.compile(
-    r'\[HealthEventsReporter\].*?\bsignal_collection_success\b',
+    r'\[(?:AL)?HealthEventsReporter\].*?\bsignal_collection_success\b',
     re.IGNORECASE,
 )
 SDK_MAX_ADAPTER_VERSION_FIELD_PATTERN = re.compile(
-    r'\badapter_version\s*=\s*["\']?(?P<version>[0-9]+(?:\.[0-9]+)+)',
+    r'["\']?\badapter_version["\']?\s*(?:=|:)\s*["\']?'
+    r'(?P<version>[0-9]+(?:\.[0-9]+)+)',
     re.IGNORECASE,
 )
 SDK_MAX_NETWORK_NAME_FIELD_PATTERN = re.compile(
-    r'\bnetwork_name\s*=\s*["\']?(?P<network>[A-Za-z0-9_./() -]+?)["\']?\s*(?:,|\]|})',
+    r'["\']?\bnetwork_name["\']?\s*(?:=|:)\s*["\']?'
+    r'(?P<network>[A-Za-z0-9_./() -]+?)["\']?\s*(?:[,;\]}])',
     re.IGNORECASE,
+)
+SDK_MAX_IOS_RECORD_START_PATTERN = re.compile(
+    r'^(?:'
+    r'[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?'
+    r'|\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?'
+    r'|\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?'
+    r')\s+',
 )
 
 # Mapping tên hiển thị cho Callback
@@ -1854,6 +1874,7 @@ SDK_NETWORK_ALIASES = {
     "admob": "googleadmobandadmanager",
     "googleadmanager": "googleadmobandadmanager",
     "line": "lineads",
+    "lineadsfivead": "lineads",
     "mytarget": "mytargetvkads",
     "vkads": "mytargetvkads",
     "pubmatic": "pubmaticopenwrap",
@@ -1864,6 +1885,21 @@ SDK_NETWORK_ALIASES = {
     "meta": "metaaudiencenetwork",
     "facebook": "facebooksdk",
 }
+
+SDK_BASE_NETWORK_ALIASES = {
+    "levelplay": "ironsource",
+    "levelplayironsource": "ironsource",
+}
+
+
+def _sdk_base_match_network(name):
+    """Match standard SDK labels while keeping a trailing ``- MAX`` distinct."""
+    base_name = re.sub(r'^\s*max\s*/\s*', '', str(name or ''), flags=re.IGNORECASE).strip()
+    normalized = _normalize_sdk_network_name(base_name)
+    return SDK_BASE_NETWORK_ALIASES.get(
+        normalized,
+        SDK_NETWORK_ALIASES.get(normalized, normalized),
+    )
 
 CLOUDX_NETWORK_ALIASES = {
     "digitalturbine": "digitalturbinefyber",
@@ -1922,6 +1958,7 @@ MAX_SDK_NETWORK_ALIASES = {
     "line": "lineads",
     "linenetwork": "lineads",
     "lineadsnetwork": "lineads",
+    "lineadsfivead": "lineads",
     "liftoff": "liftoffmonetizationvungle",
     "liftoffnetwork": "liftoffmonetizationvungle",
     "liftoffmonetization": "liftoffmonetizationvungle",
@@ -2074,7 +2111,7 @@ def _match_sdk_expected_key(actual_name):
     actual_match = (
         _cloudx_sdk_match_network(actual_name)
         if is_cloudx
-        else SDK_NETWORK_ALIASES.get(actual_norm, actual_norm)
+        else _sdk_base_match_network(actual_name)
     )
     canonical_matches = []
     for key, expected in expected_items:
@@ -2082,7 +2119,7 @@ def _match_sdk_expected_key(actual_name):
         expected_match = (
             _cloudx_sdk_match_network(expected_name)
             if is_cloudx
-            else SDK_NETWORK_ALIASES.get(_normalize_sdk_network_name(expected_name), _normalize_sdk_network_name(expected_name))
+            else _sdk_base_match_network(expected_name)
         )
         if expected_match == actual_match:
             canonical_matches.append(key)
@@ -2513,14 +2550,19 @@ def _update_sdk_max_block(device_id, expected_key, sdk_version=None, adapter_ver
 
 
 def _process_sdk_max_line(line, device_id):
-    """Parse MAX core initialization and MAX adapter health telemetry."""
-    if active_platform != "android":
+    """Parse MAX core version logs and MAX adapter health telemetry."""
+    if active_platform not in {"android", "ios"}:
         return False
     raw_line = str(line or "")
     changed = False
 
-    core_match = SDK_MAX_CORE_INITIALIZATION_PATTERN.search(raw_line)
-    if core_match:
+    core_matches = (
+        SDK_MAX_CORE_INITIALIZATION_PATTERN.search(raw_line),
+        SDK_MAX_CORE_VERSION_PATTERN.search(raw_line),
+    )
+    for core_match in core_matches:
+        if not core_match:
+            continue
         expected_key = _match_max_sdk_expected_key("MAX / AppLovin - MAX")
         if expected_key:
             changed = _update_sdk_max_block(
@@ -2544,6 +2586,57 @@ def _process_sdk_max_line(line, device_id):
                 ) or changed
 
     return changed
+
+
+def _process_sdk_max_stream_line(line, device_id):
+    """Parse MAX SDK telemetry without changing the shared iOS log reader."""
+    raw_line = str(line or "")
+    if active_platform != "ios":
+        return _process_sdk_max_line(raw_line, device_id)
+
+    pending = sdk_max_ios_pending_lines.get(device_id, "")
+    if pending:
+        if SDK_MAX_IOS_RECORD_START_PATTERN.match(raw_line):
+            sdk_max_ios_pending_lines.pop(device_id, None)
+            changed = _process_sdk_max_line(pending, device_id)
+            return _process_sdk_max_stream_line(raw_line, device_id) or changed
+
+        combined = f"{pending}\n{raw_line}"
+        if "}" in raw_line:
+            sdk_max_ios_pending_lines.pop(device_id, None)
+            return _process_sdk_max_line(combined, device_id)
+        sdk_max_ios_pending_lines[device_id] = combined
+        return False
+
+    core_pending = sdk_max_ios_core_pending_lines.get(device_id, "")
+    if core_pending:
+        if SDK_MAX_IOS_RECORD_START_PATTERN.match(raw_line):
+            sdk_max_ios_core_pending_lines.pop(device_id, None)
+            changed = _process_sdk_max_line(core_pending, device_id)
+            return _process_sdk_max_stream_line(raw_line, device_id) or changed
+
+        combined = f"{core_pending}\n{raw_line}"
+        if SDK_MAX_CORE_VERSION_PATTERN.search(combined):
+            sdk_max_ios_core_pending_lines.pop(device_id, None)
+            return _process_sdk_max_line(combined, device_id)
+        sdk_max_ios_core_pending_lines[device_id] = combined
+        return False
+
+    if (
+        SDK_MAX_HEALTH_EVENTS_PATTERN.search(raw_line)
+        and "{" in raw_line
+        and "}" not in raw_line
+    ):
+        sdk_max_ios_pending_lines[device_id] = raw_line
+        return False
+
+    if SDK_MAX_IOS_CORE_MARKER_PATTERN.search(raw_line):
+        if SDK_MAX_CORE_VERSION_PATTERN.search(raw_line):
+            return _process_sdk_max_line(raw_line, device_id)
+        sdk_max_ios_core_pending_lines[device_id] = raw_line
+        return False
+
+    return _process_sdk_max_line(raw_line, device_id)
 
 
 # --- HELPER FUNCTIONS FOR FORMATTING ---
@@ -8861,7 +8954,7 @@ def _process_sdk_check_line(line, device_id):
 
     changed = False
     with lock:
-        if _process_sdk_max_line(line, device_id):
+        if _process_sdk_max_stream_line(line, device_id):
             changed = True
         if _process_sdk_cloudx_http_metadata_line(line, device_id):
             changed = True
@@ -9327,7 +9420,7 @@ def handle_change_tab(data):
     if data.get('tab_name') == 'PriceRotation': socketio.emit('update_price_rotation_table', list(price_rotation_logs))
 
 def _reset_runtime_for_platform_switch():
-    global is_paused, validator_active, sdk_check_active, sdk_check_current_network
+    global is_paused, validator_active, sdk_check_active, sdk_check_current_network, sdk_max_ios_pending_lines, sdk_max_ios_core_pending_lines
     global target_package_name, active_package_log_session_id
     global specific_event_name_filters, specific_event_params_filters
     global connected_devices_info, installation_id_state
@@ -9341,6 +9434,8 @@ def _reset_runtime_for_platform_switch():
         sdk_check_expected_map.clear()
         sdk_check_runtime_state.clear()
         sdk_check_current_network = {}
+        sdk_max_ios_pending_lines = {}
+        sdk_max_ios_core_pending_lines = {}
         sdk_check_expected_order.clear()
 
         load_ads_events.clear(); unique_load_ads.clear()
@@ -9516,7 +9611,7 @@ def uaf(_d=None):
 
 @socketio.on('start_sdk_check')
 def sdk_check(data):
-    global sdk_check_search_list, sdk_check_results, sdk_check_input_list, sdk_check_active, sdk_check_expected_map, sdk_check_runtime_state, sdk_check_current_network, sdk_check_expected_order
+    global sdk_check_search_list, sdk_check_results, sdk_check_input_list, sdk_check_active, sdk_check_expected_map, sdk_check_runtime_state, sdk_check_current_network, sdk_check_expected_order, sdk_max_ios_pending_lines, sdk_max_ios_core_pending_lines
     with lock:
         sdk_check_search_list = []
         sdk_check_results = {}
@@ -9525,6 +9620,8 @@ def sdk_check(data):
         sdk_check_runtime_state = {}
         sdk_check_current_network = {}
         sdk_check_expected_order = []
+        sdk_max_ios_pending_lines = {}
+        sdk_max_ios_core_pending_lines = {}
         lines = [line.rstrip('\r') for line in data.get('text', '').splitlines() if line.strip()]
         if lines:
             header_text = _normalize_sdk_network_name(lines[0])
@@ -9592,10 +9689,12 @@ def sdk_check(data):
 
 @socketio.on('stop_sdk_check')
 def stop_sdk_check():
-    global sdk_check_active, sdk_check_current_network
+    global sdk_check_active, sdk_check_current_network, sdk_max_ios_pending_lines, sdk_max_ios_core_pending_lines
     with lock:
         sdk_check_active = False
         sdk_check_current_network = {}
+        sdk_max_ios_pending_lines = {}
+        sdk_max_ios_core_pending_lines = {}
     _emit_sdk_check_results()
 
 @socketio.on('start_package_log')
