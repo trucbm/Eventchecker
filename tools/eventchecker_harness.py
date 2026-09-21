@@ -40,8 +40,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-21-1-2.5.0-61"
-CURRENT_RELEASE_BUILD = 61
+CURRENT_RELEASE_VERSION = "2026-09-21-2-2.5.0-62"
+CURRENT_RELEASE_BUILD = 62
 ROLLBACK_SOURCE_BUILD = 56
 RELEASE_SOURCE_BUILD = CURRENT_RELEASE_BUILD
 if str(ROOT) not in sys.path:
@@ -1363,6 +1363,69 @@ def test_default_ad_event_contract() -> None:
             "Simple providers are intentionally rendered as separate blocks",
         ):
             _assert(marker in html, f"Default Ad Events UI contract is missing: {marker}")
+    finally:
+        lc.default_ad_event_config = original_config
+        lc.default_ad_event_simple_config = original_simple_config
+        lc.default_ad_event_hits.clear()
+        lc.default_ad_event_hits.update(original_hits)
+        lc.default_ad_event_simple_hits.clear()
+        lc.default_ad_event_simple_hits.update(original_simple_hits)
+        lc.default_ad_event_clients.clear()
+        lc.default_ad_event_clients.update(original_clients)
+        lc.is_paused = original_paused
+        lc.socketio.emit = original_emit
+
+
+def test_ios_default_ad_event_tracking_record() -> None:
+    original_config = lc.default_ad_event_config
+    original_simple_config = lc.default_ad_event_simple_config
+    original_hits = set(lc.default_ad_event_hits)
+    original_simple_hits = set(lc.default_ad_event_simple_hits)
+    original_clients = set(lc.default_ad_event_clients)
+    original_paused = lc.is_paused
+    original_emit = lc.socketio.emit
+    emitted = []
+    try:
+        lc.default_ad_event_config = lc._new_default_ad_event_config()
+        lc.default_ad_event_config["interstitial"]["max"] = ["ad_load"]
+        lc.default_ad_event_simple_config = lc._new_default_ad_event_simple_config()
+        lc.default_ad_event_hits.clear()
+        lc.default_ad_event_simple_hits.clear()
+        lc.default_ad_event_clients.clear()
+        lc.is_paused = False
+        lc.socketio.emit = lambda event, payload: emitted.append((event, payload))
+
+        line = (
+            "Sep 21 13:54:01 iPhone-11-pro PixelArt(UnityFramework)[1639] <Notice>: "
+            '[Tracking] TrackingService->Track: '
+            '{"EventName":"ad_load","params":{"ad_platform":"max",'
+            '"ad_format":"interstitial","ad_unit_id":"5a0e30d201088d93",'
+            '"ad_placement_name":"null","ab_test_ironsource":"null",'
+            '"ab_test_firebase":"null","audience_name":"default",'
+            '"event_time":1789973641848,"session_id":1789973631660,'
+            '"first_open_time":1789973631667,"session_count":1,'
+            '"game_start_count":0,"level":-1,"map":1,"mode_game":"null",'
+            '"level_design":"a"}}'
+        )
+        event_name, actual_params, _json_string = lc.find_and_parse_event(line)
+        _assert_equal(event_name, "ad_load", "iOS TrackingService event name was not parsed")
+        _assert_equal(actual_params["ad_platform"], "max", "iOS ad platform was not parsed")
+        _assert_equal(actual_params["ad_format"], "interstitial", "iOS ad format was not parsed")
+
+        # Coverage must not depend on the Default Ad Events tab being open when
+        # the device emits the event.
+        lc._record_default_ad_event_hit(event_name, actual_params, "ios-device")
+        _assert_equal(
+            lc._default_ad_event_payload()["hits"],
+            [{
+                "device_id": "ios-device",
+                "provider": "max",
+                "ad_format": "interstitial",
+                "event_name": "ad_load",
+            }],
+            "iOS TrackingService ad_load did not create MAX coverage",
+        )
+        _assert_equal(len(emitted), 1, "iOS default ad-event coverage update was not emitted")
     finally:
         lc.default_ad_event_config = original_config
         lc.default_ad_event_simple_config = original_simple_config
@@ -2964,6 +3027,7 @@ TESTS: List[Callable[[], None]] = [
     test_sdk_check_preset_contract,
     test_rendered_sdk_preset_javascript_contract,
     test_default_ad_event_contract,
+    test_ios_default_ad_event_tracking_record,
     test_installation_id_copy_contract,
     test_sdk_failed_groups_sort_first,
     test_release_build_marker,
