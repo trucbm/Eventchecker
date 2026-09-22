@@ -1194,6 +1194,7 @@ lock = threading.Lock()
 incomplete_impression_logs = {} # Buffer cho logs bị ngắt dòng
 incomplete_ios_adrevenue_logs = {} # Buffer cho iOS AdRevenue logs bị ngắt dòng
 incomplete_ios_load_ads_ext_logs = {} # Buffer riêng cho Load Ads đọc AppMetrica AdRevenue iOS
+incomplete_ios_max_load_ads_logs = {} # Buffer cho MAX Load Ads viewability logs nhiều dòng
 incomplete_adjust_adrevenue_logs = {} # Buffer cho Adjust callback/partner params bị ngắt dòng
 adb_error_counter = 0
 IOS_LOG_STALL_TIMEOUT_SECONDS = 60
@@ -1320,6 +1321,23 @@ UNITY_TRACKING_PATTERN = re.compile(r'\[\s*Tracking\s*\]\s*TrackingService->Trac
 MAX_LOAD_ADS_REVENUE_KEYWORD = "MaxAdRevenueListener.onAdRevenuePaid"
 MAX_LOAD_ADS_FORMAT_PATTERN = re.compile(r"\bformat\s*=\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
 MAX_LOAD_ADS_NETWORK_PATTERN = re.compile(r"\bnetworkName\s*=\s*(['\"])(.*?)\1", re.IGNORECASE)
+MAX_LOAD_ADS_VIEWABILITY_KEYWORD = "Reporting mediated_ad_viewability_impression_called"
+MAX_LOAD_ADS_IOS_FORMAT_PATTERN = re.compile(
+    r"[\"']?ad_format[\"']?\s*(?:=|:)\s*(?:\"([^\"]+)\"|'([^']+)'|([A-Za-z0-9_-]+))",
+    re.IGNORECASE,
+)
+MAX_LOAD_ADS_IOS_NETWORK_PATTERN = re.compile(
+    r"[\"']?network_name[\"']?\s*(?:=|:)\s*(?:\"([^\"]+)\"|'([^']+)'|([^;\s}]+))",
+    re.IGNORECASE,
+)
+MAX_LOAD_ADS_IOS_ADAPTER_CLASS_PATTERN = re.compile(
+    r"[\"']?adapter_class[\"']?\s*(?:=|:)\s*(?:\"([^\"]+)\"|'([^']+)'|([^;\s}]+))",
+    re.IGNORECASE,
+)
+MAX_LOAD_ADS_IOS_ADAPTER_VERSION_PATTERN = re.compile(
+    r"[\"']?adapter_version[\"']?\s*(?:=|:)\s*(?:\"([^\"]+)\"|'([^']+)'|([^;\s}]+))",
+    re.IGNORECASE,
+)
 
 # Pattern cho Load Ads Ext (AppMetrica)
 METRICA_TRACKING_PATTERN = re.compile(r'Event sent: ad_impression with value\s*(\{.*\})')
@@ -1693,6 +1711,7 @@ def _normalize_ios_udid(value):
 
 def _list_ios_device_ids():
     ids = []
+    network_ids = []
     tidevice = _resolve_ios_tool("tidevice")
     if tidevice:
         try:
@@ -1704,19 +1723,23 @@ def _list_ios_device_ids():
                 creationflags=creation_flags,
             ).stdout
             for line in output.splitlines():
-                if "ConnectionType.USB" not in line:
-                    continue
                 match = re.search(r'\b([0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}|[0-9A-Fa-f]{24}|[0-9A-Fa-f]{40})\b', line)
-                if match:
+                if not match:
+                    continue
+                if "ConnectionType.USB" in line:
                     ids.append(_normalize_ios_udid(match.group(1)))
+                elif "ConnectionType.NETWORK" in line:
+                    network_ids.append(_normalize_ios_udid(match.group(1)))
         except Exception:
             pass
 
-        # `tidevice list` exposes the transport type, so it is the source of
-        # truth when we intentionally support wired USB devices only.
+        # Prefer wired devices for stability. If no USB device is available,
+        # keep the network transport as a fallback; tidevice can stream
+        # syslog over the trusted network pairing as well.
+        selected_ids = ids or network_ids
         seen = set()
         unique_ids = []
-        for device_id in ids:
+        for device_id in selected_ids:
             if device_id not in seen:
                 seen.add(device_id)
                 unique_ids.append(device_id)
@@ -1799,14 +1822,12 @@ def _list_ios_device_ids():
 
 def _ios_device_status_message():
     if _resolve_ios_tool("idevice_id") or _resolve_ios_tool("tidevice") or _resolve_ios_tool("system_profiler"):
-        return "Waiting... (iOS: connect trusted USB device)"
-    return "Waiting... (iOS: install libimobiledevice/idevice_id or connect trusted USB device)"
+        return "Waiting... (iOS: connect a trusted USB or network-paired device)"
+    return "Waiting... (iOS: install libimobiledevice/idevice_id or connect a trusted device)"
 
 def _resolve_ios_syslog_command(device_id):
-    # Prefer tidevice for iOS syslog because device discovery already uses
-    # tidevice's USB-only list as the source of truth. This avoids mixing a
-    # USB device list with a different syslog backend that may attach to stale
-    # or network devices.
+    # Prefer tidevice for iOS syslog because device discovery uses the same
+    # tidevice transport and can fall back to trusted network-paired devices.
     tidevice = _resolve_ios_tool("tidevice")
     if tidevice:
         return [tidevice, "-u", device_id, "syslog"]
@@ -3828,7 +3849,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(62)</title>
+    <title>Event Inspector v2.5.0(63)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -3910,7 +3931,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(62)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(63)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4717,6 +4738,13 @@ HTML_TEMPLATE = """
         const copyInstallationIdBtn = document.getElementById('copyInstallationIdBtn');
         let activePlatform = localStorage.getItem('eventInspectorPlatform') || '';
         let sdkCheckPresets = {{ sdk_check_presets | tojson }};
+        socket.on('connect', () => {
+            if (!activePlatform) return;
+            socket.emit('set_platform', {
+                platform: activePlatform === 'ios' ? 'ios' : 'android',
+                reset: false,
+            });
+        });
         let installationIdState = {
             device_id: '',
             device_name: '',
@@ -7576,12 +7604,80 @@ def process_load_ads_unity_log(line, device_id):
         except: pass
 
 
+def _first_ios_max_field(pattern, text):
+    match = pattern.search(text or "")
+    if not match:
+        return ""
+    return next((value.strip() for value in match.groups() if value and value.strip()), "")
+
+
+def _process_ios_max_viewability_log(line, device_id):
+    """Collect one multiline MAX viewability dictionary and record it as a Load Ads row."""
+    raw_line = str(line or "").strip()
+    if not raw_line:
+        return
+
+    with lock:
+        if MAX_LOAD_ADS_VIEWABILITY_KEYWORD in raw_line:
+            buffered = raw_line
+        else:
+            previous = incomplete_ios_max_load_ads_logs.get(device_id)
+            if not previous:
+                return
+            buffered = f"{previous}\n{raw_line}"
+
+        if "}" not in buffered:
+            if len(buffered) <= 50000:
+                incomplete_ios_max_load_ads_logs[device_id] = buffered
+            else:
+                incomplete_ios_max_load_ads_logs.pop(device_id, None)
+            return
+        incomplete_ios_max_load_ads_logs.pop(device_id, None)
+
+    ad_format = _first_ios_max_field(MAX_LOAD_ADS_IOS_FORMAT_PATTERN, buffered).upper()
+    ad_network = _first_ios_max_field(MAX_LOAD_ADS_IOS_NETWORK_PATTERN, buffered)
+    if not ad_format or not ad_network:
+        return
+
+    d_name = get_ios_device_name(device_id)
+    provider = "MAX"
+    dedup_key = (device_id, provider.lower(), ad_network.casefold(), ad_format, "max_viewability")
+    row = {
+        "device_id": device_id,
+        "device_name": d_name,
+        "provider": provider,
+        "ad_source": ad_network,
+        "ad_network": ad_network,
+        "ad_format": ad_format,
+        "adapter_class": _first_ios_max_field(MAX_LOAD_ADS_IOS_ADAPTER_CLASS_PATTERN, buffered),
+        "adapter_version": _first_ios_max_field(MAX_LOAD_ADS_IOS_ADAPTER_VERSION_PATTERN, buffered),
+        "raw_log": buffered,
+    }
+    with lock:
+        if dedup_key in unique_load_ads_ext:
+            return
+        unique_load_ads_ext.add(dedup_key)
+        load_ads_ext_events.append(row)
+        socketio.emit("update_load_ads_ext", list(load_ads_ext_events))
+        send_to_sheet(d_name, ad_network, ad_format, buffered, "LoadAdsExt", provider)
+
+
 def process_load_ads_max_log(line, device_id):
-    """Process the exact AppLovin MAX revenue callback for the visible Load Ads tab."""
+    """Process MAX Load Ads callbacks for Android and multiline viewability logs for iOS."""
     # The visible Load Ads tab is backed by LoadAdsExt.  LoadAds is the
     # legacy hidden Unity table, so MAX rows must use the same state, cache,
     # socket event, and sheet target as the table users actually record.
-    if active_platform != "android" or not recording_states["LoadAdsExt"]["is_recording"]:
+    if not recording_states["LoadAdsExt"]["is_recording"]:
+        if active_platform == "ios":
+            with lock:
+                incomplete_ios_max_load_ads_logs.pop(device_id, None)
+        return
+
+    if active_platform == "ios":
+        _process_ios_max_viewability_log(line, device_id)
+        return
+
+    if active_platform != "android":
         return
     if MAX_LOAD_ADS_REVENUE_KEYWORD not in str(line or ""):
         return
@@ -9121,6 +9217,7 @@ def ios_log_reader(device_id):
                 log_obj = _normalize_ios_log_line(raw_line, device_id)
                 if not uses_nul_framing:
                     process_ios_package_log_stream_line(device_id, log_obj)
+                process_load_ads_max_log(log_obj["raw_log"], device_id)
                 process_load_ads_ext_log(log_obj["raw_log"], device_id)
                 process_adrevenue_log(log_obj["raw_log"], device_id)
                 process_price_rotation_log(log_obj["raw_log"], device_id)
@@ -9138,6 +9235,7 @@ def ios_log_reader(device_id):
         _flush_ios_package_log_frame_buffer(device_id)
         _flush_ios_package_log_buffer(device_id)
         with lock:
+            incomplete_ios_max_load_ads_logs.pop(device_id, None)
             active_ios_log_processes.pop(device_id, None)
             active_ios_log_readers.pop(device_id, None)
             active_ios_log_started_at.pop(device_id, None)
@@ -9275,11 +9373,17 @@ def _append_package_log_row(device_id, raw_log, time_str="", time_display="", le
 def process_ios_package_log_line(log_obj):
     if is_paused or active_platform != "ios":
         return
+    raw_log = log_obj.get("raw_log", "")
+    # Package Log keeps tidevice's NUL-framed multiline records intact. Feed
+    # the complete record to MAX as a second, framing-safe path; the physical
+    # line reader already handles normal records and the dedup key prevents a
+    # duplicate Load Ads row.
+    if raw_log:
+        process_load_ads_max_log(raw_log, log_obj.get("device_id", ""))
     with lock:
         bundle_search = target_package_name
     if not bundle_search:
         return
-    raw_log = log_obj.get("raw_log", "")
     if bundle_search.lower() not in raw_log.lower():
         return
 
@@ -9543,7 +9647,7 @@ def _reset_runtime_for_platform_switch():
         specific_event_params_filters = []
         specific_event_results.clear(); event_log_cache.clear()
         adrevenue_logs.clear(); adrevenue_log_cache.clear()
-        callback_ad_logs.clear(); incomplete_impression_logs.clear(); incomplete_ios_adrevenue_logs.clear(); incomplete_ios_load_ads_ext_logs.clear(); incomplete_adjust_adrevenue_logs.clear()
+        callback_ad_logs.clear(); incomplete_impression_logs.clear(); incomplete_ios_adrevenue_logs.clear(); incomplete_ios_load_ads_ext_logs.clear(); incomplete_ios_max_load_ads_logs.clear(); incomplete_adjust_adrevenue_logs.clear()
         price_rotation_logs.clear()
         package_log_cache.clear(); active_package_pids.clear(); active_ios_package_log_buffers.clear(); active_ios_package_log_frame_buffers.clear()
         installation_id_state.clear()
@@ -9663,6 +9767,7 @@ def cl():
         incomplete_impression_logs.clear()
         incomplete_ios_adrevenue_logs.clear()
         incomplete_ios_load_ads_ext_logs.clear()
+        incomplete_ios_max_load_ads_logs.clear()
         incomplete_adjust_adrevenue_logs.clear()
         installation_id_state.clear()
         

@@ -40,8 +40,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-21-2-2.5.0-62"
-CURRENT_RELEASE_BUILD = 62
+CURRENT_RELEASE_VERSION = "2026-09-22-1-2.5.0-63"
+CURRENT_RELEASE_BUILD = 63
 ROLLBACK_SOURCE_BUILD = 56
 RELEASE_SOURCE_BUILD = CURRENT_RELEASE_BUILD
 if str(ROOT) not in sys.path:
@@ -795,6 +795,45 @@ def test_ios_max_sdk_search_only() -> None:
         lc.socketio.emit = original_emit
 
 
+def test_platform_reconnect_contract() -> None:
+    """A server restart must restore the persisted platform on Socket.IO reconnect."""
+    rendered = lc.app.test_client().get("/").get_data(as_text=True)
+    _assert("socket.on('connect'" in rendered, "platform reconnect handler is missing")
+    _assert("reset: false" in rendered, "platform reconnect must not clear runtime state")
+    _assert("socket.emit('set_platform'" in rendered, "platform reconnect does not resync the backend")
+
+
+def test_ios_transport_fallback_contract() -> None:
+    """iOS discovery prefers USB but accepts trusted network-paired tidevice rows when USB is absent."""
+    original_resolve = lc._resolve_ios_tool
+    original_run = lc.subprocess.run
+    outputs = [
+        """UDID                                      SerialNumber    NAME        MarketName             ProductVersion    ConnType
+00008030-0009398422F3C02E  V149104TF2      iPad gen 9   iPad (9th generation)  18.5  ConnectionType.NETWORK
+eb6b13cc453f5a53ef07ff7149858a8635d18c10  F17VXQA8JCLH    iPhone X     iPhone X               16.7.12  ConnectionType.NETWORK
+""",
+        """UDID                                      SerialNumber    NAME        MarketName             ProductVersion    ConnType
+00008030-0009398422F3C02E  V149104TF2      iPad gen 9   iPad (9th generation)  18.5  ConnectionType.USB
+eb6b13cc453f5a53ef07ff7149858a8635d18c10  F17VXQA8JCLH    iPhone X     iPhone X               16.7.12  ConnectionType.NETWORK
+""",
+    ]
+    try:
+        lc._resolve_ios_tool = lambda name: "/fake/tidevice" if name == "tidevice" else None
+        lc.subprocess.run = lambda *args, **kwargs: types.SimpleNamespace(stdout=outputs.pop(0))
+
+        network_ids = lc._list_ios_device_ids()
+        _assert_equal(
+            network_ids,
+            ["00008030-0009398422F3C02E", "eb6b13cc453f5a53ef07ff7149858a8635d18c10"],
+            "network-paired iOS devices were not discovered when USB was absent",
+        )
+        usb_ids = lc._list_ios_device_ids()
+        _assert_equal(usb_ids, ["00008030-0009398422F3C02E"], "USB discovery must remain preferred")
+    finally:
+        lc._resolve_ios_tool = original_resolve
+        lc.subprocess.run = original_run
+
+
 def test_ios_package_log_preserves_multiline_records() -> None:
     """Package Log keeps iOS continuation lines while other tabs stay line-based."""
     original_platform = lc.active_platform
@@ -899,6 +938,72 @@ def test_ios_package_log_tidevice_nul_framing() -> None:
         lc.package_log_cache.extend(original_cache)
         lc.active_ios_package_log_frame_buffers.clear()
         lc.active_ios_package_log_frame_buffers.update(original_buffers)
+
+
+def test_ios_max_load_ads_from_package_frame_contract() -> None:
+    """A complete tidevice package frame must also feed the MAX Load Ads parser."""
+    original_platform = lc.active_platform
+    original_target = lc.target_package_name
+    original_paused = lc.is_paused
+    original_recording_state = dict(lc.recording_states["LoadAdsExt"])
+    original_cache = list(lc.package_log_cache)
+    original_rows = list(lc.load_ads_ext_events)
+    original_unique = set(lc.unique_load_ads_ext)
+    original_buffers = dict(lc.active_ios_package_log_frame_buffers)
+    original_max_buffer = dict(lc.incomplete_ios_max_load_ads_logs)
+    original_emit = lc.socketio.emit
+    original_send_to_sheet = lc.send_to_sheet
+    emitted = []
+    sheet_rows = []
+    try:
+        lc.active_platform = "ios"
+        lc.target_package_name = "PixelArt"
+        lc.is_paused = False
+        lc.recording_states["LoadAdsExt"].update({"is_recording": True, "current_sheet": "NG381"})
+        lc.package_log_cache.clear()
+        lc.load_ads_ext_events.clear()
+        lc.unique_load_ads_ext.clear()
+        lc.active_ios_package_log_frame_buffers.clear()
+        lc.incomplete_ios_max_load_ads_logs.clear()
+        lc.socketio.emit = lambda event, payload: emitted.append((event, payload))
+        lc.send_to_sheet = lambda *args: sheet_rows.append(args)
+
+        frame = (
+            "Sep 18 17:17:10 iPhone-11-pro PixelArt(AppLovinSDK)[2628] <Notice>: "
+            "[AppLovinSdk] DEBUG [ALHealthEventsReporter] Reporting "
+            "mediated_ad_viewability_impression_called with extra parameters {\n"
+            '    "ad_format" = BANNER;\n'
+            '    "adapter_class" = ALChartboostMediationAdapter;\n'
+            '    "adapter_version" = "9.14.0.1";\n'
+            '    "network_name" = "CHARTBOOST_NETWORK";\n'
+            "}"
+        )
+        lc.process_ios_package_log_stream_chunk("ios-max-frame", frame + "\x00")
+
+        rows = list(lc.load_ads_ext_events)
+        _assert_equal(len(rows), 1, "complete tidevice MAX frame was not recorded in Load Ads")
+        _assert_equal(rows[0].get("ad_network"), "CHARTBOOST_NETWORK", "package-frame MAX network was not parsed")
+        _assert_equal(rows[0].get("ad_format"), "BANNER", "package-frame MAX format was not parsed")
+        _assert_equal(len(emitted), 1, "package-frame MAX row was not emitted")
+        _assert_equal(sheet_rows[0][4:], ("LoadAdsExt", "MAX"), "package-frame MAX sheet target was wrong")
+    finally:
+        lc.active_platform = original_platform
+        lc.target_package_name = original_target
+        lc.is_paused = original_paused
+        lc.recording_states["LoadAdsExt"].clear()
+        lc.recording_states["LoadAdsExt"].update(original_recording_state)
+        lc.package_log_cache.clear()
+        lc.package_log_cache.extend(original_cache)
+        lc.load_ads_ext_events.clear()
+        lc.load_ads_ext_events.extend(original_rows)
+        lc.unique_load_ads_ext.clear()
+        lc.unique_load_ads_ext.update(original_unique)
+        lc.active_ios_package_log_frame_buffers.clear()
+        lc.active_ios_package_log_frame_buffers.update(original_buffers)
+        lc.incomplete_ios_max_load_ads_logs.clear()
+        lc.incomplete_ios_max_load_ads_logs.update(original_max_buffer)
+        lc.socketio.emit = original_emit
+        lc.send_to_sheet = original_send_to_sheet
 
 
 def test_sdk_base_name_matching() -> None:
@@ -1745,6 +1850,64 @@ def test_load_ads_max_contract() -> None:
         lc.load_ads_ext_events.extend(original_rows)
         lc.unique_load_ads_ext.clear()
         lc.unique_load_ads_ext.update(original_unique)
+        lc.socketio.emit = original_emit
+        lc.send_to_sheet = original_send_to_sheet
+
+
+def test_ios_load_ads_max_viewability_contract() -> None:
+    """iOS MAX viewability dictionaries must become visible Load Ads rows."""
+    original_platform = lc.active_platform
+    original_recording_state = dict(lc.recording_states["LoadAdsExt"])
+    original_emit = lc.socketio.emit
+    original_send_to_sheet = lc.send_to_sheet
+    original_rows = list(lc.load_ads_ext_events)
+    original_unique = set(lc.unique_load_ads_ext)
+    original_buffer = dict(lc.incomplete_ios_max_load_ads_logs)
+    emitted = []
+    sheet_rows = []
+    try:
+        lc.active_platform = "ios"
+        lc.recording_states["LoadAdsExt"].update({"is_recording": True, "current_sheet": "NG381"})
+        lc.load_ads_ext_events.clear()
+        lc.unique_load_ads_ext.clear()
+        lc.incomplete_ios_max_load_ads_logs.clear()
+        lc.socketio.emit = lambda event, payload: emitted.append((event, payload))
+        lc.send_to_sheet = lambda *args: sheet_rows.append(args)
+
+        lines = [
+            "17:17:10 PixelArt [AppLovinSdk] DEBUG [ALHealthEventsReporter] Reporting mediated_ad_viewability_impression_called with extra parameters {",
+            '    "ad_event_id" = "3a4fb284-4236-406f-a774-c763f28c3e5b";',
+            '    "ad_format" = BANNER;',
+            '    "ad_unit_id" = "test_mode_banner";',
+            '    "adapter_class" = ALChartboostMediationAdapter;',
+            '    "adapter_version" = "9.14.0.1";',
+            '    "network_name" = "CHARTBOOST_NETWORK";',
+            "}",
+        ]
+        for line in lines:
+            lc.process_load_ads_max_log(line, "ios-max")
+
+        rows = list(lc.load_ads_ext_events)
+        _assert_equal(len(rows), 1, "iOS MAX viewability log did not create a Load Ads row")
+        _assert_equal(rows[0].get("provider"), "MAX", "iOS MAX provider was not recorded")
+        _assert_equal(rows[0].get("ad_network"), "CHARTBOOST_NETWORK", "iOS MAX network_name was not parsed")
+        _assert_equal(rows[0].get("ad_format"), "BANNER", "iOS MAX ad_format was not parsed")
+        _assert_equal(rows[0].get("adapter_class"), "ALChartboostMediationAdapter", "iOS MAX adapter class was not parsed")
+        _assert_equal(rows[0].get("adapter_version"), "9.14.0.1", "iOS MAX adapter version was not parsed")
+        _assert(lc.MAX_LOAD_ADS_VIEWABILITY_KEYWORD in rows[0].get("raw_log", ""), "iOS MAX raw multiline log was not preserved")
+        _assert_equal(emitted[0][0], "update_load_ads_ext", "iOS MAX row was not emitted to Load Ads")
+        _assert_equal(sheet_rows[0][4:], ("LoadAdsExt", "MAX"), "iOS MAX sheet payload used the wrong tab or provider")
+        _assert_equal(lc.incomplete_ios_max_load_ads_logs, {}, "completed iOS MAX log left a stale buffer")
+    finally:
+        lc.active_platform = original_platform
+        lc.recording_states["LoadAdsExt"].clear()
+        lc.recording_states["LoadAdsExt"].update(original_recording_state)
+        lc.load_ads_ext_events.clear()
+        lc.load_ads_ext_events.extend(original_rows)
+        lc.unique_load_ads_ext.clear()
+        lc.unique_load_ads_ext.update(original_unique)
+        lc.incomplete_ios_max_load_ads_logs.clear()
+        lc.incomplete_ios_max_load_ads_logs.update(original_buffer)
         lc.socketio.emit = original_emit
         lc.send_to_sheet = original_send_to_sheet
 
@@ -3085,8 +3248,11 @@ TESTS: List[Callable[[], None]] = [
     test_cloudx_sdk_adapter_metadata,
     test_max_sdk_logs,
     test_ios_max_sdk_search_only,
+    test_platform_reconnect_contract,
+    test_ios_transport_fallback_contract,
     test_ios_package_log_preserves_multiline_records,
     test_ios_package_log_tidevice_nul_framing,
+    test_ios_max_load_ads_from_package_frame_contract,
     test_sdk_base_name_matching,
     test_sdk_check_preset_contract,
     test_rendered_sdk_preset_javascript_contract,
@@ -3100,6 +3266,7 @@ TESTS: List[Callable[[], None]] = [
     test_price_rotation_exact_parser,
     test_load_ads_provider_contract,
     test_load_ads_max_contract,
+    test_ios_load_ads_max_viewability_contract,
     test_levelplay_impression_data_callback_contract,
     test_ascendx_cloudx_callback_contract,
     test_release_payload_sync,
