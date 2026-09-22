@@ -13,5 +13,9 @@
   "Firebase Performance Monitoring": "FirebasePerformance",
   "AdQuality Adapter": "IronSourceAdQualityUnityBridge",
   "AdQuality Sdk": "IronSourceAdQualitySDK",
-  "Adjust/AdjustGoogleOd": "Adjust/AdjustGoogleOdm"
+  "Adjust/AdjustGoogleOd": "Adjust/AdjustGoogleOdm",
+  "TaurusX - MAX": "TaurusxAdsSDK/AppLovinAdapter",
+  "Adjust/AdjustGoogleOd": " Ascendx - MAX",
+  "Yeahmobi/ Maticoo - MAX": "zMaticooMAXAdapter",
+  "Prado - MAX": "PradoApplovinAdapter"
 }
