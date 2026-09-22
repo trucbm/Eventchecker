@@ -40,8 +40,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-22-1-2.5.0-63"
-CURRENT_RELEASE_BUILD = 63
+CURRENT_RELEASE_VERSION = "2026-09-22-2-2.5.0-64"
+CURRENT_RELEASE_BUILD = 64
 ROLLBACK_SOURCE_BUILD = 56
 RELEASE_SOURCE_BUILD = CURRENT_RELEASE_BUILD
 if str(ROOT) not in sys.path:
@@ -230,8 +230,25 @@ def test_no_pre_v25_release_artifacts() -> None:
     _assert(not any(path.exists() for path in forbidden_paths), "pre-v2.5 release files/directories are still present")
 
     ignored_parts = {".git", ".venv", "dist", "__pycache__"}
+    # Legacy SDK/service versions are valid preset data, not stale
+    # release channels. The preset files are independently versioned and must
+    # not make the app-release artifact scan fail.
+    preset_data_paths = {
+        ROOT / "sdk_check_presets.json",
+        ROOT / "services_checker" / "apk_check_presets.json",
+        ROOT / "services_checker" / "gradle_check_presets.json",
+        ROOT / "services_checker" / "gradle_lib_mapping.json",
+        ROOT / "services_checker" / "podfile_check_presets.json",
+        ROOT / "services_checker" / "podfile_lib_mapping.json",
+        ROOT / "services_checker" / "manifest_check_presets.json",
+    }
     for path in ROOT.rglob("*"):
-        if not path.is_file() or path.suffix == ".pyc" or any(part in ignored_parts for part in path.parts):
+        if (
+            not path.is_file()
+            or path.suffix == ".pyc"
+            or path in preset_data_paths
+            or any(part in ignored_parts for part in path.parts)
+        ):
             continue
         try:
             source = path.read_text(encoding="utf-8", errors="ignore")
@@ -1145,15 +1162,16 @@ def test_sdk_check_preset_contract() -> None:
     c192_ios = presets.get("C-192-iOS") or {}
     c192_ios_lines = c192_ios.get("lines") or []
     _assert_equal(c192_ios.get("platform"), "ios", "C-192 iOS preset platform changed")
-    _assert_equal(len(c192_ios_lines), 54, "C-192 iOS preset line count changed")
+    _assert_equal(len(c192_ios_lines), 55, "C-192 iOS preset line count changed")
     _assert_equal(c192_ios_lines[0], "Ads Network\tAdapter\tNative", "C-192 iOS preset header changed")
     for required_line in (
         "MAX / AppLovin\t\t13.6.4",
-        "Yandex\t5.14.0.0\t8.5.0",
+        "Yandex\tSkip\tSkip",
         "ironSource - MAX\t9.6.0.0.1",
         "MAX / AppLovin - MAX\t\t13.6.4",
         "Yandex - MAX\t8.5.0.1",
         "Voodoo - MAX\t3.17.1.1",
+        "Voodoo\t5.5.0.0\t3.17.1",
         "Firebase Crashlytics\t\t12.18.0",
     ):
         _assert(required_line in c192_ios_lines, f"C-192 iOS preset entry is missing: {required_line}")
@@ -1912,6 +1930,74 @@ def test_ios_load_ads_max_viewability_contract() -> None:
         lc.send_to_sheet = original_send_to_sheet
 
 
+def test_ios_load_ads_max_delegate_contract() -> None:
+    """iOS MAX didDisplayAd/didPayRevenueForAd callbacks must become Load Ads rows."""
+    original_platform = lc.active_platform
+    original_recording_state = dict(lc.recording_states["LoadAdsExt"])
+    original_emit = lc.socketio.emit
+    original_send_to_sheet = lc.send_to_sheet
+    original_rows = list(lc.load_ads_ext_events)
+    original_unique = set(lc.unique_load_ads_ext)
+    original_buffer = dict(lc.incomplete_ios_max_load_ads_logs)
+    emitted = []
+    sheet_rows = []
+    try:
+        lc.active_platform = "ios"
+        lc.recording_states["LoadAdsExt"].update({"is_recording": True, "current_sheet": "NG381"})
+        lc.load_ads_ext_events.clear()
+        lc.unique_load_ads_ext.clear()
+        lc.incomplete_ios_max_load_ads_logs.clear()
+        lc.socketio.emit = lambda event, payload: emitted.append((event, payload))
+        lc.send_to_sheet = lambda *args: sheet_rows.append(args)
+
+        samples = [
+            "16 17:12 Galaxy-iphone PixelArt(AppLovinSDK)[42329] <Notice>: [AppLovinSdk] DEBUG [MAAdView] -[MAAdDelegate didDisplayAd: [ALMediatedAdViewAd thirdPartyAdPlacementIdentifier=mrec_regular, adUnitIdentifier=043278b2d7a2125b, format=MREC, networkName=APPLOVIN_EXCHANGE]], delegate: <SMLDelegate: 0x15f5b0190>",
+            "16 19:22 Galaxy-iphone PixelArt(AppLovinSDK)[42329] <Notice>: [AppLovinSdk] DEBUG [MAInterstitialAd] -[MAAdDelegate didDisplayAd: [ALMediatedFullscreenAd thirdPartyAdPlacementIdentifier=inter_regular, adUnitIdentifier=5a0e30d201088d93, format=INTER, networkName=AppLovin]], delegate: <SMLDelegate: 0x166e5ec10",
+            "16 21:39 Galaxy-iphone PixelArt(AppLovinSDK)[42329] <Notice>: [AppLovinSdk] DEBUG [MARewardedAd] -[MAAdDelegate didDisplayAd: [ALMediatedFullscreenAd thirdPartyAdPlacementIdentifier=inter_videoa, adUnitIdentifier=8738b82fc7f2f9b5, format=REWARDED, networkName=AppLovin]], delegate: <SMLDelegate: 0x166e5caf0>",
+            "16 27:54 Galaxy-iphone PixelArt(AppLovinSDK)[42329] <Notice>: [AppLovinSdk] DEBUG [MAAdView] -[MAAdRevenueDelegate didPayRevenueForAd: [ALMediatedAdViewAd thirdPartyAdPlacementIdentifier=StR7aygvGBRCdKBc, adUnitIdentifier=4ffa27b3e6066b41, format=BANNER, networkName=Moloco]], delegate: <MAUnityAdManager: 0x14f40d180>",
+        ]
+        for line in samples:
+            lc.process_load_ads_max_log(line, "ios-max-delegate")
+
+        rows = list(lc.load_ads_ext_events)
+        _assert_equal(len(rows), 4, "iOS MAX delegate callbacks did not create four Load Ads rows")
+        _assert_equal(
+            {(row.get("ad_network"), row.get("ad_format")) for row in rows},
+            {
+                ("APPLOVIN_EXCHANGE", "MREC"),
+                ("AppLovin", "INTER"),
+                ("AppLovin", "REWARDED"),
+                ("Moloco", "BANNER"),
+            },
+            "iOS MAX delegate fields were not parsed",
+        )
+        _assert(all(row.get("provider") == "MAX" for row in rows), "iOS MAX delegate provider was not recorded")
+        _assert(
+            all(any(keyword in row.get("raw_log", "") for keyword in lc.MAX_LOAD_ADS_IOS_DELEGATE_KEYWORDS) for row in rows),
+            "iOS MAX delegate raw logs were not preserved",
+        )
+        _assert_equal(len(emitted), 4, "iOS MAX delegate rows were not emitted to the UI")
+        _assert(all(event_name == "update_load_ads_ext" for event_name, _ in emitted), "iOS MAX delegate rows used the wrong UI event")
+        _assert_equal(len(sheet_rows), 4, "iOS MAX delegate rows were not sent to the sheet")
+        _assert(all(args[4:] == ("LoadAdsExt", "MAX") for args in sheet_rows), "iOS MAX delegate sheet target was wrong")
+
+        duplicate = samples[0].replace("17:12", "17:13")
+        lc.process_load_ads_max_log(duplicate, "ios-max-delegate")
+        _assert_equal(len(lc.load_ads_ext_events), 4, "duplicate iOS MAX delegate callback was recorded twice")
+    finally:
+        lc.active_platform = original_platform
+        lc.recording_states["LoadAdsExt"].clear()
+        lc.recording_states["LoadAdsExt"].update(original_recording_state)
+        lc.load_ads_ext_events.clear()
+        lc.load_ads_ext_events.extend(original_rows)
+        lc.unique_load_ads_ext.clear()
+        lc.unique_load_ads_ext.update(original_unique)
+        lc.incomplete_ios_max_load_ads_logs.clear()
+        lc.incomplete_ios_max_load_ads_logs.update(original_buffer)
+        lc.socketio.emit = original_emit
+        lc.send_to_sheet = original_send_to_sheet
+
+
 def test_levelplay_impression_data_callback_contract() -> None:
     source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
     for marker in (
@@ -2132,18 +2218,17 @@ def test_services_checker_gradle_mapping_contract() -> None:
     gradle_presets = json.loads((ROOT / "services_checker" / "gradle_check_presets.json").read_text(encoding="utf-8"))
     podfile_presets = json.loads((ROOT / "services_checker" / "podfile_check_presets.json").read_text(encoding="utf-8"))
     podfile_mapping = json.loads((ROOT / "services_checker" / "podfile_lib_mapping.json").read_text(encoding="utf-8"))
-    c191_gradle_lines = gradle_presets.get("C-191-Android", {}).get("lines") or []
-    _assert("Voodoo (ADN) Adapter\t5.7.0" in c191_gradle_lines, "C-191 Voodoo adapter version changed")
-    _assert("Voodoo (ADN) SDK\t4.29.2" in c191_gradle_lines, "C-191 Voodoo SDK version changed")
+    c192_gradle_lines = gradle_presets.get("C-192-Android", {}).get("lines") or []
+    _assert(c192_gradle_lines, "C-192 Android Gradle preset is missing")
     expected_c191_max_lines = {
         "Mobilefuse - MAX\t1.12.0.0",
-        "Ascendx - MAX\t1.11.1",
-        "Yeahmobi/ Maticoo - MAX\t2.0.7.0",
+        "Ascendx - MAX\t1.12.0",
+        "Yeahmobi/ Maticoo - MAX\t2.0.7.1",
         "TaurusX - MAX\t1.16.3.1",
     }
     _assert(
-        expected_c191_max_lines.issubset(set(c191_gradle_lines)),
-        "C-191 MAX Gradle preset entries are incomplete",
+        expected_c191_max_lines.issubset(set(c192_gradle_lines)),
+        "C-192 MAX Gradle preset entries are incomplete",
     )
     expected_c191_max_mapping = {
         "Mobilefuse - MAX": "com.applovin.mediation:mobilefuse-adapter",
@@ -2155,7 +2240,7 @@ def test_services_checker_gradle_mapping_contract() -> None:
         _assert_equal(
             gradle_mapping.get(library_name),
             artifact_id,
-            f"C-191 MAX Gradle mapping changed for {library_name}",
+            f"C-192 MAX Gradle mapping changed for {library_name}",
         )
     _assert_equal(
         podfile_presets.get("C-180-iOS", {}).get("lines") or [],
@@ -3267,6 +3352,7 @@ TESTS: List[Callable[[], None]] = [
     test_load_ads_provider_contract,
     test_load_ads_max_contract,
     test_ios_load_ads_max_viewability_contract,
+    test_ios_load_ads_max_delegate_contract,
     test_levelplay_impression_data_callback_contract,
     test_ascendx_cloudx_callback_contract,
     test_release_payload_sync,

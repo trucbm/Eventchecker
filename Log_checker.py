@@ -1321,6 +1321,14 @@ UNITY_TRACKING_PATTERN = re.compile(r'\[\s*Tracking\s*\]\s*TrackingService->Trac
 MAX_LOAD_ADS_REVENUE_KEYWORD = "MaxAdRevenueListener.onAdRevenuePaid"
 MAX_LOAD_ADS_FORMAT_PATTERN = re.compile(r"\bformat\s*=\s*([A-Za-z0-9_-]+)", re.IGNORECASE)
 MAX_LOAD_ADS_NETWORK_PATTERN = re.compile(r"\bnetworkName\s*=\s*(['\"])(.*?)\1", re.IGNORECASE)
+MAX_LOAD_ADS_IOS_DELEGATE_KEYWORDS = (
+    "didDisplayAd:",
+    "didPayRevenueForAd:",
+)
+MAX_LOAD_ADS_IOS_DELEGATE_NETWORK_PATTERN = re.compile(
+    r"\bnetworkName\s*=\s*(?:'([^']+)'|\"([^\"]+)\"|([^,\]\r\n]+))",
+    re.IGNORECASE,
+)
 MAX_LOAD_ADS_VIEWABILITY_KEYWORD = "Reporting mediated_ad_viewability_impression_called"
 MAX_LOAD_ADS_IOS_FORMAT_PATTERN = re.compile(
     r"[\"']?ad_format[\"']?\s*(?:=|:)\s*(?:\"([^\"]+)\"|'([^']+)'|([A-Za-z0-9_-]+))",
@@ -3849,7 +3857,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(63)</title>
+    <title>Event Inspector v2.5.0(64)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -3931,7 +3939,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(63)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(64)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -7662,6 +7670,45 @@ def _process_ios_max_viewability_log(line, device_id):
         send_to_sheet(d_name, ad_network, ad_format, buffered, "LoadAdsExt", provider)
 
 
+def _process_ios_max_delegate_log(line, device_id):
+    """Collect one-line MAX delegate callbacks used by iOS Load Ads."""
+    raw_line = str(line or "").strip()
+    if not raw_line or not any(keyword in raw_line for keyword in MAX_LOAD_ADS_IOS_DELEGATE_KEYWORDS):
+        return
+
+    format_match = MAX_LOAD_ADS_FORMAT_PATTERN.search(raw_line)
+    network_match = MAX_LOAD_ADS_IOS_DELEGATE_NETWORK_PATTERN.search(raw_line)
+    if not format_match or not network_match:
+        return
+
+    ad_format = format_match.group(1).strip().upper()
+    ad_network = next(
+        (value.strip() for value in network_match.groups() if value and value.strip()),
+        "",
+    )
+    if not ad_format or not ad_network:
+        return
+
+    d_name = get_ios_device_name(device_id)
+    provider = "MAX"
+    dedup_key = (device_id, provider.lower(), ad_network.casefold(), ad_format, "max_delegate")
+    with lock:
+        if dedup_key in unique_load_ads_ext:
+            return
+        unique_load_ads_ext.add(dedup_key)
+        load_ads_ext_events.append({
+            "device_id": device_id,
+            "device_name": d_name,
+            "provider": provider,
+            "ad_source": ad_network,
+            "ad_network": ad_network,
+            "ad_format": ad_format,
+            "raw_log": raw_line,
+        })
+        socketio.emit("update_load_ads_ext", list(load_ads_ext_events))
+        send_to_sheet(d_name, ad_network, ad_format, raw_line, "LoadAdsExt", provider)
+
+
 def process_load_ads_max_log(line, device_id):
     """Process MAX Load Ads callbacks for Android and multiline viewability logs for iOS."""
     # The visible Load Ads tab is backed by LoadAdsExt.  LoadAds is the
@@ -7674,6 +7721,7 @@ def process_load_ads_max_log(line, device_id):
         return
 
     if active_platform == "ios":
+        _process_ios_max_delegate_log(line, device_id)
         _process_ios_max_viewability_log(line, device_id)
         return
 
