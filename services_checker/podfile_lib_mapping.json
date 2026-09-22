@@ -15,7 +15,7 @@
   "AdQuality Sdk": "IronSourceAdQualitySDK",
   "Adjust/AdjustGoogleOd": "Adjust/AdjustGoogleOdm",
   "TaurusX - MAX": "TaurusxAdsSDK/AppLovinAdapter",
-  "Adjust/AdjustGoogleOd": " Ascendx - MAX",
+  "Ascendx - MAX": "AscendXMAXAdapter",
   "Yeahmobi/ Maticoo - MAX": "zMaticooMAXAdapter",
   "Prado - MAX": "PradoApplovinAdapter"
 }
