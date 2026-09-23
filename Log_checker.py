@@ -67,11 +67,101 @@ def _sanitize_sdk_check_presets(raw):
         if not preset_name or platform_name not in {"android", "ios", "all"} or not isinstance(lines, list):
             continue
         clean_lines = [str(line).rstrip("\r") for line in lines if str(line).strip()]
-        presets[preset_name] = {
+        clean_preset = {
             "platform": platform_name,
             "lines": clean_lines,
         }
+        bright = preset.get("bright")
+        if isinstance(bright, dict):
+            bright_version = str(bright.get("version") or "").strip()
+            bright_identifiers = []
+            seen_identifiers = set()
+            raw_identifiers = bright.get("skadnetwork_identifiers")
+            if isinstance(raw_identifiers, list):
+                for value in raw_identifiers:
+                    identifier = str(value or "").strip()
+                    key = identifier.casefold()
+                    if not identifier or key in seen_identifiers:
+                        continue
+                    seen_identifiers.add(key)
+                    bright_identifiers.append(identifier)
+            if bright_version or bright_identifiers:
+                clean_preset["bright"] = {
+                    "version": bright_version,
+                    "skadnetwork_identifiers": bright_identifiers,
+                }
+        presets[preset_name] = clean_preset
     return presets
+
+
+def _compare_bright_skad_preset(actual_version, actual_identifiers, preset_name="", preset=None):
+    """Compare an IPA's BrightData version and app SKAdNetwork list to a preset."""
+    bright = preset.get("bright") if isinstance(preset, dict) else None
+    if not isinstance(bright, dict):
+        return {
+            "preset_name": str(preset_name or ""),
+            "rows": [],
+            "extra_identifiers": [],
+            "expected_identifier_count": 0,
+            "actual_identifier_count": 0,
+            "passed_count": 0,
+            "total_count": 0,
+        }
+
+    expected_version = str(bright.get("version") or "").strip()
+    expected_identifiers = []
+    expected_seen = set()
+    for value in bright.get("skadnetwork_identifiers") or []:
+        identifier = str(value or "").strip()
+        key = identifier.casefold()
+        if not identifier or key in expected_seen:
+            continue
+        expected_seen.add(key)
+        expected_identifiers.append(identifier)
+
+    actual_version = str(actual_version or "").strip()
+    actual_values = []
+    actual_seen = set()
+    for value in actual_identifiers or []:
+        identifier = str(value or "").strip()
+        key = identifier.casefold()
+        if not identifier or key in actual_seen:
+            continue
+        actual_seen.add(key)
+        actual_values.append(identifier)
+
+    rows = []
+    if expected_version:
+        version_status = "PASSED" if actual_version == expected_version else ("MISSING" if not actual_version else "FAILED")
+        rows.append({
+            "kind": "BrightData",
+            "label": "BrightData",
+            "actual": actual_version or "NOT FOUND",
+            "expected": expected_version,
+            "status": version_status,
+        })
+
+    for identifier in expected_identifiers:
+        found = identifier.casefold() in actual_seen
+        rows.append({
+            "kind": "SKAdNetwork",
+            "label": identifier,
+            "actual": identifier if found else "NOT FOUND",
+            "expected": identifier,
+            "status": "PASSED" if found else "MISSING",
+        })
+
+    extras = [identifier for identifier in actual_values if identifier.casefold() not in expected_seen]
+    passed_count = sum(1 for row in rows if row.get("status") == "PASSED")
+    return {
+        "preset_name": str(preset_name or ""),
+        "rows": rows,
+        "extra_identifiers": extras,
+        "expected_identifier_count": len(expected_identifiers),
+        "actual_identifier_count": len(actual_values),
+        "passed_count": passed_count,
+        "total_count": len(rows),
+    }
 
 
 def _sdk_check_preset_file_candidates():
@@ -103,6 +193,25 @@ def _load_sdk_check_presets():
     return {}
 
 
+def _merge_local_bright_preset_data(remote_presets):
+    """Keep local Bright/SKAds additions until the shared preset file is refreshed."""
+    if not isinstance(remote_presets, dict) or not remote_presets:
+        return remote_presets
+    local_presets = _load_sdk_check_presets()
+    if not local_presets:
+        return remote_presets
+    merged = dict(remote_presets)
+    for name, local_preset in local_presets.items():
+        local_bright = local_preset.get("bright") if isinstance(local_preset, dict) else None
+        remote_preset = merged.get(name)
+        if not isinstance(local_bright, dict) or not isinstance(remote_preset, dict):
+            continue
+        if remote_preset.get("bright"):
+            continue
+        merged[name] = {**remote_preset, "bright": local_bright}
+    return merged
+
+
 def _fetch_sdk_check_presets(force_remote=False):
     if os.getenv("SDK_CHECK_PRESETS_PATH") and not force_remote:
         local_presets = _load_sdk_check_presets()
@@ -126,7 +235,7 @@ def _fetch_sdk_check_presets(force_remote=False):
             response.raise_for_status()
             presets = _sanitize_sdk_check_presets(response.json())
             if presets:
-                return presets, "github"
+                return _merge_local_bright_preset_data(presets), "github"
         except Exception as exc:
             logging.warning("Failed to fetch SDK check presets from %s: %s", base_url, exc)
     return _load_sdk_check_presets(), "local"
@@ -1188,6 +1297,7 @@ active_ios_log_processes = {}
 active_ios_log_started_at = {}
 active_ios_log_last_seen = {}
 active_ios_log_commands = {}
+ios_device_missing_polls = {}
 connected_devices_info = []
 installation_id_state = {}
 is_paused = False
@@ -1277,6 +1387,7 @@ incomplete_ios_max_load_ads_logs = {} # Buffer cho MAX Load Ads viewability logs
 incomplete_adjust_adrevenue_logs = {} # Buffer cho Adjust callback/partner params bị ngắt dòng
 adb_error_counter = 0
 IOS_LOG_STALL_TIMEOUT_SECONDS = 60
+IOS_DEVICE_MISSING_GRACE_POLLS = 2
 
 
 def _get_package_db_connection():
@@ -1906,6 +2017,33 @@ def _list_ios_device_ids():
             seen.add(device_id)
             unique_ids.append(device_id)
     return unique_ids
+
+
+def _stabilize_ios_device_ids(observed_ids, known_ids):
+    """Debounce transient empty iOS discovery results.
+
+    ``tidevice list`` is a live usbmux query and can return no rows while its
+    service is reconnecting. The device manager calls this under ``lock``;
+    keeping the state here lets a single failed poll leave the active reader
+    alone while a genuinely disconnected device is still removed after the
+    grace window.
+    """
+    observed = {str(device_id).strip() for device_id in (observed_ids or set()) if str(device_id).strip()}
+    known = {str(device_id).strip() for device_id in (known_ids or set()) if str(device_id).strip()}
+    stable = set(observed)
+
+    for device_id in observed:
+        ios_device_missing_polls.pop(device_id, None)
+
+    for device_id in known - observed:
+        misses = ios_device_missing_polls.get(device_id, 0) + 1
+        if misses <= IOS_DEVICE_MISSING_GRACE_POLLS:
+            stable.add(device_id)
+            ios_device_missing_polls[device_id] = misses
+        else:
+            ios_device_missing_polls.pop(device_id, None)
+
+    return stable
 
 def _ios_device_status_message():
     if _resolve_ios_tool("idevice_id") or _resolve_ios_tool("tidevice") or _resolve_ios_tool("system_profiler"):
@@ -3802,7 +3940,7 @@ def _sanitize_ipa_filename(filename):
 
 def _extract_brightsdk_version_from_ipa(ipa_path):
     if not ipa_path or not os.path.exists(ipa_path):
-        return {"app_name": "", "brightsdk_version": ""}
+        return {"app_name": "", "brightsdk_version": "", "skadnetwork_identifiers": []}
     tmp_dir = None
     try:
         tmp_dir = tempfile.mkdtemp(prefix="eventinspector_ipa_")
@@ -3810,19 +3948,28 @@ def _extract_brightsdk_version_from_ipa(ipa_path):
             zf.extractall(tmp_dir)
         payload_dir = os.path.join(tmp_dir, "Payload")
         if not os.path.isdir(payload_dir):
-            return ""
+            return {"app_name": "", "brightsdk_version": "", "skadnetwork_identifiers": []}
         for app_name in os.listdir(payload_dir):
             app_dir = os.path.join(payload_dir, app_name)
             if not app_name.endswith(".app") or not os.path.isdir(app_dir):
                 continue
             app_display_name = ""
             app_bundle_name = ""
+            skadnetwork_identifiers = []
             app_plist_path = os.path.join(app_dir, "Info.plist")
             if os.path.exists(app_plist_path):
                 with open(app_plist_path, "rb") as f:
                     app_plist = plistlib.load(f)
                 app_display_name = str(app_plist.get("CFBundleDisplayName") or "").strip()
                 app_bundle_name = str(app_plist.get("CFBundleName") or "").strip()
+                # SKAdNetworkItems belongs to the app's Info.plist. Do not
+                # read the separate BrightSDK framework plist for this list.
+                for item in app_plist.get("SKAdNetworkItems") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    identifier = str(item.get("SKAdNetworkIdentifier") or "").strip()
+                    if identifier:
+                        skadnetwork_identifiers.append(identifier)
             for root, _dirs, files in os.walk(app_dir):
                 if os.path.basename(root) == "brdsdk.framework":
                     plist_path = os.path.join(root, "Info.plist")
@@ -3834,8 +3981,17 @@ def _extract_brightsdk_version_from_ipa(ipa_path):
                     return {
                         "app_name": app_display_name or app_bundle_name or app_name[:-4],
                         "brightsdk_version": version,
+                        "skadnetwork_identifiers": skadnetwork_identifiers,
                     }
-        return {"app_name": "", "brightsdk_version": ""}
+            # Keep app metadata useful even when the IPA has no BrightSDK
+            # framework, while still reporting the app plist SKAdNetwork list.
+            if app_display_name or app_bundle_name or skadnetwork_identifiers:
+                return {
+                    "app_name": app_display_name or app_bundle_name or app_name[:-4],
+                    "brightsdk_version": "",
+                    "skadnetwork_identifiers": skadnetwork_identifiers,
+                }
+        return {"app_name": "", "brightsdk_version": "", "skadnetwork_identifiers": []}
     finally:
         if tmp_dir and os.path.isdir(tmp_dir):
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -3942,7 +4098,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(65)</title>
+    <title>Event Inspector v2.5.0(66)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -4024,7 +4180,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(65)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(66)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4090,7 +4246,7 @@ HTML_TEMPLATE = """
                     <button id="tabBtnCallbackAd" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('CallbackAd')">CallBack & Ads</button>
                     <button id="tabBtnPriceRotation" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('PriceRotation')">Bidding</button>
                     <button id="tabBtnSdkCheck" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('SdkCheck')">SDK Check</button>
-                    <button id="tabBtnBrightSDK" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('BrightSDK')">BrightSDK</button>
+                    <button id="tabBtnBrightSDK" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('BrightSDK')">Bright/SKAds</button>
                     <button id="tabBtnPackage" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('Package')">Package Logcat</button>
                     <button id="tabBtnServicesChecker" class="tab-btn text-sm font-semibold py-2 px-4 -mb-px border-b-2 border-transparent" onclick="switchTab('ServicesChecker')">Services Checker</button>
                 </div>
@@ -4250,6 +4406,13 @@ HTML_TEMPLATE = """
             <div id="tabContentBrightSDK" class="hidden">
                 <div class="bg-white rounded-xl shadow-md p-4">
                     <div class="flex flex-col gap-3">
+                        <div class="flex flex-wrap items-center gap-2 bg-indigo-50 p-2.5 rounded-lg border border-indigo-100">
+                            <label for="brightSkadPresetSelect" class="text-sm font-semibold text-gray-700 whitespace-nowrap">Bright/SKAds preset:</label>
+                            <select id="brightSkadPresetSelect" class="h-9 min-w-[220px] px-3 border rounded-md shadow-sm text-xs bg-white">
+                                <option value="">Loading presets...</option>
+                            </select>
+                            <span id="brightSkadPresetStatus" class="text-xs text-slate-500">C-192-iOS sẽ được chọn mặc định.</span>
+                        </div>
                         <div class="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border">
                             <span class="text-sm font-semibold text-gray-700 whitespace-nowrap">Upload IPA:</span>
                             <input type="file" id="brightSdkFileInput" accept=".ipa" class="hidden">
@@ -4265,6 +4428,28 @@ HTML_TEMPLATE = """
                                 <span class="font-semibold">BrightSDK version:</span>
                                 <span id="brightSdkVersionValue" class="font-mono text-slate-800 ml-1">Not Found</span>
                             </div>
+                        </div>
+                        <div class="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                            <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-3 py-2 border-b">
+                                <div class="font-semibold text-sm text-slate-700">Bright/SKAds comparison</div>
+                                <div id="brightSkadCompareSummary" class="text-xs text-slate-500">Upload IPA để bắt đầu compare.</div>
+                            </div>
+                            <div class="overflow-auto max-h-[32rem]">
+                                <table class="min-w-full text-xs">
+                                    <thead class="bg-gray-50 sticky top-0 z-10">
+                                        <tr>
+                                            <th class="text-center font-semibold text-gray-600 py-2 px-3 border-b">Status</th>
+                                            <th class="text-left font-semibold text-gray-600 py-2 px-3 border-b">Item</th>
+                                            <th class="text-left font-semibold text-gray-600 py-2 px-3 border-b">Actual</th>
+                                            <th class="text-left font-semibold text-gray-600 py-2 px-3 border-b">Expected</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="brightSkadCompareBody">
+                                        <tr><td colspan="4" class="py-3 px-3 text-center text-slate-500 italic">Chưa có IPA để compare.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div id="brightSkadExtraWarning" class="hidden px-3 py-2 text-xs text-amber-800 bg-amber-50 border-t border-amber-200"></div>
                         </div>
                     </div>
                 </div>
@@ -4831,6 +5016,7 @@ HTML_TEMPLATE = """
         const copyInstallationIdBtn = document.getElementById('copyInstallationIdBtn');
         let activePlatform = localStorage.getItem('eventInspectorPlatform') || '';
         let sdkCheckPresets = {{ sdk_check_presets | tojson }};
+        let brightSkadLastPayload = null;
         socket.on('connect', () => {
             if (!activePlatform) return;
             socket.emit('set_platform', {
@@ -5103,7 +5289,7 @@ HTML_TEMPLATE = """
             const btnEl = document.getElementById('tabBtn' + tabName);
             if (btnEl) btnEl.classList.add('active');
 
-            if (tabName === 'SdkCheck') loadSdkCheckPresetsFromGit();
+            if (tabName === 'SdkCheck' || tabName === 'BrightSDK') loadSdkCheckPresetsFromGit();
             if (tabName === 'ServicesChecker') openServicesChecker();
             
             socket.emit('change_tab', { tab_name: tabName });
@@ -5434,11 +5620,158 @@ HTML_TEMPLATE = """
             }
         }
 
+        function brightSkadPresetEntries() {
+            return Object.entries(sdkCheckPresets || {})
+                .filter(([, preset]) => {
+                    if (!preset || !preset.bright) return false;
+                    return preset.platform === 'ios' || preset.platform === 'all';
+                });
+        }
+
+        function updateBrightSkadPresetStatus() {
+            const select = document.getElementById('brightSkadPresetSelect');
+            const status = document.getElementById('brightSkadPresetStatus');
+            if (!select || !status) return;
+            const name = select.value || '';
+            const bright = sdkCheckPresets?.[name]?.bright;
+            if (!name || !bright) {
+                status.textContent = 'Chưa có preset Bright/SKAds.';
+                return;
+            }
+            const identifiers = Array.isArray(bright.skadnetwork_identifiers) ? bright.skadnetwork_identifiers : [];
+            status.textContent = `${name}: BrightData ${bright.version || 'Not set'} · ${identifiers.length} SKAdNetwork entries`;
+        }
+
+        function renderBrightSkadPresetOptions() {
+            const select = document.getElementById('brightSkadPresetSelect');
+            if (!select) return;
+            const entries = brightSkadPresetEntries();
+            const current = select.value || '';
+            const defaultName = entries.some(([name]) => name === 'C-192-iOS')
+                ? 'C-192-iOS'
+                : (entries[0]?.[0] || '');
+            select.innerHTML = entries.length
+                ? entries.map(([name, preset]) => {
+                    const count = Array.isArray(preset?.bright?.skadnetwork_identifiers)
+                        ? preset.bright.skadnetwork_identifiers.length
+                        : 0;
+                    return `<option value="${escapeAttribute(name)}">${escapeHTML(name)} · ${count} SKAdNetwork</option>`;
+                }).join('')
+                : '<option value="">No Bright/SKAds preset</option>';
+            const available = entries.map(([name]) => name);
+            select.value = available.includes(current) ? current : defaultName;
+            select.disabled = entries.length === 0;
+            updateBrightSkadPresetStatus();
+            if (brightSkadLastPayload && select.value) {
+                renderBrightSkadComparison(buildBrightSkadComparison(brightSkadLastPayload, select.value));
+            }
+        }
+
+        function buildBrightSkadComparison(payload, presetName) {
+            const bright = sdkCheckPresets?.[presetName]?.bright;
+            if (!bright) {
+                return {preset_name: presetName || '', rows: [], extra_identifiers: [], passed_count: 0, total_count: 0};
+            }
+            const expectedVersion = String(bright.version || '').trim();
+            const expectedIdentifiers = [];
+            const expectedKeys = new Set();
+            (Array.isArray(bright.skadnetwork_identifiers) ? bright.skadnetwork_identifiers : []).forEach(value => {
+                const identifier = String(value || '').trim();
+                const key = identifier.toLowerCase();
+                if (!identifier || expectedKeys.has(key)) return;
+                expectedKeys.add(key);
+                expectedIdentifiers.push(identifier);
+            });
+            const rawVersion = String(payload?.brightsdk_version || '').trim();
+            const actualVersion = rawVersion.toLowerCase() === 'not found' ? '' : rawVersion;
+            const actualIdentifiers = [];
+            const actualKeys = new Set();
+            (Array.isArray(payload?.skadnetwork_identifiers) ? payload.skadnetwork_identifiers : []).forEach(value => {
+                const identifier = String(value || '').trim();
+                const key = identifier.toLowerCase();
+                if (!identifier || actualKeys.has(key)) return;
+                actualKeys.add(key);
+                actualIdentifiers.push(identifier);
+            });
+            const rows = [];
+            if (expectedVersion) {
+                rows.push({
+                    kind: 'BrightData',
+                    label: 'BrightData',
+                    actual: actualVersion || 'NOT FOUND',
+                    expected: expectedVersion,
+                    status: actualVersion === expectedVersion ? 'PASSED' : (actualVersion ? 'FAILED' : 'MISSING'),
+                });
+            }
+            expectedIdentifiers.forEach(identifier => {
+                const found = actualKeys.has(identifier.toLowerCase());
+                rows.push({
+                    kind: 'SKAdNetwork',
+                    label: identifier,
+                    actual: found ? identifier : 'NOT FOUND',
+                    expected: identifier,
+                    status: found ? 'PASSED' : 'MISSING',
+                });
+            });
+            const extraIdentifiers = actualIdentifiers.filter(identifier => !expectedKeys.has(identifier.toLowerCase()));
+            return {
+                preset_name: presetName || '',
+                rows,
+                extra_identifiers: extraIdentifiers,
+                expected_identifier_count: expectedIdentifiers.length,
+                actual_identifier_count: actualIdentifiers.length,
+                passed_count: rows.filter(row => row.status === 'PASSED').length,
+                total_count: rows.length,
+            };
+        }
+
+        function renderBrightSkadComparison(compare) {
+            const body = document.getElementById('brightSkadCompareBody');
+            const summary = document.getElementById('brightSkadCompareSummary');
+            const warning = document.getElementById('brightSkadExtraWarning');
+            if (!body || !summary || !warning) return;
+            const rows = Array.isArray(compare?.rows) ? compare.rows : [];
+            if (!rows.length) {
+                body.innerHTML = '<tr><td colspan="4" class="py-3 px-3 text-center text-slate-500 italic">Chưa có preset/IPA để compare.</td></tr>';
+                summary.textContent = 'Upload IPA để bắt đầu compare.';
+                warning.classList.add('hidden');
+                warning.innerHTML = '';
+                return;
+            }
+            const passedCount = Number.isFinite(compare.passed_count)
+                ? compare.passed_count
+                : rows.filter(row => row.status === 'PASSED').length;
+            summary.textContent = `${passedCount}/${rows.length} PASSED · ${compare.preset_name || 'Bright/SKAds preset'}`;
+            body.innerHTML = rows.map(row => {
+                const status = String(row.status || 'MISSING').toUpperCase();
+                const passed = status === 'PASSED';
+                const failed = status === 'FAILED';
+                const statusClass = passed ? 'text-green-600' : (failed ? 'text-red-600' : 'text-amber-700');
+                const statusIcon = passed ? '✓' : (failed ? '✕' : '—');
+                return `<tr class="border-b last:border-b-0 hover:bg-gray-50">
+                    <td class="py-2 px-3 text-center font-semibold ${statusClass}" title="${escapeHTML(status)}">${statusIcon} <span class="text-[10px]">${escapeHTML(status)}</span></td>
+                    <td class="py-2 px-3 font-semibold text-slate-800 break-all">${escapeHTML(row.label || row.kind || '')}</td>
+                    <td class="py-2 px-3 font-mono text-slate-700 break-all">${escapeHTML(row.actual || '')}</td>
+                    <td class="py-2 px-3 font-mono text-slate-700 break-all">${escapeHTML(row.expected || '')}</td>
+                </tr>`;
+            }).join('');
+            const extras = Array.isArray(compare.extra_identifiers) ? compare.extra_identifiers : [];
+            if (!extras.length) {
+                warning.classList.add('hidden');
+                warning.innerHTML = '';
+            } else {
+                warning.classList.remove('hidden');
+                warning.innerHTML = `<div class="font-semibold mb-1">Warning: ${extras.length} identifier(s) có trong IPA nhưng không có trong preset.</div><div class="font-mono break-all">${extras.map(value => escapeHTML(value)).join('<br>')}</div>`;
+            }
+        }
+
         function resetBrightSdkUiState() {
+            brightSkadLastPayload = null;
             const appNameEl = document.getElementById('brightSdkAppNameValue');
             if (appNameEl) appNameEl.textContent = 'Not Found';
             const versionEl = document.getElementById('brightSdkVersionValue');
             if (versionEl) versionEl.textContent = 'Not Found';
+            renderBrightSkadComparison({rows: [], extra_identifiers: []});
             const inputEl = document.getElementById('brightSdkFileInput');
             if (inputEl) inputEl.value = '';
         }
@@ -5680,11 +6013,20 @@ HTML_TEMPLATE = """
             resetBrightSdkUiState();
         });
 
+        document.getElementById('brightSkadPresetSelect')?.addEventListener('change', () => {
+            updateBrightSkadPresetStatus();
+            const presetName = document.getElementById('brightSkadPresetSelect')?.value || '';
+            if (brightSkadLastPayload && presetName) {
+                renderBrightSkadComparison(buildBrightSkadComparison(brightSkadLastPayload, presetName));
+            }
+        });
+
         document.getElementById('brightSdkFileInput')?.addEventListener('change', async (e) => {
             const file = e.target.files && e.target.files[0];
             if (!file) return;
             const formData = new FormData();
             formData.append('ipa_file', file);
+            formData.append('preset_name', document.getElementById('brightSkadPresetSelect')?.value || 'C-192-iOS');
             const res = await fetch('/api/ipa/inspect', {
                 method: 'POST',
                 body: formData
@@ -5696,11 +6038,16 @@ HTML_TEMPLATE = """
             if (!payload.ok) {
                 if (appNameEl) appNameEl.textContent = 'Not Found';
                 if (valueEl) valueEl.textContent = 'Not Found';
+                brightSkadLastPayload = null;
+                renderBrightSkadComparison({rows: [], extra_identifiers: []});
                 alert(payload.error || 'Failed to inspect IPA');
                 return;
             }
             if (appNameEl) appNameEl.textContent = payload.app_name || 'Not Found';
             if (valueEl) valueEl.textContent = payload.brightsdk_version || 'Not Found';
+            brightSkadLastPayload = payload;
+            const presetName = document.getElementById('brightSkadPresetSelect')?.value || payload.bright_compare?.preset_name || '';
+            renderBrightSkadComparison(buildBrightSkadComparison(payload, presetName));
         });
 
         // --- Socket Listeners (Renderers) ---
@@ -6923,10 +7270,12 @@ HTML_TEMPLATE = """
                     if (!response.ok || !payload.ok || !payload.presets) throw new Error(payload.error || 'preset_load_failed');
                     sdkCheckPresets = payload.presets;
                     renderSdkCheckPresetOptions();
+                    renderBrightSkadPresetOptions();
                     const sourceText = payload.source === 'github' ? 'GitHub' : 'Local fallback';
                     if (status) status.textContent = `${sourceText}: chọn preset để tự nạp danh sách.`;
                 } catch (error) {
                     renderSdkCheckPresetOptions();
+                    renderBrightSkadPresetOptions();
                     if (status) status.textContent = 'Không tải được GitHub, đang dùng danh sách local.';
                     console.warn('SDK preset load failed', error);
                 } finally {
@@ -6955,6 +7304,7 @@ HTML_TEMPLATE = """
         }
 
         renderSdkCheckPresetOptions();
+        renderBrightSkadPresetOptions();
         document.getElementById('sdkCheckPresetList')?.addEventListener('change', (event) => {
             const input = event.target.closest('input[name="sdkCheckPreset"]');
             if (input?.checked) applySdkCheckPreset(input.value);
@@ -7292,16 +7642,26 @@ def inspect_ipa():
     tmp_path = None
     try:
         filename = _sanitize_ipa_filename(upload.filename)
+        preset_name = str(request.form.get('preset_name') or '').strip()
         os.makedirs(PROFILE_DIR, exist_ok=True)
         with tempfile.NamedTemporaryFile(prefix="eventinspector_ipa_", suffix=".ipa", delete=False) as tmp:
             tmp_path = tmp.name
             upload.save(tmp_path)
         ipa_info = _extract_brightsdk_version_from_ipa(tmp_path)
+        presets = _load_sdk_check_presets()
+        bright_compare = _compare_bright_skad_preset(
+            ipa_info.get('brightsdk_version'),
+            ipa_info.get('skadnetwork_identifiers') or [],
+            preset_name=preset_name,
+            preset=presets.get(preset_name),
+        )
         return jsonify({
             'ok': True,
             'filename': filename,
             'app_name': ipa_info.get('app_name') or 'Not Found',
             'brightsdk_version': ipa_info.get('brightsdk_version') or 'Not Found',
+            'skadnetwork_identifiers': ipa_info.get('skadnetwork_identifiers') or [],
+            'bright_compare': bright_compare,
         })
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
@@ -7718,27 +8078,79 @@ def _first_ios_max_field(pattern, text):
     return next((value.strip() for value in match.groups() if value and value.strip()), "")
 
 
-def _process_ios_max_viewability_log(line, device_id):
-    """Collect one multiline MAX viewability dictionary and record it as a Load Ads row."""
-    raw_line = str(line or "").strip()
-    if not raw_line:
+def _split_ios_max_log_records(raw_text):
+    """Split a relay chunk at iOS syslog headers before MAX parses it.
+
+    tidevice can return more than one physical syslog record in a single
+    stdout chunk.  MAX viewability payloads are multiline, so parsing the
+    whole chunk as one record leaks the following SDK/postback lines into the
+    preceding Load Ads row.
+    """
+    text = str(raw_text or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not text.strip():
+        return []
+
+    starts = [
+        match.start()
+        for match in re.finditer(rf"(?m)^{IOS_LOG_TIMESTAMP_PATTERN}\s+", text)
+    ]
+    if len(starts) <= 1:
+        return [text.strip()]
+
+    records = []
+    if starts[0] > 0 and text[:starts[0]].strip():
+        records.append(text[:starts[0]].strip())
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(text)
+        record = text[start:end].strip()
+        if record:
+            records.append(record)
+    return records
+
+
+def _ios_max_viewability_block_end(text):
+    """Return the end of the MAX parameter dictionary, if it is complete."""
+    closing_line = re.search(r"(?m)^\s*}\s*(?:\n|$)", str(text or ""))
+    if closing_line:
+        return closing_line.end()
+    stripped = str(text or "").rstrip()
+    if stripped.endswith("}"):
+        return len(stripped)
+    return None
+
+
+def _process_ios_max_viewability_record(raw_record, device_id):
+    raw_record = str(raw_record or "").strip()
+    if not raw_record:
         return
 
+    record_starts = bool(IOS_LOG_RECORD_START_PATTERN.match(raw_record))
     with lock:
-        if MAX_LOAD_ADS_VIEWABILITY_KEYWORD in raw_line:
-            buffered = raw_line
+        previous = incomplete_ios_max_load_ads_logs.get(device_id)
+        starts_viewability = MAX_LOAD_ADS_VIEWABILITY_KEYWORD in raw_record
+
+        # A timestamped record is a new syslog record, never a continuation
+        # of the prior MAX dictionary. Drop an incomplete stale block instead
+        # of attaching the next SDK/postback record to it.
+        if record_starts and previous and not starts_viewability:
+            previous = None
+            incomplete_ios_max_load_ads_logs.pop(device_id, None)
+
+        if starts_viewability:
+            buffered = raw_record
         else:
-            previous = incomplete_ios_max_load_ads_logs.get(device_id)
             if not previous:
                 return
-            buffered = f"{previous}\n{raw_line}"
+            buffered = f"{previous}\n{raw_record}"
 
-        if "}" not in buffered:
+        block_end = _ios_max_viewability_block_end(buffered)
+        if block_end is None:
             if len(buffered) <= 50000:
                 incomplete_ios_max_load_ads_logs[device_id] = buffered
             else:
                 incomplete_ios_max_load_ads_logs.pop(device_id, None)
             return
+        buffered = buffered[:block_end].rstrip()
         incomplete_ios_max_load_ads_logs.pop(device_id, None)
 
     ad_format = _first_ios_max_field(MAX_LOAD_ADS_IOS_FORMAT_PATTERN, buffered).upper()
@@ -7769,6 +8181,12 @@ def _process_ios_max_viewability_log(line, device_id):
         load_ads_ext_events.append(row)
         socketio.emit("update_load_ads_ext", list(load_ads_ext_events))
         send_to_sheet(d_name, ad_network, ad_format, buffered, "LoadAdsExt", provider)
+
+
+def _process_ios_max_viewability_log(line, device_id):
+    """Collect MAX viewability dictionaries without absorbing later records."""
+    for record in _split_ios_max_log_records(line):
+        _process_ios_max_viewability_record(record, device_id)
 
 
 def _process_ios_max_delegate_log(line, device_id):
@@ -9460,9 +9878,21 @@ def device_manager():
         try:
             platform = active_platform
             if platform == "ios":
-                ids = set(_list_ios_device_ids())
+                observed_ids = set(_list_ios_device_ids())
                 readers_to_stop = []
                 with lock:
+                    known_ids = set(active_ios_log_readers) | set(active_ios_log_processes)
+                    known_ids.update(
+                        device.get("id", "")
+                        for device in connected_devices_info
+                        if device.get("id")
+                    )
+                    ids = _stabilize_ios_device_ids(observed_ids, known_ids)
+                    # A live reader remains connected even when discovery has
+                    # omitted its transport row for several polls. Keep it
+                    # in the UI until the reader itself exits.
+                    ids.update(active_ios_log_readers)
+                    ids.update(active_ios_log_processes)
                     now = time.time()
                     for did in list(active_ios_log_readers.keys()):
                         proc = active_ios_log_processes.get(did)
@@ -9470,16 +9900,27 @@ def device_manager():
                         started_at = active_ios_log_started_at.get(did, now)
                         last_seen = active_ios_log_last_seen.get(did, started_at)
                         is_dead = (thread and not thread.is_alive()) or (proc and proc.poll() is not None)
-                        is_stalled = did in ids and now - started_at > IOS_LOG_STALL_TIMEOUT_SECONDS and now - last_seen > IOS_LOG_STALL_TIMEOUT_SECONDS
-                        if is_dead or is_stalled or did not in ids:
-                            readers_to_stop.append((did, 'stalled' if is_stalled else 'dead' if is_dead else 'disconnected'))
+                        # A live tidevice syslog process is the authority for
+                        # an already attached device. Discovery can briefly
+                        # omit USB/network rows while usbmuxd refreshes; using
+                        # that snapshot to stop a live reader causes the
+                        # connect/disconnect loop seen in the local build.
+                        # ``last_seen`` remains visible in the status label,
+                        # but an idle stream must not be killed as a false
+                        # stalled connection.
+                        if is_dead:
+                            readers_to_stop.append((did, 'dead'))
 
                 for did, reason in readers_to_stop:
                     print(f"WARNING: Stopping iOS log reader for {did} ({reason})")
                     _stop_ios_log_reader(did)
 
                 with lock:
-                    for did in ids - set(active_ios_log_readers.keys()):
+                    # Only start readers for a freshly observed device. A
+                    # grace-kept ID must remain visible, but must not spawn a
+                    # new tidevice process while discovery is temporarily
+                    # empty.
+                    for did in observed_ids - set(active_ios_log_readers.keys()):
                         t = threading.Thread(target=ios_log_reader, args=(did,), daemon=True)
                         active_ios_log_readers[did] = t
                         t.start()
@@ -9890,6 +10331,7 @@ def _reset_runtime_for_platform_switch():
         sdk_max_ios_pending_lines = {}
         sdk_max_ios_core_pending_lines = {}
         sdk_check_expected_order.clear()
+        ios_device_missing_polls.clear()
 
         load_ads_events.clear(); unique_load_ads.clear()
         load_ads_ext_events.clear(); unique_load_ads_ext.clear()

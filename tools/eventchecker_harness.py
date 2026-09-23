@@ -26,11 +26,13 @@ import json
 import os
 import re
 import hashlib
+import plistlib
 import subprocess
 import sys
 import tempfile
 import threading
 import types
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path, PosixPath
 from typing import Callable, Iterable, List
@@ -40,8 +42,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-23-1-2.5.0-65"
-CURRENT_RELEASE_BUILD = 65
+CURRENT_RELEASE_VERSION = "2026-09-23-1-2.5.0-66"
+CURRENT_RELEASE_BUILD = 66
 ROLLBACK_SOURCE_BUILD = 56
 RELEASE_SOURCE_BUILD = CURRENT_RELEASE_BUILD
 if str(ROOT) not in sys.path:
@@ -75,6 +77,7 @@ def _reset_runtime_state() -> None:
     lc.package_log_cache.clear()
     lc.active_ios_package_log_buffers.clear()
     lc.active_ios_package_log_frame_buffers.clear()
+    lc.ios_device_missing_polls.clear()
     lc._clear_record_dedup()
 
 
@@ -869,6 +872,56 @@ eb6b13cc453f5a53ef07ff7149858a8635d18c10  F17VXQA8JCLH    iPhone X     iPhone X 
         lc.subprocess.run = original_run
 
 
+def test_ios_discovery_grace_contract() -> None:
+    """A transient empty tidevice poll must not flap the connected-device UI."""
+    device_id = "00008120-001C0D3C0C61A01E"
+    original_missing = dict(lc.ios_device_missing_polls)
+    try:
+        lc.ios_device_missing_polls.clear()
+        _assert_equal(
+            lc._stabilize_ios_device_ids({device_id}, set()),
+            {device_id},
+            "observed iOS device was not retained",
+        )
+        _assert_equal(
+            lc._stabilize_ios_device_ids(set(), {device_id}),
+            {device_id},
+            "first empty discovery poll incorrectly disconnected iOS device",
+        )
+        _assert_equal(
+            lc._stabilize_ios_device_ids(set(), {device_id}),
+            {device_id},
+            "second empty discovery poll incorrectly disconnected iOS device",
+        )
+        _assert_equal(
+            lc._stabilize_ios_device_ids(set(), {device_id}),
+            set(),
+            "device was retained after the discovery grace window",
+        )
+        _assert_equal(
+            lc._stabilize_ios_device_ids({device_id}, set()),
+            {device_id},
+            "device was not rediscovered after a real disconnect",
+        )
+    finally:
+        lc.ios_device_missing_polls.clear()
+        lc.ios_device_missing_polls.update(original_missing)
+
+
+def test_ios_reader_liveness_contract() -> None:
+    """Discovery churn must not stop a live iOS syslog reader."""
+    source = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    manager = source.split("def device_manager():", 1)[1].split("def _append_package_log_row", 1)[0]
+    _assert("if is_dead:" in manager, "iOS readers must still restart after a real process/thread exit")
+    _assert("did not in ids" not in manager, "iOS discovery must not stop a live reader on one missing row")
+    _assert("ids.update(active_ios_log_readers)" in manager, "live iOS readers must stay visible during discovery churn")
+    _assert("ids.update(active_ios_log_processes)" in manager, "live iOS processes must stay visible during discovery churn")
+    _assert(
+        "an idle stream must not be killed" in manager,
+        "iOS reader idle-stream protection is missing",
+    )
+
+
 def test_ios_package_log_preserves_multiline_records() -> None:
     """Package Log keeps iOS continuation lines while other tabs stay line-based."""
     original_platform = lc.active_platform
@@ -1255,6 +1308,30 @@ def test_sdk_check_preset_contract() -> None:
         parsed = lc._parse_sdk_expected_line(line)
         _assert(parsed is not None, f"C-192 iOS entry cannot be parsed: {line}")
 
+    c192_bright = c192_ios.get("bright") or {}
+    c192_bright_identifiers = c192_bright.get("skadnetwork_identifiers") or []
+    _assert_equal(c192_bright.get("version"), "1.605.415", "C-192 iOS BrightData version changed")
+    _assert_equal(len(c192_bright_identifiers), 290, "C-192 iOS Bright/SKAds preset identifier count changed")
+    _assert_equal(c192_bright_identifiers[0], "22mmun2rn5.skadnetwork", "C-192 iOS Bright/SKAds first identifier changed")
+    _assert_equal(c192_bright_identifiers[-1], "zq492l623r.skadnetwork", "C-192 iOS Bright/SKAds last identifier changed")
+    _assert("6lz2ygh3q6.adattributionkit" in c192_bright_identifiers, "C-192 iOS AdAttributionKit identifier is missing")
+    bright_compare = lc._compare_bright_skad_preset(
+        "1.605.415",
+        [c192_bright_identifiers[0], "extra-network.skadnetwork", c192_bright_identifiers[0]],
+        preset_name="C-192-iOS",
+        preset=c192_ios,
+    )
+    _assert_equal(bright_compare.get("passed_count"), 2, "Bright/SKAds compare must mark version and one identifier as PASSED")
+    _assert_equal(bright_compare.get("total_count"), 291, "Bright/SKAds compare row count changed")
+    _assert_equal(bright_compare.get("extra_identifiers"), ["extra-network.skadnetwork"], "Bright/SKAds extra identifier warning changed")
+    _assert(any(row.get("status") == "MISSING" for row in bright_compare.get("rows", [])), "Bright/SKAds compare must report missing identifiers")
+    merged_remote = lc._merge_local_bright_preset_data({"C-192-iOS": {"platform": "ios", "lines": []}})
+    _assert_equal(
+        merged_remote.get("C-192-iOS", {}).get("bright", {}).get("version"),
+        "1.605.415",
+        "local Bright/SKAds additions must survive an older remote preset response",
+    )
+
     c180_ios_preset = presets["C-180-iOS"]
     _assert_equal(c180_ios_preset.get("platform"), "ios", "C-180 iOS preset platform changed")
     c180_ios_lines = c180_ios_preset.get("lines") or []
@@ -1287,6 +1364,8 @@ def test_sdk_check_preset_contract() -> None:
     _assert("sdkCheckInput" in source_text, "manual SDK input fallback is missing")
     _assert(source_text.count('id="reloadSdkCheckPresetsBtn"') == 1, "SDK preset reload button must exist exactly once")
     _assert("clean_lines" in source_text and '"lines": clean_lines' in source_text, "empty SDK presets must remain valid")
+    _assert('"skadnetwork_identifiers"' in source_text and "_compare_bright_skad_preset" in source_text, "Bright/SKAds preset comparison support is missing")
+    _assert("_merge_local_bright_preset_data" in source_text, "local Bright/SKAds preset fallback is missing")
     _assert('"Accept-Encoding": "identity"' in source_text, "SDK preset fetch must bypass stale compressed cache")
     _assert("def _fetch_sdk_check_presets(force_remote=False):" in source_text, "SDK preset force refresh support is missing")
     _assert("refresh_requested = request.args.get(\"refresh\"" in source_text, "SDK preset refresh query is missing")
@@ -2083,6 +2162,62 @@ def test_ios_load_ads_max_viewability_contract() -> None:
         lc.send_to_sheet = original_send_to_sheet
 
 
+def test_ios_load_ads_max_viewability_record_boundary_contract() -> None:
+    """A following iOS syslog record must not be appended to a MAX row."""
+    original_platform = lc.active_platform
+    original_recording_state = dict(lc.recording_states["LoadAdsExt"])
+    original_emit = lc.socketio.emit
+    original_send_to_sheet = lc.send_to_sheet
+    original_rows = list(lc.load_ads_ext_events)
+    original_unique = set(lc.unique_load_ads_ext)
+    original_buffer = dict(lc.incomplete_ios_max_load_ads_logs)
+    try:
+        lc.active_platform = "ios"
+        lc.recording_states["LoadAdsExt"].update({"is_recording": True, "current_sheet": "NG381"})
+        lc.load_ads_ext_events.clear()
+        lc.unique_load_ads_ext.clear()
+        lc.incomplete_ios_max_load_ads_logs.clear()
+        lc.socketio.emit = lambda *_args: None
+        lc.send_to_sheet = lambda *_args: None
+
+        combined = (
+            "Sep 23 14:00:48 iPhone-11-pro PixelArt(AppLovinSDK)[2113] <Notice>: "
+            "[AppLovinSdk] DEBUG [ALHealthEventsReporter] Reporting "
+            "mediated_ad_viewability_impression_called with extra parameters {\n"
+            '    "ad_format" = BANNER;\n'
+            '    "adapter_class" = ALAppLovinMediationAdapter;\n'
+            '    "adapter_version" = "13.6.4";\n'
+            '    "network_name" = "APPLOVIN_EXCHANGE";\n'
+            "}\n"
+            "Sep 23 14:00:48 iPhone-11-pro PixelArt(AppLovinSDK)[2113] <Notice>: "
+            "[ALPersistentPostbackManager] Enqueued postback: <ALPersistentPostback: "
+            "uniqueIdentifier = D5D00408-C901-43E1-A632-D7B4B308E82E>\n"
+            "Sep 23 14:00:48 iPhone-11-pro PixelArt(UIKitCore)[2113] <Notice>: "
+            "Will add background task with taskName: <private>"
+        )
+        lc.process_load_ads_max_log(combined, "ios-max-boundary")
+
+        rows = list(lc.load_ads_ext_events)
+        _assert_equal(len(rows), 1, "combined iOS MAX chunk created the wrong row count")
+        raw_log = rows[0].get("raw_log", "")
+        _assert("ALPersistentPostbackManager" not in raw_log, "postback record leaked into MAX Load Ads")
+        _assert("UIKitCore" not in raw_log, "UIKitCore record leaked into MAX Load Ads")
+        _assert(raw_log.rstrip().endswith("}"), "MAX Load Ads row did not stop at its closing dictionary")
+        _assert_equal(lc.incomplete_ios_max_load_ads_logs, {}, "record boundary test left a stale MAX buffer")
+    finally:
+        lc.active_platform = original_platform
+        lc.recording_states["LoadAdsExt"].clear()
+        lc.recording_states["LoadAdsExt"].update(original_recording_state)
+        lc.load_ads_ext_events.clear()
+        lc.load_ads_ext_events.extend(original_rows)
+        lc.unique_load_ads_ext.clear()
+        lc.unique_load_ads_ext.update(original_unique)
+        lc.incomplete_ios_max_load_ads_logs.clear()
+        lc.incomplete_ios_max_load_ads_logs.update(original_buffer)
+        lc.socketio.emit = original_emit
+        lc.send_to_sheet = original_send_to_sheet
+
+
 def test_ios_load_ads_max_delegate_contract() -> None:
     """iOS MAX didDisplayAd/didPayRevenueForAd callbacks must become Load Ads rows."""
     original_platform = lc.active_platform
@@ -2297,6 +2432,74 @@ def test_ascendx_cloudx_callback_contract() -> None:
         lc.callback_ad_logs.clear()
         lc.callback_ad_logs.extend(original_rows)
         lc.socketio.emit = original_emit
+
+
+def test_bright_skad_ipa_inspection_contract() -> None:
+    """Bright/SKAds reads SKAdNetworkItems only from the app Info.plist."""
+    rendered = lc.app.test_client().get("/").get_data(as_text=True)
+    _assert(">Bright/SKAds<" in rendered, "Bright tab label was not renamed")
+    _assert('id="skAdNetworkList"' not in rendered, "standalone SKAdNetwork result list must be removed")
+    _assert("renderSkAdNetworkIdentifiers" not in rendered, "standalone SKAdNetwork renderer must be removed")
+    _assert('id="brightSkadPresetSelect"' in rendered, "Bright/SKAds preset selector is missing")
+    _assert('id="brightSkadCompareBody"' in rendered, "Bright/SKAds comparison table is missing")
+    _assert('id="brightSkadExtraWarning"' in rendered, "Bright/SKAds extra identifier warning is missing")
+    _assert("buildBrightSkadComparison" in rendered, "Bright/SKAds comparison renderer is missing")
+    _assert("PASSED" in rendered, "Bright/SKAds comparison must use PASSED status")
+
+    with tempfile.TemporaryDirectory(prefix="eventinspector_bright_skad_") as temp_dir:
+        ipa_path = Path(temp_dir) / "Harness.ipa"
+        app_plist = {
+            "CFBundleDisplayName": "HarnessApp",
+            "CFBundleName": "HarnessApp",
+            "SKAdNetworkItems": [
+                {"SKAdNetworkIdentifier": "app-one.skadnetwork"},
+                {"SKAdNetworkIdentifier": "app-two.skadnetwork"},
+            ],
+        }
+        bright_plist = {
+            "CFBundleShortVersionString": "9.9.9",
+            "SKAdNetworkItems": [
+                {"SKAdNetworkIdentifier": "framework-only.skadnetwork"},
+            ],
+        }
+        with zipfile.ZipFile(ipa_path, "w") as archive:
+            archive.writestr("Payload/Harness.app/Info.plist", plistlib.dumps(app_plist))
+            archive.writestr(
+                "Payload/Harness.app/Frameworks/brdsdk.framework/Info.plist",
+                plistlib.dumps(bright_plist),
+            )
+
+        result = lc._extract_brightsdk_version_from_ipa(str(ipa_path))
+        _assert_equal(result.get("app_name"), "HarnessApp", "Bright/SKAds app name changed")
+        _assert_equal(result.get("brightsdk_version"), "9.9.9", "BrightSDK version was not read")
+        _assert_equal(
+            result.get("skadnetwork_identifiers"),
+            ["app-one.skadnetwork", "app-two.skadnetwork"],
+            "SKAdNetwork list must come from the app Info.plist only",
+        )
+        _assert("framework-only.skadnetwork" not in result.get("skadnetwork_identifiers", []), "BrightSDK plist leaked into SKAdNetwork results")
+        c192_ios = lc._load_sdk_check_presets()["C-192-iOS"]
+        compare = lc._compare_bright_skad_preset(
+            result.get("brightsdk_version"),
+            result.get("skadnetwork_identifiers"),
+            preset_name="C-192-iOS",
+            preset=c192_ios,
+        )
+        _assert_equal(compare.get("rows", [{}])[0].get("status"), "FAILED", "BrightData mismatch must fail")
+        _assert_equal(compare.get("extra_identifiers"), ["app-one.skadnetwork", "app-two.skadnetwork"], "IPA-only SKAdNetwork identifiers must be warned separately")
+        with ipa_path.open("rb") as handle:
+            response = lc.app.test_client().post(
+                "/api/ipa/inspect",
+                data={
+                    "ipa_file": (handle, "Harness.ipa"),
+                    "preset_name": "C-192-iOS",
+                },
+                content_type="multipart/form-data",
+            )
+        _assert_equal(response.status_code, 200, "Bright/SKAds IPA inspect endpoint failed")
+        api_payload = response.get_json() or {}
+        _assert_equal(api_payload.get("bright_compare", {}).get("preset_name"), "C-192-iOS", "IPA inspect did not apply the selected Bright/SKAds preset")
+        _assert_equal(api_payload.get("bright_compare", {}).get("total_count"), 291, "IPA inspect Bright/SKAds compare row count changed")
 
 
 def test_release_payload_sync() -> None:
@@ -3489,6 +3692,8 @@ TESTS: List[Callable[[], None]] = [
     test_platform_reconnect_contract,
     test_ios_reader_singleton_contract,
     test_ios_transport_fallback_contract,
+    test_ios_discovery_grace_contract,
+    test_ios_reader_liveness_contract,
     test_ios_package_log_preserves_multiline_records,
     test_ios_package_log_tidevice_nul_framing,
     test_ios_package_log_tidevice_newline_stream_does_not_merge_kernel,
@@ -3502,12 +3707,14 @@ TESTS: List[Callable[[], None]] = [
     test_installation_id_copy_contract,
     test_sdk_failed_groups_sort_first,
     test_release_build_marker,
+    test_bright_skad_ipa_inspection_contract,
     test_preset_revert_protection_contract,
     test_rewarded_bidding_filter_contract,
     test_price_rotation_exact_parser,
     test_load_ads_provider_contract,
     test_load_ads_max_contract,
     test_ios_load_ads_max_viewability_contract,
+    test_ios_load_ads_max_viewability_record_boundary_contract,
     test_ios_load_ads_max_delegate_contract,
     test_levelplay_impression_data_callback_contract,
     test_ascendx_cloudx_callback_contract,
