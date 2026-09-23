@@ -4098,7 +4098,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(66)</title>
+    <title>Event Inspector v2.5.0(67)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -4180,7 +4180,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(66)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(67)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4411,6 +4411,7 @@ HTML_TEMPLATE = """
                             <select id="brightSkadPresetSelect" class="h-9 min-w-[220px] px-3 border rounded-md shadow-sm text-xs bg-white">
                                 <option value="">Loading presets...</option>
                             </select>
+                            <button id="reloadBrightSkadPresetsBtn" type="button" class="h-9 shrink-0 rounded border border-indigo-200 bg-white px-3 text-xs font-semibold text-indigo-700 hover:bg-indigo-100">Reload</button>
                             <span id="brightSkadPresetStatus" class="text-xs text-slate-500">C-192-iOS sẽ được chọn mặc định.</span>
                         </div>
                         <div class="flex items-center gap-2 bg-gray-50 p-2.5 rounded-lg border">
@@ -4434,6 +4435,7 @@ HTML_TEMPLATE = """
                                 <div class="font-semibold text-sm text-slate-700">Bright/SKAds comparison</div>
                                 <div id="brightSkadCompareSummary" class="text-xs text-slate-500">Upload IPA để bắt đầu compare.</div>
                             </div>
+                            <div id="brightSkadExtraWarning" class="hidden px-3 py-2 text-xs text-amber-800 bg-amber-50 border-b border-amber-200"></div>
                             <div class="overflow-auto max-h-[32rem]">
                                 <table class="min-w-full text-xs">
                                     <thead class="bg-gray-50 sticky top-0 z-10">
@@ -4449,7 +4451,6 @@ HTML_TEMPLATE = """
                                     </tbody>
                                 </table>
                             </div>
-                            <div id="brightSkadExtraWarning" class="hidden px-3 py-2 text-xs text-amber-800 bg-amber-50 border-t border-amber-200"></div>
                         </div>
                     </div>
                 </div>
@@ -7318,6 +7319,20 @@ HTML_TEMPLATE = """
 
         document.getElementById('reloadSdkCheckPresetsBtn')?.addEventListener('click', () => {
             loadSdkCheckPresetsFromGit(true);
+        });
+
+        document.getElementById('reloadBrightSkadPresetsBtn')?.addEventListener('click', async (event) => {
+            const button = event.currentTarget;
+            if (!button) return;
+            const originalText = button.textContent || 'Reload';
+            button.disabled = true;
+            button.textContent = 'Reloading...';
+            try {
+                await loadSdkCheckPresetsFromGit(true);
+            } finally {
+                button.disabled = false;
+                button.textContent = originalText;
+            }
         });
 
         // Refresh remote presets on every app/page start so an edited GitHub list is available immediately.

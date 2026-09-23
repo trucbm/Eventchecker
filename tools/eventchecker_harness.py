@@ -42,8 +42,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-23-1-2.5.0-66"
-CURRENT_RELEASE_BUILD = 66
+CURRENT_RELEASE_VERSION = "2026-09-23-1-2.5.0-67"
+CURRENT_RELEASE_BUILD = 67
 ROLLBACK_SOURCE_BUILD = 56
 RELEASE_SOURCE_BUILD = CURRENT_RELEASE_BUILD
 if str(ROOT) not in sys.path:
@@ -1363,6 +1363,7 @@ def test_sdk_check_preset_contract() -> None:
     _assert("loadSdkCheckPresetsFromGit" in source_text, "SDK preset remote load action is missing")
     _assert("sdkCheckInput" in source_text, "manual SDK input fallback is missing")
     _assert(source_text.count('id="reloadSdkCheckPresetsBtn"') == 1, "SDK preset reload button must exist exactly once")
+    _assert(source_text.count('id="reloadBrightSkadPresetsBtn"') == 1, "Bright/SKAds preset reload button must exist exactly once")
     _assert("clean_lines" in source_text and '"lines": clean_lines' in source_text, "empty SDK presets must remain valid")
     _assert('"skadnetwork_identifiers"' in source_text and "_compare_bright_skad_preset" in source_text, "Bright/SKAds preset comparison support is missing")
     _assert("_merge_local_bright_preset_data" in source_text, "local Bright/SKAds preset fallback is missing")
@@ -1386,10 +1387,12 @@ def test_rendered_sdk_preset_javascript_contract() -> None:
         "SDK preset selector must remain above Start Checking",
     )
     _assert('id="reloadSdkCheckPresetsBtn"' in html, "rendered SDK preset reload button is missing")
+    _assert('id="reloadBrightSkadPresetsBtn"' in html, "rendered Bright/SKAds preset reload button is missing")
     _assert("loadSdkCheckPresetsFromGit();" in html, "SDK presets must reload when the app UI starts")
     _assert("loadSdkCheckPresetsFromGit(true);" in html, "preset Reload button must force a fresh GitHub request")
     _assert("refreshQuery = force ? '&refresh=1'" in html, "SDK preset Reload must request a remote refresh")
     _assert("reloadSdkCheckPresetsBtn" in html and "loadSdkCheckPresetsFromGit" in html, "reload button handler is missing")
+    _assert("reloadBrightSkadPresetsBtn" in html and "Reloading..." in html, "Bright/SKAds reload button handler is missing")
 
 
 def test_default_ad_event_contract() -> None:
@@ -2443,6 +2446,10 @@ def test_bright_skad_ipa_inspection_contract() -> None:
     _assert('id="brightSkadPresetSelect"' in rendered, "Bright/SKAds preset selector is missing")
     _assert('id="brightSkadCompareBody"' in rendered, "Bright/SKAds comparison table is missing")
     _assert('id="brightSkadExtraWarning"' in rendered, "Bright/SKAds extra identifier warning is missing")
+    _assert(
+        rendered.index('id="brightSkadExtraWarning"') < rendered.index('id="brightSkadCompareBody"'),
+        "Bright/SKAds extra identifier warning must appear before the comparison rows",
+    )
     _assert("buildBrightSkadComparison" in rendered, "Bright/SKAds comparison renderer is missing")
     _assert("PASSED" in rendered, "Bright/SKAds comparison must use PASSED status")
 
