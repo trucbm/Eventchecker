@@ -40,8 +40,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-22-2-2.5.0-64"
-CURRENT_RELEASE_BUILD = 64
+CURRENT_RELEASE_VERSION = "2026-09-23-1-2.5.0-65"
+CURRENT_RELEASE_BUILD = 65
 ROLLBACK_SOURCE_BUILD = 56
 RELEASE_SOURCE_BUILD = CURRENT_RELEASE_BUILD
 if str(ROOT) not in sys.path:
@@ -75,6 +75,7 @@ def _reset_runtime_state() -> None:
     lc.package_log_cache.clear()
     lc.active_ios_package_log_buffers.clear()
     lc.active_ios_package_log_frame_buffers.clear()
+    lc._clear_record_dedup()
 
 
 def _assert(condition: bool, message: str) -> None:
@@ -791,12 +792,12 @@ def test_ios_max_sdk_search_only() -> None:
         source_text = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
         _assert(
             "process_ios_package_log_stream_chunk(device_id, raw_chunk)" in source_text,
-            "iOS reader must keep tidevice framing isolated to Package Log",
+            "iOS reader must route raw framing to Package Log",
         )
         _assert(
-            "if not uses_nul_framing:" in source_text
-            and "process_ios_package_log_stream_line(device_id, log_obj)" in source_text,
-            "iOS reader must keep the legacy line-based fallback",
+            "active_ios_package_log_stream_modes" in source_text
+            and "for raw_line in raw_chunk.splitlines():" in source_text,
+            "iOS Package Log must detect newline streams instead of assuming NUL framing",
         )
         _assert("pending_record" not in source_text, "MAX SDK change must not add a shared iOS log buffer")
     finally:
@@ -818,6 +819,23 @@ def test_platform_reconnect_contract() -> None:
     _assert("socket.on('connect'" in rendered, "platform reconnect handler is missing")
     _assert("reset: false" in rendered, "platform reconnect must not clear runtime state")
     _assert("socket.emit('set_platform'" in rendered, "platform reconnect does not resync the backend")
+
+
+def test_ios_reader_singleton_contract() -> None:
+    source = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    for marker in (
+        "reader_thread = threading.current_thread()",
+        "current_reader = active_ios_log_readers.get(device_id)",
+        "if thread and thread.is_alive():",
+        "thread.join(timeout=2)",
+        "readers_to_stop = []",
+        "for did, reason in readers_to_stop:",
+    ):
+        _assert(marker in source, f"iOS reader singleton guard is missing: {marker}")
+    _assert(
+        "active_ios_log_readers.get(device_id) is thread" in source,
+        "iOS reader shutdown must not remove a replacement reader",
+    )
 
 
 def test_ios_transport_fallback_contract() -> None:
@@ -863,6 +881,7 @@ def test_ios_package_log_preserves_multiline_records() -> None:
         lc.target_package_name = "PixelArt"
         lc.is_paused = False
         lc.package_log_cache.clear()
+        lc._clear_record_dedup("package")
         lc.active_ios_package_log_buffers.clear()
 
         record_lines = [
@@ -919,6 +938,7 @@ def test_ios_package_log_tidevice_nul_framing() -> None:
         lc.target_package_name = "PixelArt"
         lc.is_paused = False
         lc.package_log_cache.clear()
+        lc._clear_record_dedup("package")
         lc.active_ios_package_log_frame_buffers.clear()
 
         first_record = (
@@ -957,6 +977,61 @@ def test_ios_package_log_tidevice_nul_framing() -> None:
         lc.active_ios_package_log_frame_buffers.update(original_buffers)
 
 
+def test_ios_package_log_tidevice_newline_stream_does_not_merge_kernel() -> None:
+    """A newline tidevice stream must not merge kernel records into the app row."""
+    original_platform = lc.active_platform
+    original_target = lc.target_package_name
+    original_paused = lc.is_paused
+    original_cache = list(lc.package_log_cache)
+    original_buffers = dict(lc.active_ios_package_log_buffers)
+    original_frame_buffers = dict(lc.active_ios_package_log_frame_buffers)
+    original_modes = dict(lc.active_ios_package_log_stream_modes)
+    try:
+        lc.active_platform = "ios"
+        lc.target_package_name = "PixelArt"
+        lc.is_paused = False
+        lc.package_log_cache.clear()
+        lc._clear_record_dedup("package")
+        lc.active_ios_package_log_buffers.clear()
+        lc.active_ios_package_log_frame_buffers.clear()
+        lc.active_ios_package_log_stream_modes.clear()
+
+        stream = (
+            "Sep 22 16:56:59 Galaxy-iphone PixelArt(AppLovinSDK)[42702] <Notice>: app event {\n"
+            '    "adapter_version" = "4.10.0";\n'
+            "}\n"
+            "Sep 22 16:57:01 Galaxy-iphone kernel[0] <Notice>: IO80211ControllerMonitor::setAMPDUstat unhandled PixelArt marker\n"
+            "Sep 22 16:57:01 Galaxy-iphone akd[8532] <Error>: Attestation map does not contain the cert attestation.\n"
+        )
+        lc.process_ios_package_log_stream_chunk("ios-device", stream)
+
+        _assert_equal(
+            lc.active_ios_package_log_stream_modes.get("ios-device"),
+            "line",
+            "newline iOS stream was misclassified as NUL-framed",
+        )
+        _assert_equal(len(lc.package_log_cache), 1, "app record was not emitted at the next record boundary")
+        row = lc.package_log_cache[-1]
+        _assert_equal(row["tag"], "PixelArt", "newline app row tag was not preserved")
+        _assert("kernel[0]" not in row["log"], "kernel record was merged into the app row")
+        _assert("akd[8532]" not in row["log"], "akd record was merged into the app row")
+
+        lc._flush_ios_package_log_buffer("ios-device")
+        _assert_equal(len(lc.package_log_cache), 1, "non-app trailing record was emitted into Package Log")
+    finally:
+        lc.active_platform = original_platform
+        lc.target_package_name = original_target
+        lc.is_paused = original_paused
+        lc.package_log_cache.clear()
+        lc.package_log_cache.extend(original_cache)
+        lc.active_ios_package_log_buffers.clear()
+        lc.active_ios_package_log_buffers.update(original_buffers)
+        lc.active_ios_package_log_frame_buffers.clear()
+        lc.active_ios_package_log_frame_buffers.update(original_frame_buffers)
+        lc.active_ios_package_log_stream_modes.clear()
+        lc.active_ios_package_log_stream_modes.update(original_modes)
+
+
 def test_ios_max_load_ads_from_package_frame_contract() -> None:
     """A complete tidevice package frame must also feed the MAX Load Ads parser."""
     original_platform = lc.active_platform
@@ -978,6 +1053,7 @@ def test_ios_max_load_ads_from_package_frame_contract() -> None:
         lc.is_paused = False
         lc.recording_states["LoadAdsExt"].update({"is_recording": True, "current_sheet": "NG381"})
         lc.package_log_cache.clear()
+        lc._clear_record_dedup("package")
         lc.load_ads_ext_events.clear()
         lc.unique_load_ads_ext.clear()
         lc.active_ios_package_log_frame_buffers.clear()
@@ -1555,6 +1631,83 @@ def test_ios_default_ad_event_tracking_record() -> None:
         lc.default_ad_event_clients.clear()
         lc.default_ad_event_clients.update(original_clients)
         lc.is_paused = original_paused
+        lc.socketio.emit = original_emit
+
+
+def test_exact_duplicate_record_dedup_across_ios_tabs() -> None:
+    """An identical iOS source record must produce one row per tab cache."""
+    original_platform = lc.active_platform
+    original_paused = lc.is_paused
+    original_validator_active = lc.validator_active
+    original_target = lc.target_package_name
+    original_session = lc.active_package_log_session_id
+    original_emit = lc.socketio.emit
+    original_callback_rows = list(lc.callback_ad_logs)
+    original_validator_rows = list(lc.validator_results)
+    original_specific_rows = list(lc.event_log_cache)
+    original_adrevenue_rows = list(lc.adrevenue_logs)
+    original_price_rows = list(lc.price_rotation_logs)
+    original_package_rows = list(lc.package_log_cache)
+    original_dedup_seen = {name: set(values) for name, values in lc.record_dedup_seen.items()}
+    original_dedup_order = {name: list(values) for name, values in lc.record_dedup_order.items()}
+    try:
+        lc.active_platform = "ios"
+        lc.is_paused = False
+        lc.validator_active = True
+        lc.target_package_name = "PixelArt"
+        lc.active_package_log_session_id = None
+        lc.callback_ad_logs.clear()
+        lc.validator_results.clear()
+        lc.event_log_cache.clear()
+        lc.adrevenue_logs.clear()
+        lc.price_rotation_logs.clear()
+        lc.package_log_cache.clear()
+        lc._clear_record_dedup()
+        lc.socketio.emit = lambda *_args, **_kwargs: None
+
+        line = (
+            "Sep 21 13:54:01 iPhone-11-pro PixelArt(UnityFramework)[1639] <Notice>: "
+            '[Tracking] TrackingService->Track: {"EventName":"ad_load",'
+            '"params":{"ad_platform":"max","ad_format":"interstitial"}}'
+        )
+        event_name, params, json_string = lc.find_and_parse_event(line)
+        lc.process_callback_and_ad_event_log(line, "ios-device", event_name, params, json_string)
+        lc.process_callback_and_ad_event_log(line, "ios-device", event_name, params, json_string)
+        _assert_equal(len(lc.callback_ad_logs), 1, "duplicate iOS callback/ad event row was stored")
+
+        lc.process_event_validator_log(event_name, params, json_string, line, "ios-device")
+        lc.process_event_validator_log(event_name, params, json_string, line, "ios-device")
+        _assert_equal(len(lc.validator_results), 1, "duplicate iOS validator row was stored")
+
+        lc.cache_specific_event_log(event_name, params, json_string, line, "ios-device")
+        lc.cache_specific_event_log(event_name, params, json_string, line, "ios-device")
+        _assert_equal(len(lc.event_log_cache), 1, "duplicate iOS specific-event row was stored")
+
+        lc._append_package_log_row("ios-device", line)
+        lc._append_package_log_row("ios-device", line)
+        _assert_equal(len(lc.package_log_cache), 1, "duplicate iOS Package Log row was stored")
+    finally:
+        lc.active_platform = original_platform
+        lc.is_paused = original_paused
+        lc.validator_active = original_validator_active
+        lc.target_package_name = original_target
+        lc.active_package_log_session_id = original_session
+        lc.callback_ad_logs.clear()
+        lc.callback_ad_logs.extend(original_callback_rows)
+        lc.validator_results.clear()
+        lc.validator_results.extend(original_validator_rows)
+        lc.event_log_cache.clear()
+        lc.event_log_cache.extend(original_specific_rows)
+        lc.adrevenue_logs.clear()
+        lc.adrevenue_logs.extend(original_adrevenue_rows)
+        lc.price_rotation_logs.clear()
+        lc.price_rotation_logs.extend(original_price_rows)
+        lc.package_log_cache.clear()
+        lc.package_log_cache.extend(original_package_rows)
+        lc._clear_record_dedup()
+        for name, values in original_dedup_seen.items():
+            lc.record_dedup_seen[name].update(values)
+            lc.record_dedup_order[name].extend(original_dedup_order[name])
         lc.socketio.emit = original_emit
 
 
@@ -3334,15 +3487,18 @@ TESTS: List[Callable[[], None]] = [
     test_max_sdk_logs,
     test_ios_max_sdk_search_only,
     test_platform_reconnect_contract,
+    test_ios_reader_singleton_contract,
     test_ios_transport_fallback_contract,
     test_ios_package_log_preserves_multiline_records,
     test_ios_package_log_tidevice_nul_framing,
+    test_ios_package_log_tidevice_newline_stream_does_not_merge_kernel,
     test_ios_max_load_ads_from_package_frame_contract,
     test_sdk_base_name_matching,
     test_sdk_check_preset_contract,
     test_rendered_sdk_preset_javascript_contract,
     test_default_ad_event_contract,
     test_ios_default_ad_event_tracking_record,
+    test_exact_duplicate_record_dedup_across_ios_tabs,
     test_installation_id_copy_contract,
     test_sdk_failed_groups_sort_first,
     test_release_build_marker,

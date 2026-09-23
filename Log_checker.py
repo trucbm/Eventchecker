@@ -1134,6 +1134,7 @@ active_package_pids = {}
 active_logcat_processes = {}
 active_ios_package_log_buffers = {}
 active_ios_package_log_frame_buffers = {}
+active_ios_package_log_stream_modes = {}
 active_package_log_session_id = None
 package_log_db_queue = Queue()
 
@@ -1191,6 +1192,84 @@ connected_devices_info = []
 installation_id_state = {}
 is_paused = False
 lock = threading.Lock()
+record_dedup_lock = threading.Lock()
+
+# A single physical log record can reach the iOS readers more than once when
+# the relay reconnects or when a generic event is dispatched through both the
+# callback and event paths.  Keep a bounded exact-record index per tab so the
+# UI/cache/export pipeline stores one copy of the same device record.
+RECORD_DEDUP_LIMITS = {
+    "load_ads": MAX_LOAD_ADS_LOGS * 2,
+    "load_ads_ext": MAX_LOAD_ADS_LOGS * 2,
+    "validator": MAX_VALIDATOR_LOGS * 2,
+    "specific": MAX_SPECIFIC_EVENT_LOGS * 2,
+    "callback": MAX_CALLBACK_AD_LOGS * 2,
+    "adrevenue": MAX_ADREVENUE_LOGS * 2,
+    "price_rotation": MAX_PRICE_ROTATION_LOGS * 2,
+    "package": 30000,
+}
+record_dedup_seen = {name: set() for name in RECORD_DEDUP_LIMITS}
+record_dedup_order = {
+    name: deque(maxlen=limit)
+    for name, limit in RECORD_DEDUP_LIMITS.items()
+}
+
+
+def _accept_exact_record(bucket, device_id, raw_log, *identity_parts):
+    """Return False when this exact device record was already accepted.
+
+    Callers may hold ``lock``; this helper uses its own small lock so it is
+    safe for the background iOS reader and the socket/UI threads together.
+    The raw log includes the source timestamp in normal syslog formats, so
+    genuinely separate events remain distinct while replayed identical lines
+    collapse to one record.
+    """
+    if bucket not in record_dedup_seen:
+        return True
+    key = (
+        str(device_id or "").strip(),
+        *(str(part or "").strip() for part in identity_parts),
+        str(raw_log or "").strip(),
+    )
+    with record_dedup_lock:
+        seen = record_dedup_seen[bucket]
+        if key in seen:
+            return False
+        order = record_dedup_order[bucket]
+        if order.maxlen and len(order) >= order.maxlen:
+            seen.discard(order[0])
+        order.append(key)
+        seen.add(key)
+        return True
+
+
+def _clear_record_dedup(bucket=None):
+    names = (bucket,) if bucket else tuple(record_dedup_seen)
+    with record_dedup_lock:
+        for name in names:
+            if name not in record_dedup_seen:
+                continue
+            record_dedup_seen[name].clear()
+            record_dedup_order[name].clear()
+
+
+def _append_callback_ad_row(row):
+    """Append and emit a callback row only once for an exact source record."""
+    with lock:
+        if not _accept_exact_record(
+            "callback",
+            row.get("device_id", ""),
+            row.get("raw_log", ""),
+            row.get("type", ""),
+            row.get("event_name", ""),
+        ):
+            return False
+        callback_ad_logs.append(row)
+        snapshot = list(callback_ad_logs)
+    socketio.emit("update_callback_ad_table", snapshot)
+    return True
+
+
 incomplete_impression_logs = {} # Buffer cho logs bị ngắt dòng
 incomplete_ios_adrevenue_logs = {} # Buffer cho iOS AdRevenue logs bị ngắt dòng
 incomplete_ios_load_ads_ext_logs = {} # Buffer riêng cho Load Ads đọc AppMetrica AdRevenue iOS
@@ -2852,6 +2931,14 @@ def process_price_rotation_log(log_entry, device_id):
         return
 
     with lock:
+        if not _accept_exact_record(
+            "price_rotation",
+            device_id,
+            parsed.get("raw_log", ""),
+            parsed.get("bidding_name", ""),
+            parsed.get("type", ""),
+        ):
+            return
         price_rotation_logs.append(parsed)
         snapshot = list(price_rotation_logs)
     socketio.emit("update_price_rotation_table", snapshot)
@@ -2985,17 +3072,15 @@ def _record_named_provider_callback(log_entry, device_id, event_name, callback_t
 
     ad_unit_label = _named_callback_ad_unit_label(log_entry, event_name)
     display_name = f"{event_name} - {ad_unit_label}" if ad_unit_label else event_name
-    with lock:
-        callback_ad_logs.append({
-            "device_id": device_id,
-            "device_name": get_device_name(device_id),
-            "type": callback_type,
-            "event_name": display_name,
-            "details": details,
-            "raw_log": str(log_entry or "").strip(),
-            "json_data": json_data_for_log,
-        })
-        socketio.emit('update_callback_ad_table', list(callback_ad_logs))
+    _append_callback_ad_row({
+        "device_id": device_id,
+        "device_name": get_device_name(device_id),
+        "type": callback_type,
+        "event_name": display_name,
+        "details": details,
+        "raw_log": str(log_entry or "").strip(),
+        "json_data": json_data_for_log,
+    })
 
 def split_top_level_csv(text):
     parts = []
@@ -3857,7 +3942,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(64)</title>
+    <title>Event Inspector v2.5.0(65)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -3939,7 +4024,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(64)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(65)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5157,10 +5242,28 @@ HTML_TEMPLATE = """
             return str.replace(/'/g, '&#39;');
         }
 
+        function logRecordKey(record) {
+            const device = String(record?.device_id || '').trim();
+            const raw = String(record?.raw_log ?? record?.log ?? '').trim();
+            if (raw) return `${device}||${raw}`;
+            return `${device}||${JSON.stringify(record || {})}`;
+        }
+
+        function dedupeLogRecords(records) {
+            const seen = new Set();
+            return (Array.isArray(records) ? records : []).filter(record => {
+                const key = logRecordKey(record);
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+        }
+
         function renderSimpleTable(id, data) {
             const tbody = document.getElementById(id);
             if (!tbody) return;
-            const filtered = (selectedDevice === 'all') ? data : data.filter(e => e.device_id === selectedDevice);
+            const uniqueData = dedupeLogRecords(data);
+            const filtered = (selectedDevice === 'all') ? uniqueData : uniqueData.filter(e => e.device_id === selectedDevice);
             
             const useProvider = id === 'loadAdsTableBody' || id === 'loadAdsExtTableBody';
             const useAdNetwork = id === 'loadAdsExtTableBody';
@@ -5426,7 +5529,7 @@ HTML_TEMPLATE = """
              const filterText = (document.getElementById('validatorEventFilterInput')?.value || '').toLowerCase().trim();
              const rawFilterText = (document.getElementById('validatorRawFilterInput')?.value || '').toLowerCase().trim();
              const sourceFilter = document.querySelector('input[name="validatorSourceFilter"]:checked')?.value || 'all';
-             const filtered = results.filter(r => {
+             const filtered = dedupeLogRecords(results).filter(r => {
                  if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
                  if (filterText && !(r.event_name || '').toLowerCase().includes(filterText)) return false;
                  if (rawFilterText && !(r.raw_log || '').toLowerCase().includes(rawFilterText)) return false;
@@ -5617,7 +5720,7 @@ HTML_TEMPLATE = """
         let lastSpecificEventData = [];
 
         socket.on('update_specific_event_table', (d) => {
-             lastSpecificEventData = d || [];
+             lastSpecificEventData = dedupeLogRecords(d);
              renderSpecificEventTable();
         });
 
@@ -5626,7 +5729,7 @@ HTML_TEMPLATE = """
              if (!tbody) return;
              const sourceFilter = document.querySelector('input[name="specificSourceFilter"]:checked')?.value || 'all';
              const textFilter = (document.getElementById('specificParamInput')?.value || '').trim().toLowerCase();
-             const filtered = lastSpecificEventData.filter(r => {
+             const filtered = dedupeLogRecords(lastSpecificEventData).filter(r => {
                  if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
                  if (sourceFilter !== 'all' && (r.source || 'firebase') !== sourceFilter) return false;
                  if (textFilter && !(r.raw_log || '').toLowerCase().includes(textFilter)) return false;
@@ -5640,7 +5743,7 @@ HTML_TEMPLATE = """
         let lastAdRevenueData = [];
 
          socket.on('update_adrevenue_table', (d) => {
-             lastAdRevenueData = d || [];
+             lastAdRevenueData = dedupeLogRecords(d);
              renderAdRevenueTable();
         });
 
@@ -5649,7 +5752,7 @@ HTML_TEMPLATE = """
             if (!tbody) return;
             const filterText = document.getElementById('adRevenueFilterInput').value.toLowerCase();
             const sourceFilter = document.querySelector('input[name="adRevenueSourceFilter"]:checked')?.value || 'all';
-            const filtered = lastAdRevenueData.filter(r => {
+            const filtered = dedupeLogRecords(lastAdRevenueData).filter(r => {
                 if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
                 if (sourceFilter !== 'all' && (r.source || '').toLowerCase() !== sourceFilter) return false;
                 if (filterText && !(r.raw_log || '').toLowerCase().includes(filterText)) return false;
@@ -5668,7 +5771,7 @@ HTML_TEMPLATE = """
         let lastCallbackData = [];
 
         socket.on('update_callback_ad_table', (d) => {
-            lastCallbackData = d;
+            lastCallbackData = dedupeLogRecords(d);
             renderCallbackTable();
         });
 
@@ -5683,7 +5786,7 @@ HTML_TEMPLATE = """
                 .filter(value => value !== 'all');
             const textFilter = document.getElementById('callbackAdFilterInput').value.toLowerCase();
 
-            const filtered = d.filter(r => {
+            const filtered = dedupeLogRecords(d).filter(r => {
                 // Device filter
                 if (selectedDevice !== 'all' && r.device_id !== selectedDevice) return false;
                 
@@ -5754,7 +5857,7 @@ HTML_TEMPLATE = """
         }
 
         socket.on('update_price_rotation_table', (data) => {
-            lastPriceRotationData = Array.isArray(data) ? data : [];
+            lastPriceRotationData = dedupeLogRecords(data);
             renderPriceRotationTable();
         });
 
@@ -5867,8 +5970,7 @@ HTML_TEMPLATE = """
         let pausedPackageSnapshot = [];
 
         function getPackageRowKey(l) {
-            const msgText = (l.message || l.log || '');
-            return `${l.time_display || l.time || ''}||${l.tag || ''}||${msgText}`;
+            return logRecordKey(l);
         }
 
         function getPackageFilterState() {
@@ -5934,6 +6036,7 @@ HTML_TEMPLATE = """
             const signature = JSON.stringify(state);
             const sameFilter = !packageUiPaused && !forceFull && signature === lastPackageFilterSignature;
             let appendedOnly = false;
+            let snapshotNeedsRebuild = false;
 
             if (sameFilter && sourceLogs.length > 0 && lastPackageLastRowKey) {
                 const lastIdx = sourceLogs.findIndex(l => getPackageRowKey(l) === lastPackageLastRowKey);
@@ -5945,21 +6048,16 @@ HTML_TEMPLATE = """
                     }
                     appendedOnly = true;
                 } else if (lastIdx < 0 && tbody.querySelector('tr.package-log-row')) {
-                    // The backend window moved faster than the browser could render.
-                    // Keep the current rows visible, append a small recent chunk, then
-                    // trim from the top instead of blanking and rebuilding the table.
-                    const fallbackLimit = activePlatform === 'ios' ? 1200 : 500;
-                    const appendedLogs = filterPackageLogs(sourceLogs.slice(-fallbackLimit), state);
-                    if (appendedLogs.length > 0) {
-                        const startIdx = tbody.querySelectorAll('tr.package-log-row').length;
-                        tbody.insertAdjacentHTML('beforeend', appendedLogs.map((l, idx) => packageRowHtml(l, startIdx + idx)).join(''));
-                    }
-                    appendedOnly = true;
+                    // The incoming snapshot is authoritative. Appending a
+                    // recent chunk here duplicated the same iOS rows whenever
+                    // the rolling window moved or a multiline record completed.
+                    snapshotNeedsRebuild = true;
                 }
             }
 
             const canAppendOnly =
                 !appendedOnly &&
+                !snapshotNeedsRebuild &&
                 sameFilter &&
                 sourceLogs.length >= lastPackageRenderedCount &&
                 (lastPackageRenderedCount === 0 ||
@@ -5993,7 +6091,7 @@ HTML_TEMPLATE = """
         }
 
         socket.on('package_log_cache', (logs) => {
-            lastPackageLogs = logs || [];
+            lastPackageLogs = dedupeLogRecords(logs);
             if (!packageUiPaused) renderPackageLogTable();
         });
 
@@ -6037,14 +6135,15 @@ HTML_TEMPLATE = """
         function renderPackageHistoryRows(rows, append = false) {
             const tbody = document.getElementById('packageHistoryTableBody');
             if (!tbody) return;
-            if ((!rows || rows.length === 0) && !append) {
+            const uniqueRows = dedupeLogRecords(rows);
+            if ((!uniqueRows || uniqueRows.length === 0) && !append) {
                 tbody.innerHTML = '<tr><td colspan="4" class="py-3 px-2 text-xs text-gray-500">No saved logs found for this filter.</td></tr>';
                 return;
             }
-            if (!rows || rows.length === 0) return;
+            if (!uniqueRows || uniqueRows.length === 0) return;
             if (!append) tbody.innerHTML = '';
             const startIdx = append ? tbody.querySelectorAll('tr.package-history-row').length : 0;
-            const html = rows.map((row, idx) => {
+            const html = uniqueRows.map((row, idx) => {
                 const rowKey = getPackageHistoryRowKey(row);
                 const selectedClass = selectedPackageHistoryRowKeys.has(rowKey) ? 'selected' : '';
                 return `
@@ -7596,7 +7695,7 @@ def process_load_ads_unity_log(line, device_id):
             if src and fmt:
                 d_name = get_device_name(device_id)
                 with lock:
-                    if (device_id, src, fmt, "unity") not in unique_load_ads:
+                    if (device_id, src, fmt, "unity") not in unique_load_ads and _accept_exact_record("load_ads", device_id, line, src, fmt, "unity"):
                         unique_load_ads.add((device_id, src, fmt, "unity"))
                         load_ads_events.append({
                             "device_id": device_id,
@@ -7664,6 +7763,8 @@ def _process_ios_max_viewability_log(line, device_id):
     with lock:
         if dedup_key in unique_load_ads_ext:
             return
+        if not _accept_exact_record("load_ads_ext", device_id, buffered, provider, ad_network, ad_format, "max_viewability"):
+            return
         unique_load_ads_ext.add(dedup_key)
         load_ads_ext_events.append(row)
         socketio.emit("update_load_ads_ext", list(load_ads_ext_events))
@@ -7694,6 +7795,8 @@ def _process_ios_max_delegate_log(line, device_id):
     dedup_key = (device_id, provider.lower(), ad_network.casefold(), ad_format, "max_delegate")
     with lock:
         if dedup_key in unique_load_ads_ext:
+            return
+        if not _accept_exact_record("load_ads_ext", device_id, raw_line, provider, ad_network, ad_format, "max_delegate"):
             return
         unique_load_ads_ext.add(dedup_key)
         load_ads_ext_events.append({
@@ -7747,6 +7850,8 @@ def process_load_ads_max_log(line, device_id):
     with lock:
         if dedup_key in unique_load_ads_ext:
             return
+        if not _accept_exact_record("load_ads_ext", device_id, raw_line, provider, ad_network, ad_format, "max_revenue"):
+            return
         unique_load_ads_ext.add(dedup_key)
         load_ads_ext_events.append({
             "device_id": device_id,
@@ -7795,7 +7900,7 @@ def process_load_ads_ext_log(line, device_id):
                 d_name = get_ios_device_name(device_id)
                 with lock:
                     dedup_key = (device_id, provider, ad_network, fmt, "ios_metrica")
-                    if dedup_key not in unique_load_ads_ext:
+                    if dedup_key not in unique_load_ads_ext and _accept_exact_record("load_ads_ext", device_id, raw_log or line, provider, ad_network, fmt, "ios_metrica"):
                         unique_load_ads_ext.add(dedup_key)
                         load_ads_ext_events.append({
                             "device_id": device_id,
@@ -7829,7 +7934,7 @@ def process_load_ads_ext_log(line, device_id):
                 d_name = get_device_name(device_id)
                 with lock:
                     dedup_key = (device_id, provider, ad_network, fmt, "metrica")
-                    if dedup_key not in unique_load_ads_ext:
+                    if dedup_key not in unique_load_ads_ext and _accept_exact_record("load_ads_ext", device_id, line, provider, ad_network, fmt, "metrica"):
                         unique_load_ads_ext.add(dedup_key)
                         load_ads_ext_events.append({
                             "device_id": device_id,
@@ -7994,17 +8099,15 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                 details = f'<div class="text-xs font-mono break-all text-red-600">JSON Parse Error</div><div class="text-xs font-mono break-all">{html.escape(json_str)}</div>'
         elif after_keyword:
             details = f'<div class="text-xs font-mono break-all">{html.escape(after_keyword.lstrip(":").strip())}</div>'
-        with lock:
-            callback_ad_logs.append({
-                "device_id": device_id,
-                "device_name": get_device_name(device_id),
-                "type": "Callback Levelplay",
-                "event_name": display_name,
-                "details": details,
-                "raw_log": log_entry.strip(),
-                "json_data": json_data_for_log
-            })
-            socketio.emit('update_callback_ad_table', list(callback_ad_logs))
+        _append_callback_ad_row({
+            "device_id": device_id,
+            "device_name": get_device_name(device_id),
+            "type": "Callback Levelplay",
+            "event_name": display_name,
+            "details": details,
+            "raw_log": log_entry.strip(),
+            "json_data": json_data_for_log
+        })
         return
 
     # --- 0b. Process Android LevelPlay impression data mapper callbacks ---
@@ -8028,17 +8131,15 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
             details = f'<div class="text-xs font-mono break-all">{html.escape(after_keyword.lstrip(":").strip())}</div>'
 
         display_name = _levelplay_impression_data_event_name(details_target or {})
-        with lock:
-            callback_ad_logs.append({
-                "device_id": device_id,
-                "device_name": get_device_name(device_id),
-                "type": "Callback Levelplay",
-                "event_name": display_name,
-                "details": details,
-                "raw_log": log_entry.strip(),
-                "json_data": json_data_for_log,
-            })
-            socketio.emit('update_callback_ad_table', list(callback_ad_logs))
+        _append_callback_ad_row({
+            "device_id": device_id,
+            "device_name": get_device_name(device_id),
+            "type": "Callback Levelplay",
+            "event_name": display_name,
+            "details": details,
+            "raw_log": log_entry.strip(),
+            "json_data": json_data_for_log,
+        })
         return
 
     # --- 0c. Process AscendX callbacks ---
@@ -8071,17 +8172,15 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                     json_data_for_log = json_str
                 except:
                     details = f'<div class="text-xs font-mono break-all text-red-600">JSON Parse Error</div><div class="text-xs font-mono break-all">{json_str}</div>'
-            with lock:
-                callback_ad_logs.append({
-                    "device_id": device_id,
-                    "device_name": get_device_name(device_id),
-                    "type": "Callback Gadsme",
-                    "event_name": method_part or "Gadsme",
-                    "details": details,
-                    "raw_log": log_entry.strip(),
-                    "json_data": json_data_for_log
-                })
-                socketio.emit('update_callback_ad_table', list(callback_ad_logs))
+            _append_callback_ad_row({
+                "device_id": device_id,
+                "device_name": get_device_name(device_id),
+                "type": "Callback Gadsme",
+                "event_name": method_part or "Gadsme",
+                "details": details,
+                "raw_log": log_entry.strip(),
+                "json_data": json_data_for_log
+            })
             return
         except:
             pass
@@ -8104,17 +8203,15 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                     json_data_for_log = json_str
                 except:
                     details = f'<div class="text-xs font-mono break-all text-red-600">JSON Parse Error</div><div class="text-xs font-mono break-all">{json_str}</div>'
-            with lock:
-                callback_ad_logs.append({
-                    "device_id": device_id,
-                    "device_name": get_device_name(device_id),
-                    "type": "Callback Adverty5",
-                    "event_name": method_part or "Adverty",
-                    "details": details,
-                    "raw_log": log_entry.strip(),
-                    "json_data": json_data_for_log
-                })
-                socketio.emit('update_callback_ad_table', list(callback_ad_logs))
+            _append_callback_ad_row({
+                "device_id": device_id,
+                "device_name": get_device_name(device_id),
+                "type": "Callback Adverty5",
+                "event_name": method_part or "Adverty",
+                "details": details,
+                "raw_log": log_entry.strip(),
+                "json_data": json_data_for_log
+            })
             return
         except:
             pass
@@ -8225,16 +8322,15 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
                     incomplete_impression_logs[device_id] = ""
                     
                     # Emit
-                    callback_ad_logs.append({
-                        "device_id": device_id, 
-                        "device_name": get_device_name(device_id), 
+                    _append_callback_ad_row({
+                        "device_id": device_id,
+                        "device_name": get_device_name(device_id),
                         "type": "Callback Levelplay",
-                        "event_name": display_name, 
-                        "details": details, 
-                        "raw_log": current_buffer.strip(), 
+                        "event_name": display_name,
+                        "details": details,
+                        "raw_log": current_buffer.strip(),
                         "json_data": json_data_for_log
                     })
-                    socketio.emit('update_callback_ad_table', list(callback_ad_logs))
                     return # Done processing this line/buffer
                 else:
                      # JSON start found but not ended -> Update buffer and wait for next line
@@ -8249,9 +8345,15 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
     if event_name and event_name.startswith("ad_"):
         try:
             details = format_json_html(actual_params) if actual_params else "No params"
-            with lock:
-                callback_ad_logs.append({"device_id": device_id, "device_name": get_device_name(device_id), "type": "Ad Event", "event_name": event_name, "details": details, "raw_log": log_entry.strip(), "json_data": json_string})
-                socketio.emit('update_callback_ad_table', list(callback_ad_logs))
+            _append_callback_ad_row({
+                "device_id": device_id,
+                "device_name": get_device_name(device_id),
+                "type": "Ad Event",
+                "event_name": event_name,
+                "details": details,
+                "raw_log": log_entry.strip(),
+                "json_data": json_string,
+            })
         except: pass
     
     # --- 3. Process Other Callbacks ---
@@ -8295,9 +8397,15 @@ def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, act
              except:
                  details = "Listener Fired"
 
-        with lock:
-            callback_ad_logs.append({"device_id": device_id, "device_name": get_device_name(device_id), "type": "Callback Levelplay", "event_name": display_name, "details": details, "raw_log": log_entry.strip(), "json_data": json_data_for_log})
-            socketio.emit('update_callback_ad_table', list(callback_ad_logs))
+        _append_callback_ad_row({
+            "device_id": device_id,
+            "device_name": get_device_name(device_id),
+            "type": "Callback Levelplay",
+            "event_name": display_name,
+            "details": details,
+            "raw_log": log_entry.strip(),
+            "json_data": json_data_for_log,
+        })
 
 def process_event_validator_log(event_name, actual_params, json_string, log_entry, device_id):
     if is_paused or not validator_active: 
@@ -8342,6 +8450,8 @@ def process_event_validator_log(event_name, actual_params, json_string, log_entr
         
         details_html += format_json_html(actual_params)
         
+        if not _accept_exact_record("validator", device_id, log_entry, event_name, source):
+            return
         validator_results.append({"device_id": device_id, "event_name": event_name, "device_name": get_device_name(device_id), "status": status, "details": details_html, "raw_log": log_entry.strip(), "json_data": json_string, "source": source})
         socketio.emit('update_validator_table', list(validator_results))
 
@@ -8400,7 +8510,10 @@ def _apply_specific_filter_and_emit():
 
 def cache_specific_event_log(event_name, params, json_string, log_entry, device_id):
     if is_paused: return
-    with lock: event_log_cache.append({'log': log_entry, 'device_id': device_id, 'json_data': json_string})
+    with lock:
+        if not _accept_exact_record("specific", device_id, log_entry, event_name):
+            return
+        event_log_cache.append({'log': log_entry, 'device_id': device_id, 'json_data': json_string})
     _apply_specific_filter_and_emit()
 
 def _record_adrevenue_log(device_id, source, event_name, parsed_data, raw_log, raw_details=None, raw_event_prefix=None, skip_validation=False):
@@ -8420,7 +8533,8 @@ def _record_adrevenue_log(device_id, source, event_name, parsed_data, raw_log, r
     }
     if raw_event_prefix:
         item["raw_event_prefix"] = raw_event_prefix
-    adrevenue_logs.append(item)
+    if _accept_exact_record("adrevenue", device_id, raw_log, source, event_name, raw_event_prefix or ""):
+        adrevenue_logs.append(item)
 
 def _normalize_ios_appmetrica_adrevenue(ad_revenue):
     payload = ad_revenue.get("Payload") if isinstance(ad_revenue.get("Payload"), dict) else {}
@@ -9201,26 +9315,28 @@ def adb_log_reader(device_id):
             # 4.5 Process Price Rotation logs with an exact marker match
             process_price_rotation_log(line, device_id)
 
-            # 5. Process Callback & Events
-            process_callback_and_ad_event_log(line, device_id)
-
             # 5.5 Process Firebase Installation ID
             process_installation_id_log(line, device_id)
             
             # 6. Parse Generic Events for Validators
             event_name, params, json_string = find_and_parse_event(line)
             if event_name:
+                # Dispatch once with the parsed event. The old flow called
+                # the callback parser once before parsing and once again for
+                # ad_* events, which produced identical Callback rows.
+                process_callback_and_ad_event_log(line, device_id, event_name, params, json_string)
                 _record_default_ad_event_hit(event_name, params, device_id)
                 process_event_validator_log(event_name, params, json_string, line, device_id)
                 cache_specific_event_log(event_name, params, json_string, line, device_id)
-                # Call callback processor for "ad_" events
-                process_callback_and_ad_event_log(line, device_id, event_name, params, json_string)
+            else:
+                process_callback_and_ad_event_log(line, device_id)
 
     except Exception as e: print(f"Error {device_id}: {e}")
 
 def ios_log_reader(device_id):
     print(f"INFO: Starting iOS log reader for {device_id}")
     proc = None
+    reader_thread = threading.current_thread()
     try:
         cmd = _resolve_ios_syslog_command(device_id)
         if not cmd:
@@ -9242,7 +9358,6 @@ def ios_log_reader(device_id):
             active_ios_log_last_seen[device_id] = time.time()
             active_ios_log_commands[device_id] = os.path.basename(cmd[0])
 
-        uses_nul_framing = os.path.basename(cmd[0]).lower() == "tidevice"
         for raw_chunk in iter(proc.stdout.readline, ''):
             if not raw_chunk:
                 break
@@ -9250,45 +9365,53 @@ def ios_log_reader(device_id):
                 active_ios_log_last_seen[device_id] = time.time()
             if active_platform != "ios":
                 continue
-            if uses_nul_framing:
-                # tidevice frames complete syslog records with NUL. Keep that
-                # framing for Package Log so multiline payloads stay together,
-                # while the other iOS tabs continue to receive physical lines.
-                process_ios_package_log_stream_chunk(device_id, raw_chunk)
-                logical_lines = raw_chunk.replace("\x00", "\n").splitlines()
-            else:
-                logical_lines = raw_chunk.splitlines()
+            # Package Log detects the actual stream framing. The executable
+            # name alone cannot tell us whether the relay payload is newline
+            # or NUL-delimited.
+            process_ios_package_log_stream_chunk(device_id, raw_chunk)
+            logical_lines = raw_chunk.replace("\x00", "\n").splitlines()
 
             for raw_line in logical_lines:
                 if not raw_line:
                     continue
                 log_obj = _normalize_ios_log_line(raw_line, device_id)
-                if not uses_nul_framing:
-                    process_ios_package_log_stream_line(device_id, log_obj)
                 process_load_ads_max_log(log_obj["raw_log"], device_id)
                 process_load_ads_ext_log(log_obj["raw_log"], device_id)
                 process_adrevenue_log(log_obj["raw_log"], device_id)
                 process_price_rotation_log(log_obj["raw_log"], device_id)
                 _process_sdk_check_line(log_obj["raw_log"], device_id)
-                process_callback_and_ad_event_log(log_obj["raw_log"], device_id)
                 event_name, params, json_string = find_and_parse_event(log_obj["raw_log"])
                 if event_name:
+                    # Dispatch once with the parsed event; dispatching first
+                    # without event metadata caused duplicate iOS Ad Event rows.
+                    process_callback_and_ad_event_log(log_obj["raw_log"], device_id, event_name, params, json_string)
                     _record_default_ad_event_hit(event_name, params, device_id)
                     process_event_validator_log(event_name, params, json_string, log_obj["raw_log"], device_id)
                     cache_specific_event_log(event_name, params, json_string, log_obj["raw_log"], device_id)
-                    process_callback_and_ad_event_log(log_obj["raw_log"], device_id, event_name, params, json_string)
+                else:
+                    process_callback_and_ad_event_log(log_obj["raw_log"], device_id)
     except Exception as e:
         print(f"iOS log reader error {device_id}: {e}")
     finally:
         _flush_ios_package_log_frame_buffer(device_id)
         _flush_ios_package_log_buffer(device_id)
         with lock:
-            incomplete_ios_max_load_ads_logs.pop(device_id, None)
-            active_ios_log_processes.pop(device_id, None)
-            active_ios_log_readers.pop(device_id, None)
-            active_ios_log_started_at.pop(device_id, None)
-            active_ios_log_last_seen.pop(device_id, None)
-            active_ios_log_commands.pop(device_id, None)
+            # A stalled-reader restart must never let an old reader's finally
+            # block remove the dictionaries belonging to its replacement.
+            current_reader = active_ios_log_readers.get(device_id)
+            current_process = active_ios_log_processes.get(device_id)
+            owns_reader_state = current_reader is reader_thread
+            owns_process_state = current_process is proc
+            if owns_reader_state:
+                active_ios_log_readers.pop(device_id, None)
+                active_ios_log_started_at.pop(device_id, None)
+                active_ios_log_last_seen.pop(device_id, None)
+                active_ios_log_commands.pop(device_id, None)
+            if owns_process_state:
+                active_ios_log_processes.pop(device_id, None)
+            if owns_reader_state or (current_reader is None and current_process is None):
+                incomplete_ios_max_load_ads_logs.pop(device_id, None)
+                active_ios_package_log_stream_modes.pop(device_id, None)
         if proc and proc.poll() is None:
             try:
                 proc.terminate()
@@ -9296,21 +9419,40 @@ def ios_log_reader(device_id):
                 pass
 
 def _stop_ios_log_reader(device_id):
-    proc = active_ios_log_processes.get(device_id)
+    with lock:
+        proc = active_ios_log_processes.get(device_id)
+        thread = active_ios_log_readers.get(device_id)
+
     if proc and proc.poll() is None:
         try:
             proc.terminate()
-            proc.wait(timeout=1)
+            proc.wait(timeout=2)
         except Exception:
             try:
                 proc.kill()
             except Exception:
                 pass
-    active_ios_log_processes.pop(device_id, None)
-    active_ios_log_readers.pop(device_id, None)
-    active_ios_log_started_at.pop(device_id, None)
-    active_ios_log_last_seen.pop(device_id, None)
-    active_ios_log_commands.pop(device_id, None)
+
+    if thread and thread is not threading.current_thread():
+        thread.join(timeout=2)
+
+    with lock:
+        # Keep a still-running old reader registered. device_manager will see
+        # it on the next pass and retry the stop instead of starting a second
+        # reader for the same device.
+        if thread and thread.is_alive():
+            return False
+        if active_ios_log_readers.get(device_id) is thread:
+            active_ios_log_readers.pop(device_id, None)
+            active_ios_log_started_at.pop(device_id, None)
+            active_ios_log_last_seen.pop(device_id, None)
+            active_ios_log_commands.pop(device_id, None)
+        if active_ios_log_processes.get(device_id) is proc:
+            active_ios_log_processes.pop(device_id, None)
+        if device_id not in active_ios_log_readers and device_id not in active_ios_log_processes:
+            incomplete_ios_max_load_ads_logs.pop(device_id, None)
+            active_ios_package_log_stream_modes.pop(device_id, None)
+    return True
 
 def device_manager():
     global connected_devices_info
@@ -9319,6 +9461,7 @@ def device_manager():
             platform = active_platform
             if platform == "ios":
                 ids = set(_list_ios_device_ids())
+                readers_to_stop = []
                 with lock:
                     now = time.time()
                     for did in list(active_ios_log_readers.keys()):
@@ -9328,17 +9471,18 @@ def device_manager():
                         last_seen = active_ios_log_last_seen.get(did, started_at)
                         is_dead = (thread and not thread.is_alive()) or (proc and proc.poll() is not None)
                         is_stalled = did in ids and now - started_at > IOS_LOG_STALL_TIMEOUT_SECONDS and now - last_seen > IOS_LOG_STALL_TIMEOUT_SECONDS
-                        if is_dead or is_stalled:
-                            print(f"WARNING: Restarting iOS log reader for {did} ({'stalled' if is_stalled else 'dead'})")
-                            _stop_ios_log_reader(did)
+                        if is_dead or is_stalled or did not in ids:
+                            readers_to_stop.append((did, 'stalled' if is_stalled else 'dead' if is_dead else 'disconnected'))
 
+                for did, reason in readers_to_stop:
+                    print(f"WARNING: Stopping iOS log reader for {did} ({reason})")
+                    _stop_ios_log_reader(did)
+
+                with lock:
                     for did in ids - set(active_ios_log_readers.keys()):
                         t = threading.Thread(target=ios_log_reader, args=(did,), daemon=True)
                         active_ios_log_readers[did] = t
                         t.start()
-
-                    for did in set(active_ios_log_readers.keys()) - ids:
-                        _stop_ios_log_reader(did)
 
                     connected_devices_info = [_make_device_info(i, 'ios') for i in ids]
                 if connected_devices_info:
@@ -9351,13 +9495,9 @@ def device_manager():
                 _emit_sdk_check_results()
             else:
                 with lock:
-                    for did, proc in list(active_ios_log_processes.items()):
-                        _stop_ios_log_reader(did)
-                    active_ios_log_processes.clear()
-                    active_ios_log_readers.clear()
-                    active_ios_log_started_at.clear()
-                    active_ios_log_last_seen.clear()
-                    active_ios_log_commands.clear()
+                    ios_readers_to_stop = set(active_ios_log_readers) | set(active_ios_log_processes)
+                for did in ios_readers_to_stop:
+                    _stop_ios_log_reader(did)
 
                 output = subprocess.run([ADB_EXECUTABLE, 'devices'], capture_output=True, text=True, creationflags=creation_flags).stdout
                 ids = {l.split('\t')[0] for l in output.strip().split('\n')[1:] if '\tdevice' in l}
@@ -9388,6 +9528,9 @@ def device_manager():
 
 def _append_package_log_row(device_id, raw_log, time_str="", time_display="", level="", tag="", message="", is_error=False):
     with lock:
+        session_id = active_package_log_session_id
+        if not _accept_exact_record("package", device_id, raw_log, session_id or ""):
+            return
         package_log_cache.append({
             'device_id': device_id,
             'device_name': get_device_name(device_id),
@@ -9400,7 +9543,6 @@ def _append_package_log_row(device_id, raw_log, time_str="", time_display="", le
             'timestamp': time.time(),
             'is_error': is_error
         })
-        session_id = active_package_log_session_id
     if session_id:
         try:
             package_log_db_queue.put_nowait((
@@ -9418,21 +9560,40 @@ def _append_package_log_row(device_id, raw_log, time_str="", time_display="", le
         except Exception:
             pass
 
-def process_ios_package_log_line(log_obj):
+def _ios_package_log_matches_target(raw_log, bundle_search):
+    """Match iOS package logs by the record's process header, not its body."""
+    lines = [line.strip() for line in str(raw_log or "").splitlines() if line.strip()]
+    if not lines:
+        return False
+    first_line = lines[0]
+    search = str(bundle_search or "").casefold()
+    if IOS_LOG_RECORD_START_PATTERN.match(first_line):
+        process_match = re.match(
+            rf'^{IOS_LOG_TIMESTAMP_PATTERN}\s+\S+\s+'
+            r'([^\s(\[]+)(?:\([^)]*\))?\[\d+\]\s+<[^>]+>:',
+            first_line,
+        )
+        if process_match:
+            return search in process_match.group(1).casefold()
+        return search in first_line.casefold()
+    return search in str(raw_log or "").casefold()
+
+
+def process_ios_package_log_line(log_obj, feed_max=False):
     if is_paused or active_platform != "ios":
         return
     raw_log = log_obj.get("raw_log", "")
-    # Package Log keeps tidevice's NUL-framed multiline records intact. Feed
-    # the complete record to MAX as a second, framing-safe path; the physical
-    # line reader already handles normal records and the dedup key prevents a
-    # duplicate Load Ads row.
-    if raw_log:
+    # Only NUL-framed records need a second MAX-parser entry point. Normal
+    # newline streams are already sent to the MAX parser line-by-line by the
+    # iOS reader; feeding the completed Package Log record again can duplicate
+    # or merge unrelated records.
+    if feed_max and raw_log:
         process_load_ads_max_log(raw_log, log_obj.get("device_id", ""))
     with lock:
         bundle_search = target_package_name
     if not bundle_search:
         return
-    if bundle_search.lower() not in raw_log.lower():
+    if not _ios_package_log_matches_target(raw_log, bundle_search):
         return
 
     time_str = ""
@@ -9485,25 +9646,64 @@ def _flush_ios_package_log_frame_buffer(device_id):
         raw_record = active_ios_package_log_frame_buffers.pop(device_id, "")
     if not raw_record or active_platform != "ios":
         return
-    process_ios_package_log_line(_normalize_ios_log_line(raw_record.strip("\r\n"), device_id))
+    process_ios_package_log_line(
+        _normalize_ios_log_line(raw_record.strip("\r\n"), device_id),
+        feed_max=True,
+    )
 
 
 def process_ios_package_log_stream_chunk(device_id, raw_chunk):
-    """Consume tidevice's NUL-framed stream without losing multiline records."""
+    """Consume iOS syslog in either newline or NUL-delimited form.
+
+    tidevice forwards the syslog relay payload as-is, so its stdout is not
+    guaranteed to be NUL-delimited. Detect the framing from the stream instead
+    of assuming it from the executable name; otherwise every newline record is
+    accumulated into one giant buffer and a single matching app line can pull
+    kernel/daemon records into Package Log.
+    """
     if is_paused or active_platform != "ios":
         return
     if not raw_chunk:
         return
 
+    switch_to_nul = False
     with lock:
-        buffered = active_ios_package_log_frame_buffers.get(device_id, "")
-        frames = (buffered + raw_chunk).split("\x00")
-        active_ios_package_log_frame_buffers[device_id] = frames.pop()
+        stream_mode = active_ios_package_log_stream_modes.get(device_id)
+        if stream_mode is None:
+            stream_mode = "nul" if "\x00" in raw_chunk else "line"
+            active_ios_package_log_stream_modes[device_id] = stream_mode
+        elif stream_mode == "line" and "\x00" in raw_chunk:
+            # A relay may expose the first delimiter only after readline()
+            # has already returned a few newline chunks. Finish the normal
+            # record before switching modes rather than mixing buffers.
+            active_ios_package_log_stream_modes[device_id] = "nul"
+            stream_mode = "nul"
+            switch_to_nul = True
 
-    for frame in frames:
-        frame = frame.strip("\r\n")
-        if frame:
-            process_ios_package_log_line(_normalize_ios_log_line(frame, device_id))
+    if switch_to_nul:
+        _flush_ios_package_log_buffer(device_id)
+
+    if stream_mode == "nul":
+        with lock:
+            buffered = active_ios_package_log_frame_buffers.get(device_id, "")
+            frames = (buffered + raw_chunk).split("\x00")
+            active_ios_package_log_frame_buffers[device_id] = frames.pop()
+
+        for frame in frames:
+            frame = frame.strip("\r\n")
+            if frame:
+                process_ios_package_log_line(
+                    _normalize_ios_log_line(frame, device_id),
+                    feed_max=True,
+                )
+        return
+
+    for raw_line in raw_chunk.splitlines():
+        if raw_line:
+            process_ios_package_log_stream_line(
+                device_id,
+                _normalize_ios_log_line(raw_line, device_id),
+            )
 
 
 def process_ios_package_log_stream_line(device_id, log_obj):
@@ -9673,6 +9873,11 @@ def _reset_runtime_for_platform_switch():
     global specific_event_name_filters, specific_event_params_filters
     global connected_devices_info, installation_id_state
     with lock:
+        ios_readers_to_stop = set(active_ios_log_readers) | set(active_ios_log_processes)
+    for device_id in ios_readers_to_stop:
+        _stop_ios_log_reader(device_id)
+
+    with lock:
         is_paused = False
         validator_active = False
         sdk_check_active = False
@@ -9697,18 +9902,9 @@ def _reset_runtime_for_platform_switch():
         adrevenue_logs.clear(); adrevenue_log_cache.clear()
         callback_ad_logs.clear(); incomplete_impression_logs.clear(); incomplete_ios_adrevenue_logs.clear(); incomplete_ios_load_ads_ext_logs.clear(); incomplete_ios_max_load_ads_logs.clear(); incomplete_adjust_adrevenue_logs.clear()
         price_rotation_logs.clear()
-        package_log_cache.clear(); active_package_pids.clear(); active_ios_package_log_buffers.clear(); active_ios_package_log_frame_buffers.clear()
+        package_log_cache.clear(); active_package_pids.clear(); active_ios_package_log_buffers.clear(); active_ios_package_log_frame_buffers.clear(); active_ios_package_log_stream_modes.clear()
+        _clear_record_dedup()
         installation_id_state.clear()
-        for proc in active_ios_log_processes.values():
-            try:
-                proc.terminate()
-            except Exception:
-                pass
-        active_ios_log_processes.clear()
-        active_ios_log_readers.clear()
-        active_ios_log_started_at.clear()
-        active_ios_log_last_seen.clear()
-        active_ios_log_commands.clear()
         connected_devices_info = []
         target_package_name = ""
         if active_package_log_session_id:
@@ -9810,6 +10006,7 @@ def cl():
         specific_event_results.clear(); event_log_cache.clear()
         adrevenue_logs.clear(); callback_ad_logs.clear(); price_rotation_logs.clear()
         package_log_cache.clear()
+        _clear_record_dedup()
         # Clean SDK check
         sdk_check_results.clear()
         incomplete_impression_logs.clear()
@@ -9837,6 +10034,7 @@ def val(p):
     required_params = p or []
     validator_active = True
     validator_results.clear()
+    _clear_record_dedup("validator")
     socketio.emit('update_validator_table', [])
     socketio.emit('validator_status', {'active': True})
 
@@ -9962,8 +10160,10 @@ def spl(d):
         if pid:
             active_package_log_session_id = _start_package_log_session(pid)
         package_log_cache.clear()
+        _clear_record_dedup("package")
         active_ios_package_log_buffers.clear()
         active_ios_package_log_frame_buffers.clear()
+        active_ios_package_log_stream_modes.clear()
         socketio.emit('package_log_cache', [])
     socketio.emit('package_log_cache', [])
 
