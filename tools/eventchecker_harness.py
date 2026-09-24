@@ -1314,8 +1314,8 @@ def test_sdk_check_preset_contract() -> None:
     c192_bright = c192_ios.get("bright") or {}
     c192_bright_identifiers = c192_bright.get("skadnetwork_identifiers") or []
     _assert_equal(c192_bright.get("version"), "1.605.415", "C-192 iOS BrightData version changed")
-    _assert_equal(len(c192_bright_identifiers), 288, "C-192 iOS Bright/SKAds preset identifier count changed")
-    _assert_equal(c192_bright_identifiers[0], "23zd986j2c.skadnetwork", "C-192 iOS Bright/SKAds first identifier changed")
+    _assert_equal(len(c192_bright_identifiers), 290, "C-192 iOS Bright/SKAds preset identifier count changed")
+    _assert_equal(c192_bright_identifiers[0], "22mmun2rn5.skadnetwork", "C-192 iOS Bright/SKAds first identifier changed")
     _assert_equal(c192_bright_identifiers[-1], "zq492l623r.skadnetwork", "C-192 iOS Bright/SKAds last identifier changed")
     _assert("6lz2ygh3q6.adattributionkit" in c192_bright_identifiers, "C-192 iOS AdAttributionKit identifier is missing")
     bright_compare = lc._compare_bright_skad_preset(
@@ -1325,7 +1325,7 @@ def test_sdk_check_preset_contract() -> None:
         preset=c192_ios,
     )
     _assert_equal(bright_compare.get("passed_count"), 2, "Bright/SKAds compare must mark version and one identifier as PASSED")
-    _assert_equal(bright_compare.get("total_count"), 289, "Bright/SKAds compare row count changed")
+    _assert_equal(bright_compare.get("total_count"), 291, "Bright/SKAds compare row count changed")
     _assert_equal(bright_compare.get("extra_identifiers"), ["extra-network.skadnetwork"], "Bright/SKAds extra identifier warning changed")
     _assert(any(row.get("status") == "MISSING" for row in bright_compare.get("rows", [])), "Bright/SKAds compare must report missing identifiers")
     merged_remote = lc._merge_local_bright_preset_data({"C-192-iOS": {"platform": "ios", "lines": []}})
@@ -2509,7 +2509,7 @@ def test_bright_skad_ipa_inspection_contract() -> None:
         _assert_equal(response.status_code, 200, "Bright/SKAds IPA inspect endpoint failed")
         api_payload = response.get_json() or {}
         _assert_equal(api_payload.get("bright_compare", {}).get("preset_name"), "C-192-iOS", "IPA inspect did not apply the selected Bright/SKAds preset")
-        _assert_equal(api_payload.get("bright_compare", {}).get("total_count"), 289, "IPA inspect Bright/SKAds compare row count changed")
+        _assert_equal(api_payload.get("bright_compare", {}).get("total_count"), 291, "IPA inspect Bright/SKAds compare row count changed")
 
 
 def test_release_payload_sync() -> None:
