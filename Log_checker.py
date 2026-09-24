@@ -2037,11 +2037,11 @@ def _stabilize_ios_device_ids(observed_ids, known_ids):
 
     for device_id in known - observed:
         misses = ios_device_missing_polls.get(device_id, 0) + 1
+        # Keep the miss count after the grace window so the device manager can
+        # stop a stale syslog reader instead of re-adding it forever below.
+        ios_device_missing_polls[device_id] = misses
         if misses <= IOS_DEVICE_MISSING_GRACE_POLLS:
             stable.add(device_id)
-            ios_device_missing_polls[device_id] = misses
-        else:
-            ios_device_missing_polls.pop(device_id, None)
 
     return stable
 
@@ -4098,7 +4098,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(67)</title>
+    <title>Event Inspector v2.5.0(68)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -4180,7 +4180,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(67)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(68)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -9882,6 +9882,7 @@ def _stop_ios_log_reader(device_id):
             active_ios_log_commands.pop(device_id, None)
         if active_ios_log_processes.get(device_id) is proc:
             active_ios_log_processes.pop(device_id, None)
+        ios_device_missing_polls.pop(device_id, None)
         if device_id not in active_ios_log_readers and device_id not in active_ios_log_processes:
             incomplete_ios_max_load_ads_logs.pop(device_id, None)
             active_ios_package_log_stream_modes.pop(device_id, None)
@@ -9895,6 +9896,7 @@ def device_manager():
             if platform == "ios":
                 observed_ids = set(_list_ios_device_ids())
                 readers_to_stop = []
+                stale_reader_ids = set()
                 with lock:
                     known_ids = set(active_ios_log_readers) | set(active_ios_log_processes)
                     known_ids.update(
@@ -9903,11 +9905,21 @@ def device_manager():
                         if device.get("id")
                     )
                     ids = _stabilize_ios_device_ids(observed_ids, known_ids)
-                    # A live reader remains connected even when discovery has
-                    # omitted its transport row for several polls. Keep it
-                    # in the UI until the reader itself exits.
-                    ids.update(active_ios_log_readers)
-                    ids.update(active_ios_log_processes)
+                    # A live reader survives short discovery churn, but a
+                    # reader whose device has been absent beyond the grace
+                    # window is stale and must be stopped/removed. Otherwise
+                    # a hung tidevice process keeps a disconnected device in
+                    # the UI indefinitely.
+                    active_reader_ids = set(active_ios_log_readers) | set(active_ios_log_processes)
+                    stale_reader_ids = {
+                        did for did in (active_reader_ids - observed_ids)
+                        if ios_device_missing_polls.get(did, 0) > IOS_DEVICE_MISSING_GRACE_POLLS
+                    }
+                    for did in sorted(stale_reader_ids):
+                        readers_to_stop.append((did, 'missing from discovery'))
+                    ids.difference_update(stale_reader_ids)
+                    ids.update(set(active_ios_log_readers) - stale_reader_ids)
+                    ids.update(set(active_ios_log_processes) - stale_reader_ids)
                     now = time.time()
                     for did in list(active_ios_log_readers.keys()):
                         proc = active_ios_log_processes.get(did)
@@ -9915,15 +9927,10 @@ def device_manager():
                         started_at = active_ios_log_started_at.get(did, now)
                         last_seen = active_ios_log_last_seen.get(did, started_at)
                         is_dead = (thread and not thread.is_alive()) or (proc and proc.poll() is not None)
-                        # A live tidevice syslog process is the authority for
-                        # an already attached device. Discovery can briefly
-                        # omit USB/network rows while usbmuxd refreshes; using
-                        # that snapshot to stop a live reader causes the
-                        # connect/disconnect loop seen in the local build.
-                        # ``last_seen`` remains visible in the status label,
-                        # but an idle stream must not be killed as a false
-                        # stalled connection.
-                        if is_dead:
+                        # an idle stream must not be killed while discovery
+                        # still reports the device; a real process/thread
+                        # exit is separate from a false stalled connection.
+                        if is_dead and did not in stale_reader_ids:
                             readers_to_stop.append((did, 'dead'))
 
                 for did, reason in readers_to_stop:

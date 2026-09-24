@@ -42,8 +42,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-23-1-2.5.0-67"
-CURRENT_RELEASE_BUILD = 67
+CURRENT_RELEASE_VERSION = "2026-09-24-1-2.5.0-68"
+CURRENT_RELEASE_BUILD = 68
 ROLLBACK_SOURCE_BUILD = 56
 RELEASE_SOURCE_BUILD = CURRENT_RELEASE_BUILD
 if str(ROOT) not in sys.path:
@@ -909,13 +909,16 @@ def test_ios_discovery_grace_contract() -> None:
 
 
 def test_ios_reader_liveness_contract() -> None:
-    """Discovery churn must not stop a live iOS syslog reader."""
+    """Discovery churn is tolerated briefly, then stale iOS readers are removed."""
     source = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
     manager = source.split("def device_manager():", 1)[1].split("def _append_package_log_row", 1)[0]
-    _assert("if is_dead:" in manager, "iOS readers must still restart after a real process/thread exit")
+    _assert("if is_dead and" in manager, "iOS readers must still restart after a real process/thread exit")
     _assert("did not in ids" not in manager, "iOS discovery must not stop a live reader on one missing row")
-    _assert("ids.update(active_ios_log_readers)" in manager, "live iOS readers must stay visible during discovery churn")
-    _assert("ids.update(active_ios_log_processes)" in manager, "live iOS processes must stay visible during discovery churn")
+    _assert("stale_reader_ids" in manager, "stale iOS reader tracking is missing")
+    _assert("ids.difference_update(stale_reader_ids)" in manager, "stale iOS devices must be removed from the UI")
+    _assert("missing from discovery" in manager, "stale iOS readers must stop after discovery grace")
+    _assert("set(active_ios_log_readers) - stale_reader_ids" in manager, "live iOS readers must stay visible during discovery grace")
+    _assert("set(active_ios_log_processes) - stale_reader_ids" in manager, "live iOS processes must stay visible during discovery grace")
     _assert(
         "an idle stream must not be killed" in manager,
         "iOS reader idle-stream protection is missing",
