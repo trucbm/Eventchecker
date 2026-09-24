@@ -141,7 +141,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/manifest_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/manifest_check_presets.json"
       ],
-      "sha256": "cbcfb840fba54465c05a27fff106638c3b3e7560e5e884517245edf1f09a5fc3"
+      "sha256": "2807abaadebf5cc1519af5d92367385133949e083de51a1295a9e75abba0625f"
     }
   ]
 }
