@@ -42,8 +42,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-28-1-2.5.0-69"
-CURRENT_RELEASE_BUILD = 69
+CURRENT_RELEASE_VERSION = "2026-09-28-1-2.5.0-70"
+CURRENT_RELEASE_BUILD = 70
 ROLLBACK_SOURCE_BUILD = 56
 RELEASE_SOURCE_BUILD = CURRENT_RELEASE_BUILD
 if str(ROOT) not in sys.path:
@@ -893,6 +893,28 @@ def test_platform_reconnect_contract() -> None:
     _assert("socket.emit('set_platform'" in rendered, "platform reconnect does not resync the backend")
 
 
+def test_platform_bootstrap_sdk_state_contract() -> None:
+    """Initial platform bootstrap must not hit the SDK Check temporal dead zone."""
+    source = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    running_declaration = source.find("let sdkCheckRunning = false;")
+    reset_function = source.find("function resetSdkCheckUiState(clearInput = false)")
+    _assert(running_declaration >= 0, "SDK Check running state declaration is missing")
+    _assert(
+        running_declaration < reset_function,
+        "SDK Check running state must be declared before platform bootstrap calls resetSdkCheckUiState",
+    )
+    reset_block = source[reset_function:source.find("function resetRuntimeUiForPlatformSwitch", reset_function)]
+    _assert(
+        "typeof sdkCheckRunning" not in reset_block,
+        "SDK Check reset must not use a temporal-dead-zone typeof guard",
+    )
+    bootstrap_block = source[source.find("platformBtn?.addEventListener('click', showPlatformModal);"):source.find("// --- Tab Logic ---")]
+    _assert(
+        "window.setTimeout(() =>" in bootstrap_block,
+        "platform bootstrap must wait until all UI state declarations are initialized",
+    )
+
+
 def test_device_filter_reset_contract() -> None:
     """A stale device selection must not hide logs after a clear/platform switch."""
     source = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
@@ -924,6 +946,14 @@ def test_platform_switch_drops_stale_device_status_contract() -> None:
         "status?.platform && activePlatform && status.platform !== activePlatform" in source,
         "frontend must ignore stale device status from another platform",
     )
+    set_platform_block = source.split("@socketio.on('set_platform')", 1)[1].split(
+        "@socketio.on('toggle_record')", 1
+    )[0]
+    _assert("platform_changed" in set_platform_block, "backend platform transition must detect a stale platform")
+    _assert(
+        "or platform_changed" in set_platform_block,
+        "backend platform transition must reset stale device state even when reset=false",
+    )
 
 
 def test_ios_reader_singleton_contract() -> None:
@@ -944,7 +974,7 @@ def test_ios_reader_singleton_contract() -> None:
 
 
 def test_ios_transport_fallback_contract() -> None:
-    """iOS discovery prefers USB but accepts trusted network-paired tidevice rows when USB is absent."""
+    """iOS discovery must ignore trusted network-paired tidevice rows."""
     original_resolve = lc._resolve_ios_tool
     original_run = lc.subprocess.run
     outputs = [
@@ -964,11 +994,20 @@ eb6b13cc453f5a53ef07ff7149858a8635d18c10  F17VXQA8JCLH    iPhone X     iPhone X 
         network_ids = lc._list_ios_device_ids()
         _assert_equal(
             network_ids,
-            ["00008030-0009398422F3C02E", "eb6b13cc453f5a53ef07ff7149858a8635d18c10"],
-            "network-paired iOS devices were not discovered when USB was absent",
+            [],
+            "network-paired iOS devices must not be discovered",
         )
         usb_ids = lc._list_ios_device_ids()
-        _assert_equal(usb_ids, ["00008030-0009398422F3C02E"], "USB discovery must remain preferred")
+        _assert_equal(
+            usb_ids,
+            ["00008030-0009398422F3C02E"],
+            "USB discovery must ignore network-paired rows",
+        )
+        source = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+        _assert(
+            "selected_ids = ids or network_ids" not in source,
+            "iOS discovery must not fall back to network-paired IDs",
+        )
     finally:
         lc._resolve_ios_tool = original_resolve
         lc.subprocess.run = original_run
@@ -2604,7 +2643,10 @@ def test_macos_architecture_contract() -> None:
     _assert("target_arch='arm64'" not in spec, "macOS spec must not force Apple Silicon")
     _assert("MACOS_TARGET_ARCH" in spec, "macOS spec must accept an explicit target architecture")
     _assert("arch: arm64" in workflow and "arch: x86_64" in workflow, "macOS workflow must publish both architectures")
-    _assert("runner: macos-14" in workflow and "runner: macos-13" in workflow, "macOS workflow must use native runners")
+    _assert(
+        "runner: macos-14" in workflow and "runner: macos-15-intel" in workflow,
+        "macOS workflow must use native Apple Silicon and Intel runners",
+    )
     _assert('x86_64) MACOS_TARGET_ARCH="x86_64"' in build_script, "macOS build script lost Intel host support")
 
 
@@ -3765,6 +3807,7 @@ TESTS: List[Callable[[], None]] = [
     test_sdk_preset_switch_does_not_race_stop_start,
     test_clear_all_resets_sdk_check_state,
     test_platform_reconnect_contract,
+    test_platform_bootstrap_sdk_state_contract,
     test_device_filter_reset_contract,
     test_platform_switch_drops_stale_device_status_contract,
     test_ios_reader_singleton_contract,

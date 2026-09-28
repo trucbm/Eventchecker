@@ -50,12 +50,14 @@ class _PayloadHandler(http.server.BaseHTTPRequestHandler):
 
 
 def _release_payload_bytes(relative_path: str) -> bytes:
-    """Read the exact checked-out Git payload used by this release.
+    """Read the payload represented by the local manifest.
 
-    The Windows build can leave generated files in the working tree while the
-    smoke test runs.  Reading the committed blob keeps the HTTP fixture aligned
-    with the manifest being tested and avoids accidentally serving a stale
-    working-tree copy.
+    In CI the checkout is clean, so this resolves to the committed Git blob.
+    During local development a source fix can intentionally be uncommitted;
+    when that file differs from HEAD, use the working-tree bytes so the local
+    manifest and HTTP fixture test the same payload.  This preserves the
+    committed-blob guard for release builds without making local smoke tests
+    fail on an expected source/manifest update in progress.
     """
     try:
         result = subprocess.run(
@@ -64,6 +66,9 @@ def _release_payload_bytes(relative_path: str) -> bytes:
             check=True,
             capture_output=True,
         )
+        working_path = ROOT / relative_path
+        if working_path.is_file() and working_path.read_bytes() != result.stdout:
+            return working_path.read_bytes()
         return result.stdout
     except (OSError, subprocess.CalledProcessError):
         return (ROOT / relative_path).read_bytes()

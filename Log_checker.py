@@ -1915,7 +1915,6 @@ def _normalize_ios_udid(value):
 
 def _list_ios_device_ids():
     ids = []
-    network_ids = []
     tidevice = _resolve_ios_tool("tidevice")
     if tidevice:
         try:
@@ -1932,18 +1931,51 @@ def _list_ios_device_ids():
                     continue
                 if "ConnectionType.USB" in line:
                     ids.append(_normalize_ios_udid(match.group(1)))
-                elif "ConnectionType.NETWORK" in line:
-                    network_ids.append(_normalize_ios_udid(match.group(1)))
         except Exception:
             pass
 
-        # Prefer wired devices for stability. If no USB device is available,
-        # keep the network transport as a fallback; tidevice can stream
-        # syslog over the trusted network pairing as well.
-        selected_ids = ids or network_ids
+        # This application intentionally supports iOS over USB only. A
+        # network-paired row from tidevice must never create a reader or show
+        # up as a connected device.
         seen = set()
         unique_ids = []
-        for device_id in selected_ids:
+        for device_id in ids:
+            if device_id not in seen:
+                seen.add(device_id)
+                unique_ids.append(device_id)
+        return unique_ids
+
+    # On macOS, use the USB inventory before any generic libimobiledevice
+    # fallback. This keeps network-paired devices out even when tidevice is
+    # not installed. Do not fall through to xcrun: it can include network
+    # paired devices in its device list.
+    system_profiler = _resolve_ios_tool("system_profiler")
+    if system_profiler:
+        try:
+            output = subprocess.run(
+                [system_profiler, "SPUSBDataType"],
+                capture_output=True,
+                text=True,
+                timeout=8,
+                creationflags=creation_flags,
+            ).stdout
+            in_ios_block = False
+            for line in output.splitlines():
+                stripped = line.strip()
+                if stripped in {"iPhone:", "iPad:", "iPod:"}:
+                    in_ios_block = True
+                    continue
+                if in_ios_block and stripped.startswith("Serial Number:"):
+                    ids.append(_normalize_ios_udid(stripped.split(":", 1)[1].strip()))
+                    in_ios_block = False
+                elif in_ios_block and stripped.endswith(":") and stripped not in {"iPhone:", "iPad:", "iPod:"}:
+                    in_ios_block = False
+        except Exception:
+            pass
+
+        seen = set()
+        unique_ids = []
+        for device_id in ids:
             if device_id not in seen:
                 seen.add(device_id)
                 unique_ids.append(device_id)
@@ -1972,49 +2004,6 @@ def _list_ios_device_ids():
                 seen.add(device_id)
                 unique_ids.append(device_id)
         return unique_ids
-
-    if not ids:
-        system_profiler = _resolve_ios_tool("system_profiler")
-        if system_profiler:
-            try:
-                output = subprocess.run(
-                    [system_profiler, "SPUSBDataType"],
-                    capture_output=True,
-                    text=True,
-                    timeout=8,
-                    creationflags=creation_flags,
-                ).stdout
-                in_ios_block = False
-                for line in output.splitlines():
-                    stripped = line.strip()
-                    if stripped in {"iPhone:", "iPad:", "iPod:"}:
-                        in_ios_block = True
-                        continue
-                    if in_ios_block and stripped.startswith("Serial Number:"):
-                        ids.append(_normalize_ios_udid(stripped.split(":", 1)[1].strip()))
-                        in_ios_block = False
-                    elif in_ios_block and stripped.endswith(":") and stripped not in {"iPhone:", "iPad:", "iPod:"}:
-                        in_ios_block = False
-            except Exception:
-                pass
-
-    if not ids:
-        xcrun = _resolve_ios_tool("xcrun")
-        if xcrun:
-            try:
-                output = subprocess.run(
-                    [xcrun, "xctrace", "list", "devices"],
-                    capture_output=True,
-                    text=True,
-                    timeout=8,
-                    creationflags=creation_flags,
-                ).stdout
-                for line in output.splitlines():
-                    match = re.search(r'\(([0-9A-Fa-f]{8}-[0-9A-Fa-f]{16}|[0-9A-Fa-f]{24}|[0-9a-fA-F]{40})\)\s*$', line.strip())
-                    if match:
-                        ids.append(_normalize_ios_udid(match.group(1)))
-            except Exception:
-                pass
 
     seen = set()
     unique_ids = []
@@ -2053,12 +2042,12 @@ def _stabilize_ios_device_ids(observed_ids, known_ids):
 
 def _ios_device_status_message():
     if _resolve_ios_tool("idevice_id") or _resolve_ios_tool("tidevice") or _resolve_ios_tool("system_profiler"):
-        return "Waiting... (iOS: connect a trusted USB or network-paired device)"
-    return "Waiting... (iOS: install libimobiledevice/idevice_id or connect a trusted device)"
+        return "Waiting... (iOS: connect a trusted USB device)"
+    return "Waiting... (iOS: install libimobiledevice/idevice_id or connect a trusted USB device)"
 
 def _resolve_ios_syslog_command(device_id):
-    # Prefer tidevice for iOS syslog because device discovery uses the same
-    # tidevice transport and can fall back to trusted network-paired devices.
+    # Prefer tidevice for iOS syslog; discovery has already restricted the
+    # device ID to a physical USB transport.
     tidevice = _resolve_ios_tool("tidevice")
     if tidevice:
         return [tidevice, "-u", device_id, "syslog"]
@@ -4116,7 +4105,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(69)</title>
+    <title>Event Inspector v2.5.0(70)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -4198,7 +4187,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(69)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(70)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5036,6 +5025,14 @@ HTML_TEMPLATE = """
         let activePlatform = localStorage.getItem('eventInspectorPlatform') || '';
         let sdkCheckPresets = {{ sdk_check_presets | tojson }};
         let brightSkadLastPayload = null;
+        // Keep SDK Check state declarations above the platform/bootstrap code.
+        // setActivePlatform() runs during initial page setup, before the rest
+        // of the SDK Check handlers are registered.  A later `let` declaration
+        // leaves the binding in the temporal dead zone and breaks platform
+        // switching with `Cannot access 'sdkCheckRunning' before
+        // initialization`.
+        let sdkCheckRunning = false;
+        let sdkCheckClearPending = false;
         socket.on('connect', () => {
             if (!activePlatform) return;
             socket.emit('set_platform', {
@@ -5162,9 +5159,8 @@ HTML_TEMPLATE = """
         }
 
         function resetSdkCheckUiState(clearInput = false) {
-            if (typeof sdkCheckRunning !== 'undefined') {
-                sdkCheckRunning = false;
-            }
+            sdkCheckRunning = false;
+            if (clearInput) sdkCheckClearPending = false;
             const sdkBtn = document.getElementById('startSdkCheckBtn');
             if (sdkBtn) sdkBtn.textContent = 'Start Checking';
             document.getElementById('sdkCheckTableBody')?.replaceChildren();
@@ -5243,8 +5239,16 @@ HTML_TEMPLATE = """
         });
 
         platformBtn?.addEventListener('click', showPlatformModal);
-        if (activePlatform) setActivePlatform(activePlatform, false);
-        else showPlatformModal();
+        // The platform bootstrap calls several reset helpers whose state is
+        // declared later in this script (package log, price rotation, and
+        // Bright/SKAds).  Running it immediately leaves those `let` bindings
+        // in the temporal dead zone and aborts the rest of the script.  Defer
+        // bootstrap until the complete script has initialized so all platform
+        // and device handlers are registered before the first reset.
+        window.setTimeout(() => {
+            if (activePlatform) setActivePlatform(activePlatform, false);
+            else showPlatformModal();
+        }, 0);
 
         // --- Tab Logic ---
         function setServicesCheckerStatus(message, state = 'idle') {
@@ -7268,8 +7272,6 @@ HTML_TEMPLATE = """
             }
         });
         
-        let sdkCheckRunning = false;
-        let sdkCheckClearPending = false;
         function renderSdkCheckPresetOptions() {
             const container = document.getElementById('sdkCheckPresetList');
             if (!container) return;
@@ -10489,9 +10491,15 @@ def set_platform(data):
     global active_platform, platform_generation
     platform = (data or {}).get('platform', 'android')
     with lock:
+        platform_changed = active_platform != ('ios' if platform == 'ios' else 'android')
         active_platform = 'ios' if platform == 'ios' else 'android'
         platform_generation += 1
-    if (data or {}).get('reset'):
+    # A reconnect normally sends reset=false so the current platform's logs
+    # survive.  If the client was holding a stale platform (for example after
+    # a page reload while the backend was still on iOS), still perform the
+    # platform transition reset; otherwise the old device list/readers can be
+    # shown under the newly selected platform.
+    if (data or {}).get('reset') or platform_changed:
         _reset_runtime_for_platform_switch()
     socketio.emit('platform_status', {'platform': active_platform})
 
