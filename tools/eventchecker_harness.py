@@ -21,6 +21,7 @@ import argparse
 import copy
 import functools
 import http.server
+import io
 import importlib.util
 import json
 import os
@@ -42,8 +43,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-28-1-2.5.0-70"
-CURRENT_RELEASE_BUILD = 70
+CURRENT_RELEASE_VERSION = "2026-09-28-1-2.5.0-71"
+CURRENT_RELEASE_BUILD = 71
 ROLLBACK_SOURCE_BUILD = 56
 RELEASE_SOURCE_BUILD = CURRENT_RELEASE_BUILD
 if str(ROOT) not in sys.path:
@@ -77,6 +78,8 @@ def _reset_runtime_state() -> None:
     lc.package_log_cache.clear()
     lc.active_ios_package_log_buffers.clear()
     lc.active_ios_package_log_frame_buffers.clear()
+    lc.active_ios_package_log_stream_modes.clear()
+    lc.incomplete_android_event_logs.clear()
     lc.ios_device_missing_polls.clear()
     lc._clear_record_dedup()
 
@@ -943,8 +946,8 @@ def test_platform_switch_drops_stale_device_status_contract() -> None:
     )
     _assert('"platform": platform' in source, "device status payload must identify its platform")
     _assert(
-        "status?.platform && activePlatform && status.platform !== activePlatform" in source,
-        "frontend must ignore stale device status from another platform",
+        "if (!statusPlatform || statusPlatform !== activePlatform) return;" in source,
+        "frontend must reject untagged or stale device status from another platform",
     )
     set_platform_block = source.split("@socketio.on('set_platform')", 1)[1].split(
         "@socketio.on('toggle_record')", 1
@@ -1064,6 +1067,105 @@ def test_ios_reader_liveness_contract() -> None:
         "an idle stream must not be killed" in manager,
         "iOS reader idle-stream protection is missing",
     )
+
+
+def test_android_tracking_stream_reassembles_wrapped_records() -> None:
+    """Wrapped Unity TrackingService JSON must reach every Android event tab."""
+    original_platform = lc.active_platform
+    original_paused = lc.is_paused
+    original_validator_active = lc.validator_active
+    original_emit = lc.socketio.emit
+    original_callback_rows = list(lc.callback_ad_logs)
+    original_validator_rows = list(lc.validator_results)
+    original_specific_rows = list(lc.event_log_cache)
+    original_specific_results = list(lc.specific_event_results)
+    original_buffer = dict(lc.incomplete_android_event_logs)
+    original_dedup_seen = {name: set(values) for name, values in lc.record_dedup_seen.items()}
+    original_dedup_order = {name: list(values) for name, values in lc.record_dedup_order.items()}
+    try:
+        lc.active_platform = "android"
+        lc.is_paused = False
+        lc.validator_active = True
+        lc.socketio.emit = lambda *_args, **_kwargs: None
+        lc.callback_ad_logs.clear()
+        lc.validator_results.clear()
+        lc.event_log_cache.clear()
+        lc.specific_event_results.clear()
+        lc.incomplete_android_event_logs.clear()
+        lc._clear_record_dedup()
+
+        first = (
+            '09-28 14:43:16.087  6927  7783 I Unity : [Tracking] '
+            'TrackingService->Track: {"EventName":"ad_impression",'
+        )
+        second = (
+            '"params":{"ad_platform":"ironsource","ad_network":"pangle",'
+            '"ad_format":"banner","value":7.428e-05}}'
+        )
+        lc._process_android_runtime_line(first, "android-device")
+        _assert_equal(len(lc.event_log_cache), 0, "incomplete Android event was emitted too early")
+        lc._process_android_runtime_line(second, "android-device")
+
+        _assert_equal(len(lc.callback_ad_logs), 1, "wrapped Android event missing from Callback & Ads")
+        _assert_equal(len(lc.validator_results), 1, "wrapped Android event missing from Validator")
+        _assert_equal(len(lc.event_log_cache), 1, "wrapped Android event missing from Specific Validator")
+        _assert_equal(lc.callback_ad_logs[-1]["event_name"], "ad_impression", "wrapped event name changed")
+    finally:
+        lc.active_platform = original_platform
+        lc.is_paused = original_paused
+        lc.validator_active = original_validator_active
+        lc.socketio.emit = original_emit
+        lc.callback_ad_logs.clear()
+        lc.callback_ad_logs.extend(original_callback_rows)
+        lc.validator_results.clear()
+        lc.validator_results.extend(original_validator_rows)
+        lc.event_log_cache.clear()
+        lc.event_log_cache.extend(original_specific_rows)
+        lc.specific_event_results.clear()
+        lc.specific_event_results.extend(original_specific_results)
+        lc.incomplete_android_event_logs.clear()
+        lc.incomplete_android_event_logs.update(original_buffer)
+        for name in lc.record_dedup_seen:
+            lc.record_dedup_seen[name].clear()
+            lc.record_dedup_order[name].clear()
+        for name, values in original_dedup_seen.items():
+            lc.record_dedup_seen[name].update(values)
+            lc.record_dedup_order[name].extend(original_dedup_order[name])
+
+
+def test_android_package_log_ignores_global_pause() -> None:
+    """Package Log's own pause control must not be disabled by global Pause."""
+    original_platform = lc.active_platform
+    original_paused = lc.is_paused
+    original_target = lc.target_package_name
+    original_rows = list(lc.package_log_cache)
+    original_dedup_seen = {name: set(values) for name, values in lc.record_dedup_seen.items()}
+    original_dedup_order = {name: list(values) for name, values in lc.record_dedup_order.items()}
+    try:
+        lc.active_platform = "android"
+        lc.is_paused = True
+        lc.target_package_name = "com.nostel.parking.car"
+        lc.package_log_cache.clear()
+        lc._clear_record_dedup("package")
+        package_line = (
+            '09-28 14:43:16.087  6927  7783 I Unity : '
+            '[Tracking] TrackingService->Track: {"EventName":"ad_impression"}\n'
+        )
+        fake_process = type("FakeProcess", (), {"stdout": io.StringIO(package_line)})()
+        lc.package_log_consumer("android-device", fake_process)
+        _assert_equal(len(lc.package_log_cache), 1, "Android Package Log stopped by global Pause")
+    finally:
+        lc.active_platform = original_platform
+        lc.is_paused = original_paused
+        lc.target_package_name = original_target
+        lc.package_log_cache.clear()
+        lc.package_log_cache.extend(original_rows)
+        for name in lc.record_dedup_seen:
+            lc.record_dedup_seen[name].clear()
+            lc.record_dedup_order[name].clear()
+        for name, values in original_dedup_seen.items():
+            lc.record_dedup_seen[name].update(values)
+            lc.record_dedup_order[name].extend(original_dedup_order[name])
 
 
 def test_ios_package_log_preserves_multiline_records() -> None:
@@ -3814,6 +3916,8 @@ TESTS: List[Callable[[], None]] = [
     test_ios_transport_fallback_contract,
     test_ios_discovery_grace_contract,
     test_ios_reader_liveness_contract,
+    test_android_tracking_stream_reassembles_wrapped_records,
+    test_android_package_log_ignores_global_pause,
     test_ios_package_log_preserves_multiline_records,
     test_ios_package_log_tidevice_nul_framing,
     test_ios_package_log_tidevice_newline_stream_does_not_merge_kernel,

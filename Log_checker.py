@@ -388,6 +388,7 @@ PROFILE_DIR = _resolve_profiles_dir()
 active_profile_name = None
 active_profile_path = None
 active_profile_game_name = ""
+profile_revision = 0
 
 
 def _app_audit_config_path():
@@ -1302,7 +1303,11 @@ ios_device_missing_polls = {}
 connected_devices_info = []
 installation_id_state = {}
 is_paused = False
-lock = threading.Lock()
+# Several tab refresh/emit paths legitimately call a helper that takes the
+# same runtime lock (for example profile refresh -> default-ad-event payload).
+# A plain Lock turns that harmless re-entry into a permanent server-wide
+# deadlock, leaving Package Log alive while the page/profile APIs hang.
+lock = threading.RLock()
 record_dedup_lock = threading.Lock()
 
 # A single physical log record can reach the iOS readers more than once when
@@ -1386,6 +1391,8 @@ incomplete_ios_adrevenue_logs = {} # Buffer cho iOS AdRevenue logs bị ngắt d
 incomplete_ios_load_ads_ext_logs = {} # Buffer riêng cho Load Ads đọc AppMetrica AdRevenue iOS
 incomplete_ios_max_load_ads_logs = {} # Buffer cho MAX Load Ads viewability logs nhiều dòng
 incomplete_adjust_adrevenue_logs = {} # Buffer cho Adjust callback/partner params bị ngắt dòng
+incomplete_ios_event_logs = {} # Buffer cho TrackingService event JSON bị xuống dòng trên iOS
+incomplete_android_event_logs = {} # Buffer cho TrackingService event JSON bị adb logcat wrap dòng
 adb_error_counter = 0
 IOS_LOG_STALL_TIMEOUT_SECONDS = 60
 IOS_DEVICE_MISSING_GRACE_POLLS = 2
@@ -1551,6 +1558,13 @@ IOS_LOAD_ADS_EXT_ADREVENUE_KEYWORDS = (
 )
 METRICA_REGULAR_EVENT_PATTERN = re.compile(
     r'Event received on service:\s*EVENT_TYPE_REGULAR\s+with name\s+([A-Za-z0-9_.$-]+)\s+with value\s*(\{.*\})'
+)
+TRACKING_SERVICE_EVENT_PATTERN = re.compile(
+    r'TrackingService\s*->\s*(?:Track|_LogEvent)\s*:',
+    re.IGNORECASE,
+)
+ANDROID_LOG_RECORD_START_PATTERN = re.compile(
+    r'^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?\s+',
 )
 
 # Patterns cũ của Log Checker
@@ -4030,13 +4044,14 @@ def _ensure_default_profile_seed():
 
 
 def _set_active_profile(profile_name=None):
-    global active_profile_name, active_profile_path
+    global active_profile_name, active_profile_path, profile_revision
     _ensure_default_profile_seed()
     names = _list_profile_names()
     if not names:
         active_profile_name = None
         active_profile_path = None
         load_default_params_config()
+        profile_revision += 1
         return False
 
     selected = None
@@ -4055,6 +4070,7 @@ def _set_active_profile(profile_name=None):
     active_profile_name = selected
     active_profile_path = os.path.join(PROFILE_DIR, selected)
     load_default_params_config()
+    profile_revision += 1
     return True
 
 
@@ -4062,11 +4078,23 @@ def _profile_payload():
     return {
         "profiles": _list_profile_names(),
         "current_profile": active_profile_name,
+        "profile_revision": profile_revision,
         "game_name": active_profile_game_name,
         "profile_dir": PROFILE_DIR,
         "default_event_names": sorted(event_specific_params.keys()),
         "default_ad_event_data": _default_ad_event_payload(),
     }
+
+
+def _emit_profile_runtime_refresh():
+    """Re-render every tab that derives results from the active profile."""
+    with lock:
+        validator_results.clear()
+        _clear_record_dedup("validator")
+    _apply_specific_filter_and_emit()
+    _apply_adrevenue_filter_and_emit()
+    socketio.emit('update_validator_table', [])
+    socketio.emit('profile_updated', _profile_payload())
 
 def _levenshtein_distance_limit(a, b, limit=2):
     """Compute Levenshtein distance with early exit if > limit."""
@@ -4105,7 +4133,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(70)</title>
+    <title>Event Inspector v2.5.0(71)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -4187,7 +4215,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(70)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(71)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4811,7 +4839,7 @@ HTML_TEMPLATE = """
                                         <span>CP - com.nostel.parking.car</span>
                                     </label>
                                     <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.afk.idle.cat.food.restaurent" data-android-value="com.afk.idle.cat.food.restaurent" data-android-label="CR - com.afk.idle.cat.food.restaurent">
+                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.afk.idle.cat.food.restaurent" data-android-value="com.afk.idle.cat.food.restaurent" data-android-label="CR - com.afk.idle.cat.food.restaurent" data-ios-value="CatRestaurant" data-ios-label="CR - CatRestaurant">
                                         <span>CR - com.afk.idle.cat.food.restaurent</span>
                                     </label>
                                     <label class="inline-flex items-center gap-2">
@@ -5103,6 +5131,22 @@ HTML_TEMPLATE = """
             if (deviceFilter) deviceFilter.value = 'all';
         }
 
+        function resetDeviceStatusUi(platform = activePlatform) {
+            resetSelectedDeviceFilter();
+            if (deviceFilter) {
+                deviceFilter.replaceChildren(new Option('All Devices', 'all'));
+            }
+            if (!deviceListEl) return;
+            const message = platform === 'ios'
+                ? 'Waiting... (iOS: connect a trusted USB device)'
+                : 'Waiting... (ADB: connect an Android device)';
+            deviceListEl.replaceChildren();
+            const waiting = document.createElement('p');
+            waiting.className = 'text-orange-500';
+            waiting.textContent = message;
+            deviceListEl.appendChild(waiting);
+        }
+
         function syncPlatformUi() {
             const platform = activePlatform === 'ios' ? 'ios' : 'android';
             document.querySelectorAll('.sdk-check-panel').forEach(panel => {
@@ -5184,6 +5228,7 @@ HTML_TEMPLATE = """
             if (typeof resetPriceRotationUiState === 'function') resetPriceRotationUiState();
             resetSelectedDeviceFilter();
             syncPlatformUi();
+            resetDeviceStatusUi(activePlatform);
         }
 
         function renderInstallationIdPanel() {
@@ -5320,6 +5365,12 @@ HTML_TEMPLATE = """
 
             if (tabName === 'SdkCheck' || tabName === 'BrightSDK') loadSdkCheckPresetsFromGit();
             if (tabName === 'ServicesChecker') openServicesChecker();
+            if (['Validator', 'DefaultAdEvents', 'Specific', 'AdRevenue'].includes(tabName)) {
+                // The profile is shared by all validation/revenue tabs. Sync
+                // it on tab entry so a tab cannot keep a stale selector after
+                // another tab changed the Default File.
+                refreshProfiles().catch(() => {});
+            }
             
             socket.emit('change_tab', { tab_name: tabName });
         }
@@ -5379,6 +5430,16 @@ HTML_TEMPLATE = """
             manualRestartBtn.disabled = true;
             manualRestartBtn.textContent = 'Restarting...';
             fetch('/restart_app', { method: 'POST' })
+                .then(async response => {
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok || data.ok === false) {
+                        throw new Error(data.error || `HTTP ${response.status}`);
+                    }
+                    if (data.mode === 'local_runtime_reset') {
+                        window.location.reload();
+                    }
+                    return data;
+                })
                 .catch(err => {
                     alert('Restart failed: ' + err);
                 })
@@ -5505,6 +5566,8 @@ HTML_TEMPLATE = """
         let defaultEventNames = {{ default_event_names | tojson }};
         let defaultEventStatusEls = {};
         let currentProfileName = {{ current_profile_name | tojson }};
+        let currentProfileRevision = {{ profile_revision | tojson }};
+        let profileRefreshRequestId = 0;
         let defaultAdEventData = {{ default_ad_event_data | tojson }};
 
         function defaultAdEventHitKey(adFormat, provider, eventName) {
@@ -5808,15 +5871,29 @@ HTML_TEMPLATE = """
         }
 
         function renderProfileOptions(payload) {
-            const profiles = payload.profiles || [];
+            if (!payload || typeof payload !== 'object') return;
+            const incomingRevision = Number(payload.profile_revision);
+            if (Number.isFinite(incomingRevision) && incomingRevision < currentProfileRevision) {
+                return;
+            }
+            if (Number.isFinite(incomingRevision)) {
+                currentProfileRevision = incomingRevision;
+            }
+            const profiles = Array.isArray(payload.profiles) ? payload.profiles : [];
+            const selectedProfile = payload.current_profile || '';
             [document.getElementById('profileSelect'), document.getElementById('adRevenueProfileSelect'), document.getElementById('defaultAdEventProfileSelect')].forEach(select => {
                 if (!select) return;
                 select.innerHTML = profiles.length
-                    ? profiles.map(name => `<option value="${escapeAttribute(name)}"${name === payload.current_profile ? ' selected' : ''}>${escapeHTML(name)}</option>`).join('')
+                    ? profiles.map(name => `<option value="${escapeAttribute(name)}">${escapeHTML(name)}</option>`).join('')
                     : '<option value="">No profiles</option>';
+                // Keep one canonical selection across every tab. Setting the
+                // property (rather than relying only on the selected HTML
+                // attribute) also handles selectors populated after the user
+                // switched tabs.
+                select.value = selectedProfile;
                 select.disabled = profiles.length === 0;
             });
-            currentProfileName = payload.current_profile || '';
+            currentProfileName = selectedProfile;
             defaultEventNames = payload.default_event_names || [];
             defaultAdEventData = payload.default_ad_event_data || {providers: [], formats: [], hits: [], simple_categories: [], simple_hits: []};
             renderDefaultEventStatusList();
@@ -5834,9 +5911,12 @@ HTML_TEMPLATE = """
         }
 
         async function refreshProfiles() {
-            const res = await fetch('/api/profiles');
+            const requestId = ++profileRefreshRequestId;
+            const res = await fetch(`/api/profiles?ts=${Date.now()}-${requestId}`, { cache: 'no-store' });
             const payload = await res.json();
+            if (requestId !== profileRefreshRequestId) return payload;
             renderProfileOptions(payload);
+            return payload;
         }
 
         function renderDefaultEventStatusList() {
@@ -5965,7 +6045,11 @@ HTML_TEMPLATE = """
         });
 
         async function switchSharedProfile(profileName) {
-            if (!profileName || profileName === currentProfileName) return;
+            if (!profileName) return;
+            if (profileName === currentProfileName) {
+                await refreshProfiles();
+                return;
+            }
             const res = await fetch('/api/profiles/select', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -6093,6 +6177,10 @@ HTML_TEMPLATE = """
         socket.on('update_default_ad_events', (d) => {
             defaultAdEventData = d || {providers: [], formats: [], hits: [], simple_categories: [], simple_hits: []};
             renderDefaultAdEventMatrix();
+        });
+
+        socket.on('profile_updated', (payload) => {
+            if (payload && typeof payload === 'object') renderProfileOptions(payload);
         });
 
         let lastSpecificEventData = [];
@@ -6901,11 +6989,22 @@ HTML_TEMPLATE = """
             // A discovery pass started on the previous platform can finish
             // after a switch. Ignore that late status instead of overwriting
             // the new platform with an old Waiting/device list.
-            if (status?.platform && activePlatform && status.platform !== activePlatform) return;
+            const statusPlatform = status?.platform === 'ios'
+                ? 'ios'
+                : status?.platform === 'android'
+                    ? 'android'
+                    : '';
+            // Every current backend status is platform-tagged. Reject legacy
+            // or malformed payloads so an iOS list can never be rendered in
+            // the Android view (or vice versa).
+            if (!statusPlatform || statusPlatform !== activePlatform) return;
             const currentFilter = deviceFilter.value;
             deviceFilter.innerHTML = '<option value="all">All Devices</option>';
-            if (status.connected_devices) {
-                status.connected_devices.forEach(d => {
+            const devices = Array.isArray(status.connected_devices)
+                ? status.connected_devices.filter(d => !d.platform || d.platform === statusPlatform)
+                : [];
+            if (devices.length > 0) {
+                devices.forEach(d => {
                     const opt = document.createElement('option');
                     opt.value = d.id; opt.textContent = d.display_name || d.name || d.id;
                     deviceFilter.appendChild(opt);
@@ -6919,12 +7018,12 @@ HTML_TEMPLATE = """
                 resetSelectedDeviceFilter();
             }
 
-            if (status.connected_devices && status.connected_devices.length > 0) {
+            if (devices.length > 0) {
                  deviceListEl.innerHTML = '<ul class="list-disc list-inside text-left">' + 
-                    status.connected_devices.map(d => `<li class="${escapeHTML(d.status_class || 'text-green-600')} font-semibold">${escapeHTML(d.display_name || d.name || d.id)}</li>`).join('') + 
+                    devices.map(d => `<li class="${escapeHTML(d.status_class || 'text-green-600')} font-semibold">${escapeHTML(d.display_name || d.name || d.id)}</li>`).join('') +
                     '</ul>';
             } else {
-                 deviceListEl.innerHTML = `<p class="text-orange-500">${status.message || 'Waiting...'}</p>`;
+                deviceListEl.innerHTML = `<p class="text-orange-500">${status.message || 'Waiting...'}</p>`;
             }
         });
 
@@ -6933,7 +7032,7 @@ HTML_TEMPLATE = """
             const platformChanged = activePlatform !== platform;
             activePlatform = platform;
             if (platformBtn) platformBtn.textContent = `Platform: ${platformLabel(platform)}`;
-            if (platformChanged) resetSelectedDeviceFilter();
+            if (platformChanged) resetDeviceStatusUi(platform);
             syncPlatformUi();
             if (platform === 'ios') {
                 installationIdState = {
@@ -7355,6 +7454,10 @@ HTML_TEMPLATE = """
         socket.on('clear_all_logs_complete', () => {
             sdkCheckClearPending = false;
             renderSdkCheckPresetOptions();
+            lastPackageLogs = [];
+            selectedPackageRowKeys.clear();
+            pausedPackageSnapshot = [];
+            renderPackageLogTable(true);
             const status = document.getElementById('sdkCheckPresetStatus');
             if (status && !sdkCheckRunning) status.textContent = 'Chọn preset để tự nạp danh sách.';
         });
@@ -7478,7 +7581,15 @@ HTML_TEMPLATE = """
         }
 
         startPackageLogBtn?.addEventListener('click', () => {
-             const pkg = document.getElementById('packageIdInput').value;
+             const packageInput = document.getElementById('packageIdInput');
+             const pkg = String(packageInput?.value || '').trim();
+             if (!pkg) {
+                 alert(activePlatform === 'ios'
+                     ? 'Chọn hoặc nhập Bundle Search trước khi start Package Log.'
+                     : 'Chọn hoặc nhập Package ID trước khi start Package Log.');
+                 packageInput?.focus();
+                 return;
+             }
              setPackagePauseState(false);
              openPackageStreamModal();
              socket.emit('start_package_log', {package_id: pkg});
@@ -7588,6 +7699,7 @@ def index():
         HTML_TEMPLATE,
         default_event_names=sorted(event_specific_params.keys()),
         current_profile_name=active_profile_name,
+        profile_revision=profile_revision,
         default_ad_event_data=_default_ad_event_payload(),
         sdk_check_presets=_load_sdk_check_presets(),
     )
@@ -7661,8 +7773,8 @@ def select_profile():
     try:
         if not _set_active_profile(profile_name):
             return jsonify({'ok': False, 'error': 'profile_not_found'}), 404
-        _apply_adrevenue_filter_and_emit()
         socketio.emit('update_default_ad_events', _default_ad_event_payload())
+        _emit_profile_runtime_refresh()
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
     return jsonify({'ok': True, **_profile_payload()})
@@ -7674,8 +7786,8 @@ def reload_profile():
         _set_active_profile(active_profile_name)
     else:
         _set_active_profile()
-    _apply_adrevenue_filter_and_emit()
     socketio.emit('update_default_ad_events', _default_ad_event_payload())
+    _emit_profile_runtime_refresh()
     return jsonify({'ok': True, **_profile_payload()})
 
 
@@ -7690,8 +7802,8 @@ def import_profile():
         os.makedirs(PROFILE_DIR, exist_ok=True)
         upload.save(target)
         _set_active_profile(filename)
-        _apply_adrevenue_filter_and_emit()
         socketio.emit('update_default_ad_events', _default_ad_event_payload())
+        _emit_profile_runtime_refresh()
         return jsonify({'ok': True, **_profile_payload()})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
@@ -7781,7 +7893,12 @@ def restart_app():
     cmd = os.getenv('EVENTINSPECTOR_RESTART_CMD')
     args = os.getenv('EVENTINSPECTOR_RESTART_ARGS', '')
     if not cmd:
-        return jsonify({'ok': False, 'error': 'restart_cmd_missing'})
+        # ``python -c 'import Log_checker; run_server(...)'`` is the supported
+        # local test mode and has no desktop process to relaunch. Reset the
+        # runtime instead of returning an error that the UI cannot act on.
+        _clear_default_ad_event_history()
+        _reset_runtime_for_platform_switch()
+        return jsonify({'ok': True, 'mode': 'local_runtime_reset'})
     _clear_default_ad_event_history()
     argv = [cmd]
     if args:
@@ -8101,39 +8218,61 @@ def _create_record_sheet_in_background(tab_name, requested_name, request_id):
     })
 
 def process_load_ads_unity_log(line, device_id):
-    """Xử lý log cho Tab 1: Load Ads (Unity)"""
+    """Xử lý TrackingService ad_impression cho Tab Load Ads.
+
+    Unity Android records historically used ``eventName`` + ``e`` while the
+    iOS UnityFramework record uses ``EventName`` + ``params``. Both are the
+    same TrackingService record format, so parse them through the shared event
+    parser instead of making Load Ads depend on one JSON spelling.
+    """
     # CHỈ XỬ LÝ NẾU ĐANG GHI (RECORDING)
     if not recording_states["LoadAds"]["is_recording"]:
         return
 
-    match = UNITY_TRACKING_PATTERN.search(line)
-    if match:
-        try:
-            data = json.loads(match.group(1))
-            params = data.get("e", {})
-            src = params.get("ad_source")
-            fmt = params.get("ad_format")
-            if params.get("mediation_ad_unit_name") == "MREC": fmt = "MREC"
-            
-            if src and fmt:
-                d_name = get_device_name(device_id)
-                snapshot = None
-                with lock:
-                    if (device_id, src, fmt, "unity") not in unique_load_ads and _accept_exact_record("load_ads", device_id, line, src, fmt, "unity"):
-                        unique_load_ads.add((device_id, src, fmt, "unity"))
-                        load_ads_events.append({
-                            "device_id": device_id,
-                            "device_name": d_name, 
-                            "ad_source": src, 
-                            "ad_format": fmt, 
-                            "raw_log": line.strip()
-                        })
-                        snapshot = list(load_ads_events)
-                if snapshot is not None:
-                    socketio.emit('update_load_ads', snapshot)
-                    # Gửi với type "LoadAds"
-                    send_to_sheet(d_name, src, fmt, line.strip(), "LoadAds")
-        except: pass
+    if not TRACKING_SERVICE_EVENT_PATTERN.search(str(line or "")):
+        return
+
+    try:
+        event_name, params, _json_string = find_and_parse_event(line)
+        if event_name != "ad_impression" or not isinstance(params, dict):
+            return
+
+        # Keep the existing Load Ads columns while accepting both old Unity
+        # names and the newer iOS TrackingService names. This is only field
+        # extraction after the record has been parsed; record matching itself
+        # is shared and does not depend on the ad parameter set.
+        src = (
+            params.get("ad_source")
+            or params.get("ad_network")
+            or params.get("network_name")
+            or params.get("ad_platform")
+        )
+        fmt = params.get("ad_format")
+        if params.get("mediation_ad_unit_name") == "MREC":
+            fmt = "MREC"
+
+        if not src or not fmt:
+            return
+
+        d_name = get_device_name(device_id)
+        snapshot = None
+        with lock:
+            dedup_key = (device_id, str(src), str(fmt), "tracking")
+            if dedup_key not in unique_load_ads and _accept_exact_record("load_ads", device_id, line, src, fmt, "tracking"):
+                unique_load_ads.add(dedup_key)
+                load_ads_events.append({
+                    "device_id": device_id,
+                    "device_name": d_name,
+                    "ad_source": src,
+                    "ad_format": fmt,
+                    "raw_log": line.strip()
+                })
+                snapshot = list(load_ads_events)
+        if snapshot is not None:
+            socketio.emit('update_load_ads', snapshot)
+            send_to_sheet(d_name, src, fmt, line.strip(), "LoadAds")
+    except Exception:
+        pass
 
 
 def _first_ios_max_field(pattern, text):
@@ -8444,126 +8583,353 @@ def process_load_ads_ext_log(line, device_id):
                     send_to_sheet(d_name, ad_network, fmt, line.strip(), "LoadAdsExt", provider)
         except: pass
 
+def _extract_event_json_candidate(text):
+    """Extract one JSON object without counting braces inside string values."""
+    raw_text = str(text or "")
+    start = raw_text.find("{")
+    if start >= 0:
+        decoder = json.JSONDecoder()
+        for candidate_text in (raw_text, _decode_ios_levelplay_json_text(raw_text)):
+            candidate_start = candidate_text.find("{")
+            if candidate_start < 0:
+                continue
+            try:
+                parsed, end = decoder.raw_decode(candidate_text[candidate_start:])
+                if isinstance(parsed, dict):
+                    return candidate_text[candidate_start:candidate_start + end]
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+    # Keep the existing Objective-C/plist-style fallback for callers that
+    # receive a non-JSON diagnostic around the event payload.
+    return extract_json_object_from_text(raw_text)
+
+
+def _mapping_value_case_insensitive(data, *keys):
+    if not isinstance(data, dict):
+        return None
+    normalized = {str(key).casefold(): value for key, value in data.items()}
+    for key in keys:
+        value = normalized.get(str(key).casefold())
+        if value is not None:
+            return value
+    return None
+
+
+def _parse_tracking_service_event(log_entry):
+    """Parse both Android and iOS TrackingService event spellings."""
+    text = str(log_entry or "")
+    marker = TRACKING_SERVICE_EVENT_PATTERN.search(text)
+    if not marker:
+        return None, None, None
+
+    after_keyword = text[marker.end():]
+    json_str = _extract_event_json_candidate(after_keyword)
+    candidates = []
+    if json_str:
+        candidates.extend([json_str, _decode_ios_levelplay_json_text(json_str)])
+    raw_tail = after_keyword.strip()
+    if raw_tail:
+        candidates.extend([raw_tail, _decode_ios_levelplay_json_text(raw_tail)])
+
+    data = None
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            parsed = json.loads(candidate)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(parsed, dict):
+            data = parsed
+            break
+
+    if isinstance(data, dict):
+        event_name = _mapping_value_case_insensitive(
+            data, "eventName", "event_name", "name", "event"
+        )
+        params = _mapping_value_case_insensitive(data, "e", "params", "parameters")
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                params = {}
+        if not isinstance(params, dict):
+            params = {}
+        if event_name:
+            event_name = str(event_name).strip()
+            if event_name:
+                wrapped = {
+                    "eventName": event_name,
+                    "e": params,
+                    "source": "firebase",
+                }
+                return event_name, params, json.dumps(wrapped, ensure_ascii=False)
+
+    # If the payload is malformed, keep the event visible as a FAILED/INFO
+    # record instead of silently dropping it from every event tab. A line that
+    # starts an unfinished JSON object is left for the iOS stream buffer.
+    if not json_str and "{" not in after_keyword:
+        name_match = re.search(
+            r"[\"']?(?:eventname|event_name|name)[\"']?\s*(?:=|:)\s*[\"']([^\"']+)[\"']",
+            after_keyword,
+            re.IGNORECASE,
+        )
+        if name_match:
+            event_name = name_match.group(1).strip()
+            wrapped = {"eventName": event_name, "e": {}, "source": "firebase"}
+            return event_name, {}, json.dumps(wrapped, ensure_ascii=False)
+
+    return None, None, None
+
+
 def find_and_parse_event(log_entry):
-    """Parse log sự kiện chung từ TrackingService->Track và AppMetrica regular event."""
-    if 'TrackingService->Track:' in log_entry:
-        try:
-            after_keyword = log_entry.split('TrackingService->Track:', 1)[1]
-            json_str = extract_json_object_from_text(after_keyword)
-            if not json_str:
-                match = OLD_EVENT_LOG_PATTERN.search(log_entry)
-                json_str = match.group(1) if match else None
-            if json_str or after_keyword:
-                data = None
-                candidates = []
-                if json_str:
-                    candidates.extend([json_str, _decode_ios_levelplay_json_text(json_str)])
-                raw_tail = (after_keyword or "").strip()
-                if raw_tail:
-                    candidates.extend([raw_tail, _decode_ios_levelplay_json_text(raw_tail)])
-                seen = set()
-                unique_candidates = []
-                for candidate in candidates:
-                    if candidate and candidate not in seen:
-                        seen.add(candidate)
-                        unique_candidates.append(candidate)
-                for candidate in unique_candidates:
-                    try:
-                        data = json.loads(candidate)
-                        break
-                    except Exception:
-                        data = None
-                if not isinstance(data, dict):
-                    raise ValueError("invalid_trackingservice_track_json")
-                event_name = (
-                    data.get('eventName')
-                    or data.get('EventName')
-                    or data.get('event_name')
-                )
-                params = data.get('e')
-                if params is None:
-                    params = data.get('params', {})
-                if isinstance(params, str):
-                    try:
-                        params = json.loads(params)
-                    except Exception:
-                        params = {}
-                if event_name and isinstance(params, dict):
-                    wrapped = {
-                        'eventName': event_name,
-                        'e': params,
-                        'source': 'firebase',
-                    }
-                    return event_name, params, json.dumps(wrapped, ensure_ascii=False)
-        except Exception:
-            pass
+    """Parse TrackingService and AppMetrica regular event records."""
+    event_name, params, json_string = _parse_tracking_service_event(log_entry)
+    if event_name:
+        return event_name, params, json_string
 
-    if 'TrackingService->_LogEvent:' in log_entry:
-        try:
-            match = IOS_FIREBASE_EVENT_PATTERN.search(log_entry)
-            json_str = match.group(1) if match else None
-            if not json_str:
-                after_keyword = log_entry.split('TrackingService->_LogEvent:', 1)[1]
-                json_str = extract_json_object_from_text(after_keyword)
-            if json_str or ('TrackingService->_LogEvent:' in log_entry):
-                data = None
-                candidates = []
-                if json_str:
-                    candidates.extend([json_str, _decode_ios_levelplay_json_text(json_str)])
-                raw_tail = log_entry.split('TrackingService->_LogEvent:', 1)[1].strip()
-                if raw_tail:
-                    candidates.extend([raw_tail, _decode_ios_levelplay_json_text(raw_tail)])
-                seen = set()
-                unique_candidates = []
-                for candidate in candidates:
-                    if candidate and candidate not in seen:
-                        seen.add(candidate)
-                        unique_candidates.append(candidate)
-                for candidate in unique_candidates:
-                    try:
-                        data = json.loads(candidate)
-                        break
-                    except Exception:
-                        data = None
-                if not isinstance(data, dict):
-                    raise ValueError("invalid_trackingservice_logevent_json")
-                event_name = (
-                    data.get('eventName')
-                    or data.get('EventName')
-                    or data.get('event_name')
-                )
-                params = data.get('e')
-                if params is None:
-                    params = data.get('params', {})
-                if isinstance(params, str):
-                    try:
-                        params = json.loads(params)
-                    except Exception:
-                        params = {}
-                if event_name and isinstance(params, dict):
-                    wrapped = {
-                        'eventName': event_name,
-                        'e': params,
-                        'source': 'firebase',
-                    }
-                    return event_name, params, json.dumps(wrapped, ensure_ascii=False)
-        except Exception:
-            pass
-
-    match = METRICA_REGULAR_EVENT_PATTERN.search(log_entry)
+    match = METRICA_REGULAR_EVENT_PATTERN.search(str(log_entry or ""))
     if match:
         try:
             event_name = match.group(1)
             params = json.loads(match.group(2))
+            if not isinstance(params, dict):
+                params = {}
             wrapped = {
-                'eventName': event_name,
-                'e': params,
-                'source': 'appmetrica',
+                "eventName": event_name,
+                "e": params,
+                "source": "appmetrica",
             }
             return event_name, params, json.dumps(wrapped, ensure_ascii=False)
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             pass
     return None, None, None
+
+
+def _process_ios_event_stream_line(device_id, raw_line):
+    """Return completed event records while buffering split iOS JSON lines."""
+    text = str(raw_line or "").rstrip("\r\n")
+    if not text.strip():
+        return []
+
+    completed = []
+    with lock:
+        buffered = incomplete_ios_event_logs.get(device_id, "")
+
+    # A timestamped line starts a new syslog record. Finish the previous
+    # TrackingService record before considering this line independently.
+    if buffered and IOS_LOG_RECORD_START_PATTERN.match(text.strip()):
+        parsed = find_and_parse_event(buffered)
+        if parsed[0]:
+            completed.append((buffered, parsed))
+        buffered = ""
+        with lock:
+            incomplete_ios_event_logs.pop(device_id, None)
+
+    combined = f"{buffered}\n{text}" if buffered else text
+    parsed = find_and_parse_event(combined)
+    if parsed[0]:
+        with lock:
+            incomplete_ios_event_logs.pop(device_id, None)
+        completed.append((combined, parsed))
+        return completed
+
+    if TRACKING_SERVICE_EVENT_PATTERN.search(combined):
+        if len(combined) <= 200000:
+            with lock:
+                incomplete_ios_event_logs[device_id] = combined
+        else:
+            with lock:
+                incomplete_ios_event_logs.pop(device_id, None)
+    return completed
+
+
+def _safe_runtime_call(label, callback, *args):
+    """Run one log consumer without allowing it to kill the device reader."""
+    try:
+        return callback(*args)
+    except Exception as exc:
+        print(f"WARNING: {label} failed: {exc}")
+        return None
+
+
+def _dispatch_event_record(raw_log, device_id, parsed=None):
+    """Send one parsed event to every relevant tab independently."""
+    if parsed is None:
+        parsed = _safe_runtime_call("event parser", find_and_parse_event, raw_log)
+    if not parsed:
+        parsed = (None, None, None)
+    event_name, params, json_string = parsed
+    if event_name:
+        # Each tab is isolated deliberately. A malformed profile/filter or a
+        # transient formatter error must not stop the shared device stream.
+        _safe_runtime_call(
+            "callback/ad-event consumer",
+            process_callback_and_ad_event_log,
+            raw_log,
+            device_id,
+            event_name,
+            params,
+            json_string,
+        )
+        _safe_runtime_call(
+            "default-ad-event consumer",
+            _record_default_ad_event_hit,
+            event_name,
+            params,
+            device_id,
+        )
+        _safe_runtime_call(
+            "validator consumer",
+            process_event_validator_log,
+            event_name,
+            params,
+            json_string,
+            raw_log,
+            device_id,
+        )
+        _safe_runtime_call(
+            "specific-event consumer",
+            cache_specific_event_log,
+            event_name,
+            params,
+            json_string,
+            raw_log,
+            device_id,
+        )
+    else:
+        _safe_runtime_call("callback consumer", process_callback_and_ad_event_log, raw_log, device_id)
+
+
+def _dispatch_android_event_record(raw_log, device_id, parsed=None):
+    """Dispatch one complete Android record to Load Ads and event tabs."""
+    # Load Ads/Unity historically parsed the physical adb line itself.  Keep
+    # that behavior for normal records, but also feed it the reconstructed
+    # record when logcat wrapped a long TrackingService JSON payload.
+    _safe_runtime_call("Android Load Ads/Unity event", process_load_ads_unity_log, raw_log, device_id)
+    _dispatch_event_record(raw_log, device_id, parsed)
+
+
+def _process_android_event_stream_line(device_id, raw_line):
+    """Reassemble wrapped Android TrackingService records before dispatch.
+
+    ``adb logcat`` normally returns one message per line, but Unity can emit a
+    long JSON message that the relay exposes as several physical lines.  The
+    old per-line parser silently discarded every fragment.  Only records that
+    contain the TrackingService marker are buffered; ordinary callbacks keep
+    their existing one-line behavior.
+    """
+    text = str(raw_line or "").rstrip("\r\n")
+    if not text.strip():
+        return
+
+    with lock:
+        buffered = incomplete_android_event_logs.get(device_id, "")
+
+    # A new timestamp starts a new logcat record.  Flush a completed previous
+    # record before handling the new one; never merge unrelated log messages.
+    if buffered and ANDROID_LOG_RECORD_START_PATTERN.match(text.strip()):
+        parsed = find_and_parse_event(buffered)
+        if parsed[0]:
+            _dispatch_android_event_record(buffered, device_id, parsed)
+        buffered = ""
+        with lock:
+            incomplete_android_event_logs.pop(device_id, None)
+
+    combined = f"{buffered}\n{text}" if buffered else text
+    parsed = find_and_parse_event(combined)
+    if parsed[0]:
+        with lock:
+            incomplete_android_event_logs.pop(device_id, None)
+        _dispatch_android_event_record(combined, device_id, parsed)
+        return
+
+    if TRACKING_SERVICE_EVENT_PATTERN.search(combined):
+        if len(combined) <= 200000:
+            with lock:
+                incomplete_android_event_logs[device_id] = combined
+        else:
+            with lock:
+                incomplete_android_event_logs.pop(device_id, None)
+        return
+
+    _dispatch_event_record(text, device_id)
+
+
+def _flush_android_event_log_buffer(device_id):
+    """Dispatch a final complete Android event before a reader is replaced."""
+    with lock:
+        buffered = incomplete_android_event_logs.pop(device_id, "")
+    if not buffered:
+        return
+    parsed = _safe_runtime_call("Android final event parser", find_and_parse_event, buffered)
+    if parsed and parsed[0]:
+        _dispatch_android_event_record(buffered, device_id, parsed)
+
+
+def _process_android_runtime_line(line, device_id):
+    """Process one Android logcat line without coupling tab consumers."""
+    _safe_runtime_call("Android Load Ads/MAX", process_load_ads_max_log, line, device_id)
+    _safe_runtime_call("Android Load Ads Ext", process_load_ads_ext_log, line, device_id)
+    _safe_runtime_call("Android SDK Check", _process_sdk_check_line, line, device_id)
+    _safe_runtime_call("Android AdRevenue", process_adrevenue_log, line, device_id)
+    _safe_runtime_call("Android Price Rotation", process_price_rotation_log, line, device_id)
+    _safe_runtime_call("Android Installation ID", process_installation_id_log, line, device_id)
+    _process_android_event_stream_line(device_id, line)
+
+
+def _process_ios_runtime_line(raw_line, device_id):
+    """Process one iOS physical line and complete buffered event records."""
+    line = str(raw_line or "")
+    if not line:
+        return
+
+    _safe_runtime_call("iOS Load Ads/MAX", process_load_ads_max_log, line, device_id)
+    _safe_runtime_call("iOS Load Ads/Unity", process_load_ads_unity_log, line, device_id)
+    _safe_runtime_call("iOS Load Ads Ext", process_load_ads_ext_log, line, device_id)
+    _safe_runtime_call("iOS AdRevenue", process_adrevenue_log, line, device_id)
+    _safe_runtime_call("iOS Price Rotation", process_price_rotation_log, line, device_id)
+    _safe_runtime_call("iOS SDK Check", _process_sdk_check_line, line, device_id)
+
+    with lock:
+        had_buffer = bool(incomplete_ios_event_logs.get(device_id))
+    is_record_start = bool(IOS_LOG_RECORD_START_PATTERN.match(line.strip()))
+    is_tracking_line = bool(TRACKING_SERVICE_EVENT_PATTERN.search(line))
+    completed = _safe_runtime_call(
+        "iOS event stream parser",
+        _process_ios_event_stream_line,
+        device_id,
+        line,
+    ) or []
+
+    for event_raw, parsed in completed:
+        _dispatch_event_record(event_raw, device_id, parsed)
+
+    # A non-TrackingService line is independent unless it was a continuation
+    # of the buffered TrackingService JSON. This also keeps AppMetrica regular
+    # events and ordinary callbacks flowing through the normal dispatcher.
+    continuation = had_buffer and not is_record_start
+    if not is_tracking_line and not continuation:
+        current_parsed = _safe_runtime_call("iOS current-event parser", find_and_parse_event, line)
+        current_was_completed = any(
+            str(event_raw or "").strip() == line.strip()
+            for event_raw, _parsed in completed
+        )
+        if not current_was_completed:
+            _dispatch_event_record(line, device_id, current_parsed)
+
+
+def _flush_ios_event_log_buffer(device_id):
+    """Dispatch a final buffered iOS event when a reader is replaced/stopped."""
+    with lock:
+        buffered = incomplete_ios_event_logs.pop(device_id, "")
+    if not buffered:
+        return
+    parsed = _safe_runtime_call("iOS final event parser", find_and_parse_event, buffered)
+    if parsed and parsed[0]:
+        _dispatch_event_record(buffered, device_id, parsed)
 
 def process_callback_and_ad_event_log(log_entry, device_id, event_name=None, actual_params=None, json_string=None):
     global incomplete_impression_logs
@@ -9141,12 +9507,17 @@ def _loads_adrevenue_json_payload(json_str):
     return {}
 
 def _is_adjust_tag_log(line):
-    if active_platform == "ios":
-        return "AdjustSdk)" in line or "PixelArt(Adjust" in line
-    return bool(
-        re.search(r'\b[VDEIWF]\s+Adjust\s*:', line) or
-        re.search(r'(?:^|\s)Adjust(?:\s|$)', line)
-    )
+    text = str(line or "")
+    return bool(re.search(
+        r'(?:'
+        r'AdjustSdk|AdjustTrackingHandler|AdjustService|'
+        r'\[\s*Tracking\s*,\s*Adjust\b|'
+        r'\[\s*Adjust(?:Sdk)?\s*\]|'
+        r'(?:^|[\s(\[])Adjust(?:\s|:|\)|\])'
+        r')',
+        text,
+        re.IGNORECASE,
+    ))
 
 
 def _buffer_adjust_adrevenue_param(device_id, param_type, payload_part, raw_line):
@@ -9232,8 +9603,13 @@ def process_adrevenue_log(line, device_id):
                 _record_adrevenue_log(device_id, "appsflyer", "AdRevenue - Appsflyer", appsflyer_data, line, json_str, event_prefix)
             handled = True
 
-    if (not handled) and "AdjustTrackingHandler->_LogPurchaseVerificationResult:" in line:
-        payload_part = line.split("AdjustTrackingHandler->_LogPurchaseVerificationResult:", 1)[1].strip()
+    purchase_match = re.search(
+        r'AdjustTrackingHandler\s*->\s*_LogPurchaseVerificationResult\s*:',
+        line,
+        re.IGNORECASE,
+    )
+    if (not handled) and purchase_match:
+        payload_part = line[purchase_match.end():].strip()
         json_str = extract_json_object_from_text(payload_part) or ""
         if json_str:
             verification_data = _loads_adrevenue_json_payload(json_str)
@@ -9250,7 +9626,12 @@ def process_adrevenue_log(line, device_id):
                 )
             handled = True
 
-    if (not handled) and "AdjustService->Initialize:" in line:
+    initialize_match = re.search(
+        r'AdjustService\s*->\s*Initialize\s*:',
+        line,
+        re.IGNORECASE,
+    )
+    if (not handled) and initialize_match:
         json_str = extract_json_object_from_text(line)
         if json_str:
             adjust_config_data = _loads_adrevenue_json_payload(json_str)
@@ -9269,14 +9650,45 @@ def process_adrevenue_log(line, device_id):
                     )
                 handled = True
 
-    if (not handled) and "[Tracking,Adjust,Iap]" in line and "AdjustTrackingHandler->Track:" in line:
-        payload_part = line.split("AdjustTrackingHandler->Track:", 1)[1].strip()
+    adjust_track_match = re.search(
+        r'AdjustTrackingHandler\s*->\s*Track\s*:',
+        line,
+        re.IGNORECASE,
+    )
+    if (
+        (not handled)
+        and re.search(r'\[\s*Tracking\s*,\s*Adjust\s*,\s*Iap\s*\]', line, re.IGNORECASE)
+        and adjust_track_match
+    ):
+        payload_part = line[adjust_track_match.end():].strip()
         json_str = extract_json_object_from_text(payload_part) or ""
         if json_str:
             iap_data = _loads_adrevenue_json_payload(json_str)
             event_name = "Adjust Subscription" if isinstance(iap_data.get("subscription"), dict) else "Adjust IAP"
             with lock:
                 _record_adrevenue_log(device_id, "adjust", event_name, iap_data, line, json_str, "iap", skip_validation=True)
+            handled = True
+
+    # Some Android/iOS integrations emit AdjustTrackingHandler->Track without
+    # the older [Tracking,Adjust,Iap] prefix.  Keep those records visible too;
+    # do not require a particular app/process name or platform.
+    if (not handled) and adjust_track_match:
+        payload_part = line[adjust_track_match.end():].strip()
+        json_str = extract_json_object_from_text(payload_part) or ""
+        if json_str:
+            adjust_data = _loads_adrevenue_json_payload(json_str)
+            event_name = "Adjust Subscription" if isinstance(adjust_data.get("subscription"), dict) else "AdRevenue - Adjust Track"
+            with lock:
+                _record_adrevenue_log(
+                    device_id,
+                    "adjust",
+                    event_name,
+                    adjust_data,
+                    line,
+                    json_str,
+                    "track",
+                    skip_validation=True,
+                )
             handled = True
 
     ios_source, ios_keyword, ios_payload_part = (None, "", "")
@@ -9346,7 +9758,7 @@ def process_adrevenue_log(line, device_id):
                 _record_adrevenue_log(device_id, "adjust", f"AdRevenue - Adjust {param_type}", adjust_data, raw_log or line, json_str, param_type)
             handled = True
 
-    if (not handled) and _is_adjust_tag_log(line) and "source" in line:
+    if (not handled) and _is_adjust_tag_log(line) and re.search(r'\bsource\b', line, re.IGNORECASE):
         match = re.search(r'(?:(?:\bsource\s+)|(?:"source"\s*:\s*"))(ironsource[A-Za-z0-9_.-]*)', line, re.IGNORECASE)
         if match:
             source_data = {"source": match.group(1)}
@@ -9783,48 +10195,43 @@ def _process_sdk_check_line(line, device_id):
 
 def adb_log_reader(device_id):
     print(f"INFO: Starting log reader for {device_id}")
+    proc = None
+    reader_thread = threading.current_thread()
     try:
-        subprocess.run([ADB_EXECUTABLE, '-s', device_id, 'logcat', '-c'], creationflags=creation_flags)
-        proc = subprocess.Popen([ADB_EXECUTABLE, '-s', device_id, 'logcat'], stdout=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=creation_flags)
+        # Do not clear logcat every time the reader is restarted.  A transient
+        # ADB disconnect used to erase the records emitted during the restart
+        # window, which made the Package Log contain rows while all event tabs
+        # appeared to miss them.  The per-tab exact-record index filters a
+        # replayed identical line without destroying live records.
+        proc = subprocess.Popen(
+            [ADB_EXECUTABLE, '-s', device_id, 'logcat', '-v', 'threadtime'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+            text=True,
+            encoding='utf-8',
+            errors='ignore',
+            creationflags=creation_flags,
+        )
         
         for line in iter(proc.stdout.readline, ''):
             if not line: break
             if active_platform != "android":
                 continue
-            
-            # 1. Process Load Ads (MAX + Unity) - ONLY IF RECORDING
-            process_load_ads_max_log(line, device_id)
-            process_load_ads_unity_log(line, device_id)
-            
-            # 2. Process Load Ads Ext (Metrica) - ONLY IF RECORDING
-            process_load_ads_ext_log(line, device_id)
-            
-            # 3. Process SDK Check
-            _process_sdk_check_line(line, device_id)
+            _process_android_runtime_line(line, device_id)
 
-            # 4. Process AdRevenue
-            process_adrevenue_log(line, device_id)
-
-            # 4.5 Process Price Rotation logs with an exact marker match
-            process_price_rotation_log(line, device_id)
-
-            # 5.5 Process Firebase Installation ID
-            process_installation_id_log(line, device_id)
-            
-            # 6. Parse Generic Events for Validators
-            event_name, params, json_string = find_and_parse_event(line)
-            if event_name:
-                # Dispatch once with the parsed event. The old flow called
-                # the callback parser once before parsing and once again for
-                # ad_* events, which produced identical Callback rows.
-                process_callback_and_ad_event_log(line, device_id, event_name, params, json_string)
-                _record_default_ad_event_hit(event_name, params, device_id)
-                process_event_validator_log(event_name, params, json_string, line, device_id)
-                cache_specific_event_log(event_name, params, json_string, line, device_id)
-            else:
-                process_callback_and_ad_event_log(line, device_id)
-
-    except Exception as e: print(f"Error {device_id}: {e}")
+    except Exception as e:
+        print(f"Error {device_id}: {e}")
+    finally:
+        _safe_runtime_call("Android final event buffer", _flush_android_event_log_buffer, device_id)
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        with lock:
+            if active_log_readers.get(device_id) is reader_thread:
+                active_log_readers.pop(device_id, None)
 
 def ios_log_reader(device_id):
     print(f"INFO: Starting iOS log reader for {device_id}")
@@ -9861,33 +10268,24 @@ def ios_log_reader(device_id):
             # Package Log detects the actual stream framing. The executable
             # name alone cannot tell us whether the relay payload is newline
             # or NUL-delimited.
-            process_ios_package_log_stream_chunk(device_id, raw_chunk)
+            _safe_runtime_call(
+                "iOS Package Log stream",
+                process_ios_package_log_stream_chunk,
+                device_id,
+                raw_chunk,
+            )
             logical_lines = raw_chunk.replace("\x00", "\n").splitlines()
 
             for raw_line in logical_lines:
                 if not raw_line:
                     continue
-                log_obj = _normalize_ios_log_line(raw_line, device_id)
-                process_load_ads_max_log(log_obj["raw_log"], device_id)
-                process_load_ads_ext_log(log_obj["raw_log"], device_id)
-                process_adrevenue_log(log_obj["raw_log"], device_id)
-                process_price_rotation_log(log_obj["raw_log"], device_id)
-                _process_sdk_check_line(log_obj["raw_log"], device_id)
-                event_name, params, json_string = find_and_parse_event(log_obj["raw_log"])
-                if event_name:
-                    # Dispatch once with the parsed event; dispatching first
-                    # without event metadata caused duplicate iOS Ad Event rows.
-                    process_callback_and_ad_event_log(log_obj["raw_log"], device_id, event_name, params, json_string)
-                    _record_default_ad_event_hit(event_name, params, device_id)
-                    process_event_validator_log(event_name, params, json_string, log_obj["raw_log"], device_id)
-                    cache_specific_event_log(event_name, params, json_string, log_obj["raw_log"], device_id)
-                else:
-                    process_callback_and_ad_event_log(log_obj["raw_log"], device_id)
+                _process_ios_runtime_line(raw_line, device_id)
     except Exception as e:
         print(f"iOS log reader error {device_id}: {e}")
     finally:
-        _flush_ios_package_log_frame_buffer(device_id)
-        _flush_ios_package_log_buffer(device_id)
+        _flush_ios_event_log_buffer(device_id)
+        _safe_runtime_call("iOS Package Log NUL flush", _flush_ios_package_log_frame_buffer, device_id)
+        _safe_runtime_call("iOS Package Log line flush", _flush_ios_package_log_buffer, device_id)
         with lock:
             # A stalled-reader restart must never let an old reader's finally
             # block remove the dictionaries belonging to its replacement.
@@ -9904,6 +10302,7 @@ def ios_log_reader(device_id):
                 active_ios_log_processes.pop(device_id, None)
             if owns_reader_state or (current_reader is None and current_process is None):
                 incomplete_ios_max_load_ads_logs.pop(device_id, None)
+                incomplete_ios_event_logs.pop(device_id, None)
                 active_ios_package_log_stream_modes.pop(device_id, None)
         if proc and proc.poll() is None:
             try:
@@ -9945,6 +10344,7 @@ def _stop_ios_log_reader(device_id):
         ios_device_missing_polls.pop(device_id, None)
         if device_id not in active_ios_log_readers and device_id not in active_ios_log_processes:
             incomplete_ios_max_load_ads_logs.pop(device_id, None)
+            incomplete_ios_event_logs.pop(device_id, None)
             active_ios_package_log_stream_modes.pop(device_id, None)
     return True
 
@@ -10040,6 +10440,14 @@ def device_manager():
                 with lock:
                     if generation != platform_generation or active_platform != platform:
                         continue
+                    # A reader can exit while ADB still reports the device
+                    # (for example after a transient logcat failure). Remove
+                    # dead thread handles so the next pass starts a fresh
+                    # reader instead of leaving every event tab stalled.
+                    for did in list(active_log_readers.keys()):
+                        reader = active_log_readers.get(did)
+                        if did in ids and reader is not None and not reader.is_alive():
+                            active_log_readers.pop(did, None)
                     for did in ids - set(active_log_readers.keys()):
                         t = threading.Thread(target=adb_log_reader, args=(did,), daemon=True)
                         active_log_readers[did] = t
@@ -10070,6 +10478,11 @@ def device_manager():
 
 def _append_package_log_row(device_id, raw_log, time_str="", time_display="", level="", tag="", message="", is_error=False):
     with lock:
+        # A Package Log consumer can deliver one final line after Clear All
+        # asks its subprocess to stop. Do not let that tail recreate rows
+        # after the UI has already been cleared.
+        if not target_package_name:
+            return
         session_id = active_package_log_session_id
         if not _accept_exact_record("package", device_id, raw_log, session_id or ""):
             return
@@ -10122,7 +10535,9 @@ def _ios_package_log_matches_target(raw_log, bundle_search):
 
 
 def process_ios_package_log_line(log_obj, feed_max=False):
-    if is_paused or active_platform != "ios":
+    # Package Log has its own Pause/Resume control in the UI.  The global
+    # validation pause must not silently stop package capture.
+    if active_platform != "ios":
         return
     raw_log = log_obj.get("raw_log", "")
     # Only NUL-framed records need a second MAX-parser entry point. Normal
@@ -10161,7 +10576,9 @@ def process_ios_package_log_line(log_obj, feed_max=False):
     if ios_process_match:
         tag = ios_process_match.group(1).strip()
         message = ios_process_match.group(2).strip()
-    _append_package_log_row(
+    _safe_runtime_call(
+        "iOS Package Log row",
+        _append_package_log_row,
         log_obj.get("device_id", ""),
         raw_log,
         time_str,
@@ -10169,7 +10586,7 @@ def process_ios_package_log_line(log_obj, feed_max=False):
         level,
         tag,
         message,
-        is_error
+        is_error,
     )
 
 
@@ -10203,7 +10620,7 @@ def process_ios_package_log_stream_chunk(device_id, raw_chunk):
     accumulated into one giant buffer and a single matching app line can pull
     kernel/daemon records into Package Log.
     """
-    if is_paused or active_platform != "ios":
+    if active_platform != "ios":
         return
     if not raw_chunk:
         return
@@ -10250,7 +10667,7 @@ def process_ios_package_log_stream_chunk(device_id, raw_chunk):
 
 def process_ios_package_log_stream_line(device_id, log_obj):
     """Keep iOS multiline records intact without changing other iOS tabs."""
-    if is_paused or active_platform != "ios":
+    if active_platform != "ios":
         return
     raw_line = (log_obj.get("raw_log", "") or "").rstrip("\r\n")
     if not raw_line:
@@ -10276,25 +10693,41 @@ def package_log_consumer(device_id, logcat_process):
     try:
         for line in iter(logcat_process.stdout.readline, ''):
             if not line: break
-            if not is_paused:
-                is_error = bool(re.search(r'^\S+\s+\S+\s+\d+\s+\d+\s+[EF]\s', line))
-                time_str = ""
-                time_display = ""
-                level = ""
-                tag = ""
-                message = line.strip()
-                # Try to parse standard logcat format: MM-DD HH:MM:SS.mmm PID TID LEVEL TAG: message
-                m = re.match(r'^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+\d+\s+\d+\s+([A-Z])\s+([^:]+):\s*(.*)$', line.strip())
-                if m:
-                    time_str = m.group(1)
-                    level = m.group(2)
-                    tag = m.group(3).strip()
-                    message = m.group(4).strip()
-                    # Prefer shorter time display to save width: HH:MM:SS.mmm
-                    if ' ' in time_str:
-                        time_display = time_str.split(' ', 1)[1]
-                _append_package_log_row(device_id, line, time_str, time_display, level, tag, message, is_error)
-    except: pass
+            is_error = bool(re.search(r'^\S+\s+\S+\s+\d+\s+\d+\s+[EF]\s', line))
+            time_str = ""
+            time_display = ""
+            level = ""
+            tag = ""
+            message = line.strip()
+            # Try to parse standard logcat format: MM-DD HH:MM:SS.mmm PID TID LEVEL TAG: message
+            m = re.match(r'^(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)\s+\d+\s+\d+\s+([A-Z])\s+([^:]+):\s*(.*)$', line.strip())
+            if m:
+                time_str = m.group(1)
+                level = m.group(2)
+                tag = m.group(3).strip()
+                message = m.group(4).strip()
+                # Prefer shorter time display to save width: HH:MM:SS.mmm
+                if ' ' in time_str:
+                    time_display = time_str.split(' ', 1)[1]
+            _safe_runtime_call(
+                "Android Package Log row",
+                _append_package_log_row,
+                device_id,
+                line,
+                time_str,
+                time_display,
+                level,
+                tag,
+                message,
+                is_error,
+            )
+    except Exception as exc:
+        print(f"WARNING: Android Package Log consumer {device_id} stopped: {exc}")
+        try:
+            if logcat_process.poll() is None:
+                logcat_process.terminate()
+        except Exception:
+            pass
 
 def package_pid_monitor():
     global active_package_pids
@@ -10371,8 +10804,17 @@ def package_pid_monitor():
                                 active_logcat_processes[did].terminate()
                             except Exception:
                                 pass
-                        cmd = [ADB_EXECUTABLE, '-s', did, 'logcat', f'--pid={pid}']
-                        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, encoding='utf-8', errors='ignore', creationflags=creation_flags)
+                        cmd = [ADB_EXECUTABLE, '-s', did, 'logcat', '-v', 'threadtime', f'--pid={pid}']
+                        proc = subprocess.Popen(
+                            cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            bufsize=1,
+                            text=True,
+                            encoding='utf-8',
+                            errors='ignore',
+                            creationflags=creation_flags,
+                        )
                         active_logcat_processes[did] = proc
                         active_package_pids[did] = pid
                         threading.Thread(target=package_log_consumer, args=(did, proc), daemon=True).start()
@@ -10392,7 +10834,9 @@ def package_log_emitter():
         time.sleep(1)
         ui_rows = None
         with lock:
-            if not is_paused and target_package_name:
+            # Package Log has an independent UI pause snapshot; keep receiving
+            # rows while the global event-validation pause is enabled.
+            if target_package_name:
                 now = time.time()
                 while package_log_cache and now - package_log_cache[0]['timestamp'] > 1000: package_log_cache.popleft()
                 ui_limit = PACKAGE_LOG_UI_MAX_ROWS_IOS if active_platform == "ios" else PACKAGE_LOG_UI_MAX_ROWS
@@ -10404,6 +10848,8 @@ def package_log_emitter():
 @socketio.on('change_tab')
 def handle_change_tab(data): 
     # Sync logs for current tab on switch
+    if data.get('tab_name') in {'Validator', 'DefaultAdEvents', 'Specific', 'AdRevenue'}:
+        socketio.emit('profile_updated', _profile_payload(), to=request.sid)
     if data.get('tab_name') == 'LoadAds': socketio.emit('update_load_ads', list(load_ads_events))
     if data.get('tab_name') == 'LoadAdsExt': socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
     if data.get('tab_name') == 'DefaultAdEvents': socketio.emit('update_default_ad_events', _default_ad_event_payload())
@@ -10445,7 +10891,7 @@ def _reset_runtime_for_platform_switch():
         specific_event_params_filters = []
         specific_event_results.clear(); event_log_cache.clear()
         adrevenue_logs.clear(); adrevenue_log_cache.clear()
-        callback_ad_logs.clear(); incomplete_impression_logs.clear(); incomplete_ios_adrevenue_logs.clear(); incomplete_ios_load_ads_ext_logs.clear(); incomplete_ios_max_load_ads_logs.clear(); incomplete_adjust_adrevenue_logs.clear()
+        callback_ad_logs.clear(); incomplete_impression_logs.clear(); incomplete_ios_adrevenue_logs.clear(); incomplete_ios_load_ads_ext_logs.clear(); incomplete_ios_max_load_ads_logs.clear(); incomplete_ios_event_logs.clear(); incomplete_android_event_logs.clear(); incomplete_adjust_adrevenue_logs.clear()
         price_rotation_logs.clear()
         package_log_cache.clear(); active_package_pids.clear(); active_ios_package_log_buffers.clear(); active_ios_package_log_frame_buffers.clear(); active_ios_package_log_stream_modes.clear()
         _clear_record_dedup()
@@ -10552,6 +10998,8 @@ def tp():
 @socketio.on('clear_all_logs')
 def cl():
     global sdk_check_active, sdk_check_current_network, sdk_max_ios_pending_lines, sdk_max_ios_core_pending_lines
+    global target_package_name, active_package_log_session_id
+    package_processes_to_stop = []
     with lock:
         load_ads_events.clear(); unique_load_ads.clear()
         load_ads_ext_events.clear(); unique_load_ads_ext.clear()
@@ -10577,8 +11025,30 @@ def cl():
         incomplete_ios_adrevenue_logs.clear()
         incomplete_ios_load_ads_ext_logs.clear()
         incomplete_ios_max_load_ads_logs.clear()
+        incomplete_ios_event_logs.clear()
+        incomplete_android_event_logs.clear()
         incomplete_adjust_adrevenue_logs.clear()
         installation_id_state.clear()
+
+        # Clear is also the end of the current Package Log capture. Stop the
+        # Android logcat consumers and discard any iOS multiline/NUL frame so
+        # their final buffered line cannot repopulate the just-cleared table.
+        package_processes_to_stop = list(active_logcat_processes.values())
+        active_logcat_processes.clear()
+        active_package_pids.clear()
+        active_ios_package_log_buffers.clear()
+        active_ios_package_log_frame_buffers.clear()
+        active_ios_package_log_stream_modes.clear()
+        target_package_name = ""
+        if active_package_log_session_id:
+            _finish_package_log_session(active_package_log_session_id)
+            active_package_log_session_id = None
+
+    for process in package_processes_to_stop:
+        try:
+            process.terminate()
+        except Exception:
+            pass
         
     socketio.emit('update_load_ads', [])
     socketio.emit('update_load_ads_ext', [])
@@ -10712,7 +11182,7 @@ def stop_sdk_check():
 @socketio.on('start_package_log')
 def spl(d):
     global target_package_name, active_package_log_session_id
-    pid = d.get('package_id', '').strip()
+    pid = str((d or {}).get('package_id', '') or '').strip()
     for device_id in list(active_ios_package_log_frame_buffers):
         _flush_ios_package_log_frame_buffer(device_id)
     for device_id in list(active_ios_package_log_buffers):
@@ -10747,6 +11217,7 @@ def connect():
     socketio.emit('pause_status', {'is_paused': is_paused})
     socketio.emit('validator_status', {'active': validator_active})
     socketio.emit('platform_status', {'platform': active_platform})
+    socketio.emit('profile_updated', _profile_payload(), to=request.sid)
     socketio.emit('update_default_ad_events', _default_ad_event_payload())
     socketio.emit('update_price_rotation_table', list(price_rotation_logs))
     _emit_installation_id_state()
