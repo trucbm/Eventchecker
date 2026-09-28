@@ -87,5 +87,40 @@
       "Adjust Meta Referrer\t5.8.0",
       "Adjust Google LVL\t5.8.0"
     ]
+  },
+  "C-193-Android": {
+    "platform": "android",
+    "lines": [
+      "Kidoz adapter\t2.2.0",
+      "Kidoz native\t10.1.9",
+      "Maticoo adapter\t2.0.7.1",
+      "Maticoo sdk\t2.0.7.1",
+      "TaurusX adapter\t1.16.3.1",
+      "TaurusX native\t1.19.1",
+      "Ascendx Adapter\t0.12.0",
+      "Odeeo SDK\t3.10.0",
+      "Firebase Cloud Messaging Unity\t13.17.0",
+      "Firebase Cloud Messaging\t25.1.3",
+      "Firebase Installations\t19.1.2",
+      "Firebase Remote Config Unity\t13.17.0",
+      "Firebase Remote Config\t23.1.0",
+      "Firebase Performance Monitoring Plugin\t2.0.2",
+      "Firebase Performance Monitoring\t22.0.6",
+      "com.android.installreferrer:installreferrer\t2.2",
+      "Voodoo (ADN) Adapter\t5.9.0",
+      "Voodoo (ADN) SDK\t4.29.3",
+      "Adjust Xiaomi Referrer\t5.8.0",
+      "Xiaomi Install Referrer\t1.0.0.6",
+      "Adjust Samsung Referrer\t5.8.0",
+      "Samsung Install Referrer\t3.0.1",
+      "Adjust Vivo Referrer\t5.8.0",
+      "Adjust Meta Referrer\t5.8.0",
+      "Adjust Google LVL\t5.8.0",
+      "Mobilefuse - MAX\t1.12.0.0",
+      "Ascendx - MAX\t1.12.0",
+      "Yeahmobi/ Maticoo - MAX\t2.0.7.1",
+      "TaurusX - MAX\t1.16.3.1",
+      "Prado - MAX\t2.0.2"
+    ]
   }
 }
