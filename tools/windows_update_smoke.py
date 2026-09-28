@@ -12,6 +12,7 @@ import copy
 import http.server
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -48,6 +49,26 @@ class _PayloadHandler(http.server.BaseHTTPRequestHandler):
         return
 
 
+def _release_payload_bytes(relative_path: str) -> bytes:
+    """Read the exact checked-out Git payload used by this release.
+
+    The Windows build can leave generated files in the working tree while the
+    smoke test runs.  Reading the committed blob keeps the HTTP fixture aligned
+    with the manifest being tested and avoids accidentally serving a stale
+    working-tree copy.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "show", f"HEAD:{relative_path}"],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+        )
+        return result.stdout
+    except (OSError, subprocess.CalledProcessError):
+        return (ROOT / relative_path).read_bytes()
+
+
 def main() -> int:
     simulate_windows = os.name != "nt" and os.getenv("EVENTINSPECTOR_WINDOWS_SMOKE_SIMULATE") == "1"
     if os.name != "nt" and not simulate_windows:
@@ -58,7 +79,7 @@ def main() -> int:
     if expected_build is None:
         raise AssertionError(f"Canonical manifest has no release build: {manifest.get('version')!r}")
     payloads = {
-        str(item["path"]): (ROOT / str(item["path"])).read_bytes()
+        str(item["path"]): _release_payload_bytes(str(item["path"]))
         for item in manifest.get("files") or []
         if item.get("path")
     }
