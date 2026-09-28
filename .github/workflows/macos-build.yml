@@ -18,9 +18,18 @@ concurrency:
 
 jobs:
   build-macos:
-    # macos-14 is an Apple Silicon runner. The build script is explicitly
-    # pinned to arm64 below so the artifact matches the target Macs.
-    runs-on: macos-14
+    # Publish one native artifact for each supported Mac architecture.  The
+    # Intel runner is required for a reliable x86_64 PyInstaller bundle;
+    # cross-building it from Apple Silicon is not dependable for native deps.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+          - arch: x86_64
+            runner: macos-13
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -53,9 +62,9 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
-      - name: Build Apple Silicon DMG
+      - name: Build ${{ matrix.arch }} DMG
         env:
-          MACOS_TARGET_ARCH: arm64
+          MACOS_TARGET_ARCH: ${{ matrix.arch }}
           VENV_DIR: ${{ runner.temp }}/eventinspector-macos-venv
           PYTHON_BIN: python3
           PIP_DEFAULT_TIMEOUT: "120"
@@ -89,7 +98,7 @@ jobs:
 
           binary_info="$(file "$app_path/Contents/MacOS/EventInspector")"
           echo "$binary_info"
-          [[ "$binary_info" == *arm64* ]]
+          [[ "$binary_info" == *"${{ matrix.arch }}"* ]]
 
           hdiutil verify "$dmg_path"
           shasum -a 256 "$dmg_path"
@@ -97,7 +106,7 @@ jobs:
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: EventInspector-macOS-arm64-v${{ steps.release.outputs.release_version }}
+          name: EventInspector-macOS-${{ matrix.arch }}-v${{ steps.release.outputs.release_version }}
           path: dist/EventInspector.dmg
           if-no-files-found: error
           retention-days: 14

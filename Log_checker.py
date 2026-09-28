@@ -1289,6 +1289,7 @@ sdk_check_expected_order = []
 sdk_max_ios_pending_lines = {}
 sdk_max_ios_core_pending_lines = {}
 active_platform = "android"
+platform_generation = 0
 
 # Dữ liệu hệ thống chung
 active_log_readers = {}
@@ -1611,6 +1612,11 @@ SDK_CLOUDX_NATIVE_METADATA_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SDK_CLOUDX_HTTP_METADATA_PATTERN = re.compile(r'\[CloudXHttpClient\]', re.IGNORECASE)
+AUDIOMOB_OPEN_MEASUREMENT_SDK_PATTERN = re.compile(
+    r'\bAudiomob\b.*?\bOpen\s+Measurement\s+started\s*'
+    r'\(\s*SDK\s*:\s*v?(?P<version>[0-9]+(?:\.[0-9]+)+)\s*\)',
+    re.IGNORECASE,
+)
 SDK_MAX_CORE_INITIALIZATION_PATTERN = re.compile(
     r'\[TaskInitializeSdk\]\s+AppLovin\s+SDK\s+'
     r'(?P<version>[0-9]+(?:\.[0-9]+)+)\s+initialization\s+succeeded\b',
@@ -2664,6 +2670,15 @@ def _process_sdk_external_line(line, device_id):
             block["adapter_version"] = ""
             changed = True
 
+    def update_single_expected_version(network_name, version):
+        """Put a one-version log into the version column used by its preset row."""
+        expected_key = _match_sdk_expected_key(network_name) or _normalize_sdk_network_name(network_name)
+        expected = sdk_check_expected_map.get(expected_key, {})
+        if expected.get("sdk") and not expected.get("adapter"):
+            update_block(network_name, sdk_version=version)
+        else:
+            update_block(network_name, adapter_version=version)
+
     if platform == "ios":
         for item in sdk_check_search_list:
             pattern_norm = item.get("search_pattern_normalized", "")
@@ -2695,9 +2710,12 @@ def _process_sdk_external_line(line, device_id):
         if match:
             update_block("Gadsme", adapter_version=match.group(1))
     if "audiomob" in normalized_line:
-        match = re.search(r'Audiomob\s+v?([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
+        match = AUDIOMOB_OPEN_MEASUREMENT_SDK_PATTERN.search(line)
+        if not match:
+            match = re.search(r'Audiomob\s+v?([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
         if match:
-            update_block("AudioMob", adapter_version=match.group(1))
+            version = match.groupdict().get("version") or match.group(1)
+            update_single_expected_version("AudioMob", version)
     if "adquality" in normalized_line:
         match = re.search(r'AdQuality\s+([0-9]+(?:\.[0-9]+)+)', line, re.IGNORECASE)
         if match:
@@ -4098,7 +4116,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(68)</title>
+    <title>Event Inspector v2.5.0(69)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -4180,7 +4198,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(68)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(69)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -5083,6 +5101,11 @@ HTML_TEMPLATE = """
             platformModal?.classList.remove('flex');
         }
 
+        function resetSelectedDeviceFilter() {
+            selectedDevice = 'all';
+            if (deviceFilter) deviceFilter.value = 'all';
+        }
+
         function syncPlatformUi() {
             const platform = activePlatform === 'ios' ? 'ios' : 'android';
             document.querySelectorAll('.sdk-check-panel').forEach(panel => {
@@ -5163,6 +5186,7 @@ HTML_TEMPLATE = """
             if (typeof setPackageRunningState === 'function') setPackageRunningState(false);
             if (typeof resetPackageLogUiState === 'function') resetPackageLogUiState();
             if (typeof resetPriceRotationUiState === 'function') resetPriceRotationUiState();
+            resetSelectedDeviceFilter();
             syncPlatformUi();
         }
 
@@ -5206,8 +5230,8 @@ HTML_TEMPLATE = """
             activePlatform = platform === 'ios' ? 'ios' : 'android';
             if (persist) localStorage.setItem('eventInspectorPlatform', activePlatform);
             if (platformBtn) platformBtn.textContent = `Platform: ${platformLabel(activePlatform)}`;
-            syncPlatformUi();
             resetBrightSdkUiState();
+            resetRuntimeUiForPlatformSwitch();
             socket.emit('set_platform', { platform: activePlatform, reset: !!persist });
         }
 
@@ -5307,6 +5331,8 @@ HTML_TEMPLATE = """
         clearAllBtn.addEventListener('click', () => {
             if (confirm('Are you sure you want to clear ALL logs?')) {
                 resetSdkCheckUiState(true);
+                sdkCheckClearPending = true;
+                renderSdkCheckPresetOptions();
                 resetBrightSdkUiState();
                 resetPriceRotationUiState();
                 socket.emit('clear_all_logs');
@@ -6868,6 +6894,10 @@ HTML_TEMPLATE = """
         
         // --- Device Status ---
         socket.on('device_status', (status) => {
+            // A discovery pass started on the previous platform can finish
+            // after a switch. Ignore that late status instead of overwriting
+            // the new platform with an old Waiting/device list.
+            if (status?.platform && activePlatform && status.platform !== activePlatform) return;
             const currentFilter = deviceFilter.value;
             deviceFilter.innerHTML = '<option value="all">All Devices</option>';
             if (status.connected_devices) {
@@ -6878,7 +6908,12 @@ HTML_TEMPLATE = """
                 });
             }
             // Restore selection if exists
-            if([...deviceFilter.options].some(o => o.value === currentFilter)) deviceFilter.value = currentFilter;
+            if ([...deviceFilter.options].some(o => o.value === currentFilter)) {
+                deviceFilter.value = currentFilter;
+                selectedDevice = currentFilter;
+            } else {
+                resetSelectedDeviceFilter();
+            }
 
             if (status.connected_devices && status.connected_devices.length > 0) {
                  deviceListEl.innerHTML = '<ul class="list-disc list-inside text-left">' + 
@@ -6891,8 +6926,10 @@ HTML_TEMPLATE = """
 
         socket.on('platform_status', (status) => {
             const platform = status?.platform === 'ios' ? 'ios' : 'android';
+            const platformChanged = activePlatform !== platform;
             activePlatform = platform;
             if (platformBtn) platformBtn.textContent = `Platform: ${platformLabel(platform)}`;
+            if (platformChanged) resetSelectedDeviceFilter();
             syncPlatformUi();
             if (platform === 'ios') {
                 installationIdState = {
@@ -7232,6 +7269,7 @@ HTML_TEMPLATE = """
         });
         
         let sdkCheckRunning = false;
+        let sdkCheckClearPending = false;
         function renderSdkCheckPresetOptions() {
             const container = document.getElementById('sdkCheckPresetList');
             if (!container) return;
@@ -7245,7 +7283,7 @@ HTML_TEMPLATE = """
             }
             container.innerHTML = presets.map(([name, preset]) => `
                 <label class="inline-flex items-center gap-2 rounded-md border border-indigo-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 shadow-sm cursor-pointer hover:bg-indigo-50">
-                    <input type="radio" name="sdkCheckPreset" value="${escapeAttribute(name)}" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500">
+                    <input type="radio" name="sdkCheckPreset" value="${escapeAttribute(name)}" class="h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500"${sdkCheckClearPending ? ' disabled' : ''}>
                     <span>${escapeHTML(name)}</span>
                     <span class="text-[11px] font-normal text-slate-500">${Array.isArray(preset.lines) ? preset.lines.length - 1 : 0} SDKs</span>
                 </label>
@@ -7287,15 +7325,16 @@ HTML_TEMPLATE = """
         }
 
         function applySdkCheckPreset(name) {
+            if (sdkCheckClearPending) return;
             const preset = sdkCheckPresets?.[name];
             if (!preset || (preset.platform !== 'all' && preset.platform !== activePlatform)) return;
             const lines = Array.isArray(preset?.lines) ? preset.lines.filter(line => String(line).trim()) : [];
             const input = document.getElementById('sdkCheckInput');
             if (!input || !lines.length) return;
             input.value = lines.join('\\n');
-            if (sdkCheckRunning) {
-                socket.emit('stop_sdk_check');
-            }
+            // start_sdk_check atomically replaces the previous preset/state. Do
+            // not send stop first: concurrent Socket.IO handlers could leave
+            // the newly selected check inactive and make the table appear stuck.
             socket.emit('start_sdk_check', {text: input.value});
             sdkCheckRunning = true;
             const btn = document.getElementById('startSdkCheckBtn');
@@ -7309,6 +7348,13 @@ HTML_TEMPLATE = """
         document.getElementById('sdkCheckPresetList')?.addEventListener('change', (event) => {
             const input = event.target.closest('input[name="sdkCheckPreset"]');
             if (input?.checked) applySdkCheckPreset(input.value);
+        });
+
+        socket.on('clear_all_logs_complete', () => {
+            sdkCheckClearPending = false;
+            renderSdkCheckPresetOptions();
+            const status = document.getElementById('sdkCheckPresetStatus');
+            if (status && !sdkCheckRunning) status.textContent = 'Chọn preset để tự nạp danh sách.';
         });
 
         document.getElementById('sdkCheckInput')?.addEventListener('input', () => {
@@ -8069,6 +8115,7 @@ def process_load_ads_unity_log(line, device_id):
             
             if src and fmt:
                 d_name = get_device_name(device_id)
+                snapshot = None
                 with lock:
                     if (device_id, src, fmt, "unity") not in unique_load_ads and _accept_exact_record("load_ads", device_id, line, src, fmt, "unity"):
                         unique_load_ads.add((device_id, src, fmt, "unity"))
@@ -8079,10 +8126,11 @@ def process_load_ads_unity_log(line, device_id):
                             "ad_format": fmt, 
                             "raw_log": line.strip()
                         })
-                        socketio.emit('update_load_ads', list(load_ads_events))
-                        
-                        # Gửi với type "LoadAds"
-                        send_to_sheet(d_name, src, fmt, line.strip(), "LoadAds")
+                        snapshot = list(load_ads_events)
+                if snapshot is not None:
+                    socketio.emit('update_load_ads', snapshot)
+                    # Gửi với type "LoadAds"
+                    send_to_sheet(d_name, src, fmt, line.strip(), "LoadAds")
         except: pass
 
 
@@ -8187,6 +8235,7 @@ def _process_ios_max_viewability_record(raw_record, device_id):
         "adapter_version": _first_ios_max_field(MAX_LOAD_ADS_IOS_ADAPTER_VERSION_PATTERN, buffered),
         "raw_log": buffered,
     }
+    snapshot = None
     with lock:
         if dedup_key in unique_load_ads_ext:
             return
@@ -8194,8 +8243,9 @@ def _process_ios_max_viewability_record(raw_record, device_id):
             return
         unique_load_ads_ext.add(dedup_key)
         load_ads_ext_events.append(row)
-        socketio.emit("update_load_ads_ext", list(load_ads_ext_events))
-        send_to_sheet(d_name, ad_network, ad_format, buffered, "LoadAdsExt", provider)
+        snapshot = list(load_ads_ext_events)
+    socketio.emit("update_load_ads_ext", snapshot)
+    send_to_sheet(d_name, ad_network, ad_format, buffered, "LoadAdsExt", provider)
 
 
 def _process_ios_max_viewability_log(line, device_id):
@@ -8226,6 +8276,7 @@ def _process_ios_max_delegate_log(line, device_id):
     d_name = get_ios_device_name(device_id)
     provider = "MAX"
     dedup_key = (device_id, provider.lower(), ad_network.casefold(), ad_format, "max_delegate")
+    snapshot = None
     with lock:
         if dedup_key in unique_load_ads_ext:
             return
@@ -8241,8 +8292,9 @@ def _process_ios_max_delegate_log(line, device_id):
             "ad_format": ad_format,
             "raw_log": raw_line,
         })
-        socketio.emit("update_load_ads_ext", list(load_ads_ext_events))
-        send_to_sheet(d_name, ad_network, ad_format, raw_line, "LoadAdsExt", provider)
+        snapshot = list(load_ads_ext_events)
+    socketio.emit("update_load_ads_ext", snapshot)
+    send_to_sheet(d_name, ad_network, ad_format, raw_line, "LoadAdsExt", provider)
 
 
 def process_load_ads_max_log(line, device_id):
@@ -8280,6 +8332,7 @@ def process_load_ads_max_log(line, device_id):
     d_name = get_device_name(device_id)
     provider = "MAX"
     dedup_key = (device_id, provider.lower(), ad_network.casefold(), ad_format, "max_revenue")
+    snapshot = None
     with lock:
         if dedup_key in unique_load_ads_ext:
             return
@@ -8295,8 +8348,9 @@ def process_load_ads_max_log(line, device_id):
             "ad_format": ad_format,
             "raw_log": raw_line,
         })
-        socketio.emit("update_load_ads_ext", list(load_ads_ext_events))
-        send_to_sheet(d_name, ad_network, ad_format, raw_line, "LoadAdsExt", provider)
+        snapshot = list(load_ads_ext_events)
+    socketio.emit("update_load_ads_ext", snapshot)
+    send_to_sheet(d_name, ad_network, ad_format, raw_line, "LoadAdsExt", provider)
 
 def process_load_ads_ext_log(line, device_id):
     """Xử lý log cho Tab 2: Load Ads Ext (AppMetrica AdRevenue)"""
@@ -8331,6 +8385,7 @@ def process_load_ads_ext_log(line, device_id):
 
             if ad_network and fmt:
                 d_name = get_ios_device_name(device_id)
+                snapshot = None
                 with lock:
                     dedup_key = (device_id, provider, ad_network, fmt, "ios_metrica")
                     if dedup_key not in unique_load_ads_ext and _accept_exact_record("load_ads_ext", device_id, raw_log or line, provider, ad_network, fmt, "ios_metrica"):
@@ -8343,8 +8398,10 @@ def process_load_ads_ext_log(line, device_id):
                             "ad_format": fmt,
                             "raw_log": raw_log or line.strip()
                         })
-                        socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
-                        send_to_sheet(d_name, ad_network, fmt, raw_log or line.strip(), "LoadAdsExt", provider)
+                        snapshot = list(load_ads_ext_events)
+                if snapshot is not None:
+                    socketio.emit('update_load_ads_ext', snapshot)
+                    send_to_sheet(d_name, ad_network, fmt, raw_log or line.strip(), "LoadAdsExt", provider)
             return
         except:
             pass
@@ -8365,6 +8422,7 @@ def process_load_ads_ext_log(line, device_id):
 
             if ad_network and fmt:
                 d_name = get_device_name(device_id)
+                snapshot = None
                 with lock:
                     dedup_key = (device_id, provider, ad_network, fmt, "metrica")
                     if dedup_key not in unique_load_ads_ext and _accept_exact_record("load_ads_ext", device_id, line, provider, ad_network, fmt, "metrica"):
@@ -8377,10 +8435,11 @@ def process_load_ads_ext_log(line, device_id):
                             "ad_format": fmt, 
                             "raw_log": line.strip()
                         })
-                        socketio.emit('update_load_ads_ext', list(load_ads_ext_events))
-                        
-                        # Gửi với type "LoadAdsExt"
-                        send_to_sheet(d_name, ad_network, fmt, line.strip(), "LoadAdsExt", provider)
+                        snapshot = list(load_ads_ext_events)
+                if snapshot is not None:
+                    socketio.emit('update_load_ads_ext', snapshot)
+                    # Gửi với type "LoadAdsExt"
+                    send_to_sheet(d_name, ad_network, fmt, line.strip(), "LoadAdsExt", provider)
         except: pass
 
 def find_and_parse_event(log_entry):
@@ -8886,7 +8945,8 @@ def process_event_validator_log(event_name, actual_params, json_string, log_entr
         if not _accept_exact_record("validator", device_id, log_entry, event_name, source):
             return
         validator_results.append({"device_id": device_id, "event_name": event_name, "device_name": get_device_name(device_id), "status": status, "details": details_html, "raw_log": log_entry.strip(), "json_data": json_string, "source": source})
-        socketio.emit('update_validator_table', list(validator_results))
+        snapshot = list(validator_results)
+    socketio.emit('update_validator_table', snapshot)
 
 def _apply_specific_filter_and_emit():
     global specific_event_results
@@ -9433,8 +9493,6 @@ def _emit_sdk_check_results():
         if active_platform == "ios" and not connected_devices_info:
             res.append({"status": "HEADER", "display_text": "--- iOS ---", "device_name": "iOS", "device_id": "ios"})
             res.append({"status": "WAITING", "display_text": "Waiting for iOS device...", "device_id": "ios"})
-            socketio.emit('update_sdk_check_table', res)
-            return
 
         def append_sdk_network_rows(device_id, network_key, block):
             rows = []
@@ -9891,13 +9949,16 @@ def _stop_ios_log_reader(device_id):
 def device_manager():
     global connected_devices_info
     while True:
+        platform = active_platform
+        generation = platform_generation
         try:
-            platform = active_platform
             if platform == "ios":
                 observed_ids = set(_list_ios_device_ids())
                 readers_to_stop = []
                 stale_reader_ids = set()
                 with lock:
+                    if generation != platform_generation or active_platform != platform:
+                        continue
                     known_ids = set(active_ios_log_readers) | set(active_ios_log_processes)
                     known_ids.update(
                         device.get("id", "")
@@ -9938,6 +9999,8 @@ def device_manager():
                     _stop_ios_log_reader(did)
 
                 with lock:
+                    if generation != platform_generation or active_platform != platform:
+                        continue
                     # Only start readers for a freshly observed device. A
                     # grace-kept ID must remain visible, but must not spawn a
                     # new tidevice process while discovery is temporarily
@@ -9948,24 +10011,33 @@ def device_manager():
                         t.start()
 
                     connected_devices_info = [_make_device_info(i, 'ios') for i in ids]
+                if generation != platform_generation or active_platform != platform:
+                    continue
                 if connected_devices_info:
-                    socketio.emit('device_status', {"connected_devices": connected_devices_info})
+                    socketio.emit('device_status', {"platform": platform, "connected_devices": connected_devices_info})
                 else:
                     socketio.emit('device_status', {
+                        "platform": platform,
                         "connected_devices": [],
                         "message": _ios_device_status_message()
                     })
                 _emit_sdk_check_results()
             else:
                 with lock:
+                    if generation != platform_generation or active_platform != platform:
+                        continue
                     ios_readers_to_stop = set(active_ios_log_readers) | set(active_ios_log_processes)
                 for did in ios_readers_to_stop:
                     _stop_ios_log_reader(did)
 
+                if generation != platform_generation or active_platform != platform:
+                    continue
                 output = subprocess.run([ADB_EXECUTABLE, 'devices'], capture_output=True, text=True, creationflags=creation_flags).stdout
                 ids = {l.split('\t')[0] for l in output.strip().split('\n')[1:] if '\tdevice' in l}
                 
                 with lock:
+                    if generation != platform_generation or active_platform != platform:
+                        continue
                     for did in ids - set(active_log_readers.keys()):
                         t = threading.Thread(target=adb_log_reader, args=(did,), daemon=True)
                         active_log_readers[did] = t
@@ -9975,18 +10047,23 @@ def device_manager():
                         del active_log_readers[did]
                     
                     connected_devices_info = [_make_device_info(i, 'android') for i in ids]
+                if generation != platform_generation or active_platform != platform:
+                    continue
                 if connected_devices_info:
-                    socketio.emit('device_status', {"connected_devices": connected_devices_info})
+                    socketio.emit('device_status', {"platform": platform, "connected_devices": connected_devices_info})
                 else:
                     socketio.emit('device_status', {
+                        "platform": platform,
                         "connected_devices": [],
                         "message": f"Waiting... (ADB: {ADB_EXECUTABLE})"
                     })
         except Exception as e:
-            socketio.emit('device_status', {
-                "connected_devices": [],
-                "message": f"{'iOS' if active_platform == 'ios' else 'ADB'} error: {e}"
-            })
+            if generation == platform_generation and active_platform == platform:
+                socketio.emit('device_status', {
+                    "platform": platform,
+                    "connected_devices": [],
+                    "message": f"{'iOS' if platform == 'ios' else 'ADB'} error: {e}"
+                })
         time.sleep(3)
 
 def _append_package_log_row(device_id, raw_log, time_str="", time_display="", level="", tag="", message="", is_error=False):
@@ -10311,13 +10388,15 @@ def package_pid_monitor():
 def package_log_emitter():
     while True:
         time.sleep(1)
+        ui_rows = None
         with lock:
             if not is_paused and target_package_name:
                 now = time.time()
                 while package_log_cache and now - package_log_cache[0]['timestamp'] > 1000: package_log_cache.popleft()
                 ui_limit = PACKAGE_LOG_UI_MAX_ROWS_IOS if active_platform == "ios" else PACKAGE_LOG_UI_MAX_ROWS
                 ui_rows = list(package_log_cache)[-ui_limit:]
-                socketio.emit('package_log_cache', ui_rows)
+        if ui_rows is not None:
+            socketio.emit('package_log_cache', ui_rows)
 
 # --- SOCKET HANDLERS ---
 @socketio.on('change_tab')
@@ -10397,6 +10476,7 @@ def _reset_runtime_for_platform_switch():
     socketio.emit('update_price_rotation_table', [])
     socketio.emit('package_log_cache', [])
     socketio.emit('device_status', {
+        "platform": active_platform,
         "connected_devices": [],
         "message": _ios_device_status_message() if active_platform == "ios" else f"Waiting... (ADB: {ADB_EXECUTABLE})"
     })
@@ -10406,9 +10486,11 @@ def _reset_runtime_for_platform_switch():
 
 @socketio.on('set_platform')
 def set_platform(data):
-    global active_platform
+    global active_platform, platform_generation
     platform = (data or {}).get('platform', 'android')
-    active_platform = 'ios' if platform == 'ios' else 'android'
+    with lock:
+        active_platform = 'ios' if platform == 'ios' else 'android'
+        platform_generation += 1
     if (data or {}).get('reset'):
         _reset_runtime_for_platform_switch()
     socketio.emit('platform_status', {'platform': active_platform})
@@ -10461,6 +10543,7 @@ def tp():
 
 @socketio.on('clear_all_logs')
 def cl():
+    global sdk_check_active, sdk_check_current_network, sdk_max_ios_pending_lines, sdk_max_ios_core_pending_lines
     with lock:
         load_ads_events.clear(); unique_load_ads.clear()
         load_ads_ext_events.clear(); unique_load_ads_ext.clear()
@@ -10472,7 +10555,16 @@ def cl():
         package_log_cache.clear()
         _clear_record_dedup()
         # Clean SDK check
+        sdk_check_active = False
         sdk_check_results.clear()
+        sdk_check_search_list.clear()
+        sdk_check_input_list.clear()
+        sdk_check_expected_map.clear()
+        sdk_check_runtime_state.clear()
+        sdk_check_current_network = {}
+        sdk_check_expected_order.clear()
+        sdk_max_ios_pending_lines = {}
+        sdk_max_ios_core_pending_lines = {}
         incomplete_impression_logs.clear()
         incomplete_ios_adrevenue_logs.clear()
         incomplete_ios_load_ads_ext_logs.clear()
@@ -10491,6 +10583,7 @@ def cl():
     socketio.emit('package_log_cache', [])
     socketio.emit("installation_id_status", _build_installation_id_payload(""))
     _emit_sdk_check_results()
+    socketio.emit('clear_all_logs_complete', {})
 
 @socketio.on('start_validation')
 def val(p): 
@@ -10628,7 +10721,6 @@ def spl(d):
         active_ios_package_log_buffers.clear()
         active_ios_package_log_frame_buffers.clear()
         active_ios_package_log_stream_modes.clear()
-        socketio.emit('package_log_cache', [])
     socketio.emit('package_log_cache', [])
 
 @socketio.on('refresh_request')

@@ -1,4 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
+
 from PyInstaller.utils.hooks import collect_data_files
 from PyInstaller.utils.hooks import collect_submodules
 
@@ -36,7 +38,10 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch='arm64',
+    # Keep the spec usable on both Apple Silicon and Intel.  The build script
+    # supplies MACOS_TARGET_ARCH when a specific target is requested; otherwise
+    # PyInstaller follows the architecture of the host running the build.
+    target_arch=os.getenv('MACOS_TARGET_ARCH') or None,
     codesign_identity=None,
     entitlements_file=None,
     icon=['assets/app.icns'],

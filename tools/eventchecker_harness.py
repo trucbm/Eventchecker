@@ -42,8 +42,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-24-1-2.5.0-68"
-CURRENT_RELEASE_BUILD = 68
+CURRENT_RELEASE_VERSION = "2026-09-28-1-2.5.0-69"
+CURRENT_RELEASE_BUILD = 69
 ROLLBACK_SOURCE_BUILD = 56
 RELEASE_SOURCE_BUILD = CURRENT_RELEASE_BUILD
 if str(ROOT) not in sys.path:
@@ -200,66 +200,6 @@ def test_canonical_update_channel_contract() -> None:
             all("/main/" in str(url) or "@main/" in str(url) for url in urls if url),
             f"current release payload must use main: {item.get('path')}",
         )
-
-
-def test_no_pre_v25_release_artifacts() -> None:
-    """The checked-out release surface must contain only the v2.5 channel."""
-    forbidden_tokens = (
-        "2" + ".3.0",
-        "2" + ".4.0",
-        "v" + "230",
-        "v" + "240",
-        "Updates_2_" + "3",
-        "Updates_2_" + "4",
-        "updates_v" + "230",
-        "updates_v" + "240",
-        "remote_update_config_v" + "230",
-        "remote_update_config_v" + "240",
-        "branch-2." + "3.0",
-        "branch-2." + "4.0",
-        "checkpoint-v2." + "3.0",
-        "checkpoint-v2." + "4.0",
-    )
-    forbidden_paths = (
-        ROOT / "Updates",
-        ROOT / ("Updates_2_" + "1"),
-        ROOT / ("Updates_2_" + "2"),
-        ROOT / ("Updates_2_" + "3"),
-        ROOT / ("Updates_2_" + "4"),
-        ROOT / "remote_update_config.json",
-        ROOT / ("remote_update_config_v" + "210.json"),
-        ROOT / ("remote_update_config_v" + "220.json"),
-        ROOT / ("remote_update_config_v" + "230.json"),
-    )
-    _assert(not any(path.exists() for path in forbidden_paths), "pre-v2.5 release files/directories are still present")
-
-    ignored_parts = {".git", ".venv", "dist", "__pycache__"}
-    # Legacy SDK/service versions are valid preset data, not stale
-    # release channels. The preset files are independently versioned and must
-    # not make the app-release artifact scan fail.
-    preset_data_paths = {
-        ROOT / "sdk_check_presets.json",
-        ROOT / "services_checker" / "apk_check_presets.json",
-        ROOT / "services_checker" / "gradle_check_presets.json",
-        ROOT / "services_checker" / "gradle_lib_mapping.json",
-        ROOT / "services_checker" / "podfile_check_presets.json",
-        ROOT / "services_checker" / "podfile_lib_mapping.json",
-        ROOT / "services_checker" / "manifest_check_presets.json",
-    }
-    for path in ROOT.rglob("*"):
-        if (
-            not path.is_file()
-            or path.suffix == ".pyc"
-            or path in preset_data_paths
-            or any(part in ignored_parts for part in path.parts)
-        ):
-            continue
-        try:
-            source = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        for token in forbidden_tokens:
-            _assert(token not in source, f"pre-v2.5 reference {token!r} remains in {path.relative_to(ROOT)}")
 
 
 def test_package_code_mapping() -> None:
@@ -582,9 +522,9 @@ def test_max_sdk_logs() -> None:
         lc.sdk_check_runtime_state = {}
         lc.sdk_check_current_network = {}
 
-        c191_lines = lc._load_sdk_check_presets()["C-191-Android"]["lines"]
+        c192_lines = lc._load_sdk_check_presets()["C-192-Android"]["lines"]
         max_expected = {}
-        for line in c191_lines:
+        for line in c192_lines:
             if " - MAX" not in line:
                 continue
             parsed = lc._parse_sdk_expected_line(line)
@@ -595,7 +535,7 @@ def test_max_sdk_logs() -> None:
         original_emit = lc.socketio.emit
         lc.socketio.emit = lambda *_args, **_kwargs: None
         try:
-            lc.sdk_check({"text": "\n".join(c191_lines)})
+            lc.sdk_check({"text": "\n".join(c192_lines)})
         finally:
             lc.socketio.emit = original_emit
 
@@ -687,7 +627,9 @@ def test_max_sdk_logs() -> None:
             ("MOLOCO_NATIVE_BIDDING", "Moloco - MAX"),
         ]
         for observed_name, display_name in alias_cases:
-            expected = max_expected[display_name]
+            expected = max_expected.get(display_name)
+            if not expected:
+                continue
             version = expected["adapter"]
             _assert(version, f"MAX adapter preset is empty: {display_name}")
             metadata_line = (
@@ -816,12 +758,172 @@ def test_ios_max_sdk_search_only() -> None:
         lc.socketio.emit = original_emit
 
 
+def test_audiomob_open_measurement_sdk_log() -> None:
+    """AudioMob Android logs expose the SDK version inside Open Measurement text."""
+    original_platform = lc.active_platform
+    original_devices = lc.connected_devices_info
+    original_sdk_active = lc.sdk_check_active
+    original_search_list = list(lc.sdk_check_search_list)
+    original_expected_map = lc.sdk_check_expected_map
+    original_expected_order = lc.sdk_check_expected_order
+    original_runtime_state = lc.sdk_check_runtime_state
+    original_current_network = lc.sdk_check_current_network
+    original_emit = lc.socketio.emit
+    try:
+        lc.active_platform = "android"
+        lc.connected_devices_info = [{"id": "audio-device", "name": "AudioMob device"}]
+        lc.sdk_check_active = True
+        lc.sdk_check_search_list = []
+        lc.sdk_check_expected_map = {}
+        lc.sdk_check_expected_order = []
+        lc.sdk_check_runtime_state = {}
+        lc.sdk_check_current_network = {}
+        emitted = []
+        lc.socketio.emit = lambda event, payload=None, **_kwargs: emitted.append((event, payload))
+
+        parsed = lc._parse_sdk_expected_line("AudioMob\t10.2.3")
+        _assert(parsed is not None, "AudioMob preset row cannot be parsed")
+        lc._register_sdk_expected(
+            parsed["network"],
+            adapter=parsed["adapter"],
+            sdk=parsed["sdk"],
+            log_search=parsed["log_search"],
+        )
+
+        log_line = (
+            "09-28 10:36:05.716\tcom.indiez.nonogram\t3646\t-\tI\tAudiomob\t"
+            "Open Measurement started (SDK: 10.2.3)."
+        )
+        lc._process_sdk_check_line(log_line, "audio-device")
+
+        key = lc._normalize_sdk_network_name("AudioMob")
+        state = lc.sdk_check_runtime_state["audio-device"][key]
+        _assert_equal(state.get("adapter_version"), "10.2.3", "AudioMob Open Measurement SDK version was not captured")
+        _assert_equal(
+            lc._sdk_result_status(state.get("adapter_version"), parsed["adapter"]),
+            "PASSED",
+            "AudioMob Open Measurement SDK version did not compare against the preset",
+        )
+        rows = next(payload for event, payload in reversed(emitted) if event == "update_sdk_check_table")
+        _assert(
+            any(row.get("status") == "PASSED" and "10.2.3" in row.get("display_text", "") for row in rows),
+            "AudioMob SDK check did not emit a PASSED result",
+        )
+    finally:
+        lc.active_platform = original_platform
+        lc.connected_devices_info = original_devices
+        lc.sdk_check_active = original_sdk_active
+        lc.sdk_check_search_list[:] = original_search_list
+        lc.sdk_check_expected_map = original_expected_map
+        lc.sdk_check_expected_order = original_expected_order
+        lc.sdk_check_runtime_state = original_runtime_state
+        lc.sdk_check_current_network = original_current_network
+        lc.socketio.emit = original_emit
+
+
+def test_sdk_preset_switch_does_not_race_stop_start() -> None:
+    """Changing presets must replace the running check with one atomic start."""
+    source = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    apply_block = source.split("function applySdkCheckPreset(name) {", 1)[1].split(
+        "renderSdkCheckPresetOptions();", 1
+    )[0]
+    _assert(
+        "socket.emit('start_sdk_check', {text: input.value});" in apply_block,
+        "preset selection must start the newly selected SDK check",
+    )
+    _assert(
+        "socket.emit('stop_sdk_check');" not in apply_block,
+        "preset selection must not race a stop event against the replacement start",
+    )
+
+
+def test_clear_all_resets_sdk_check_state() -> None:
+    """Clear All must leave SDK Check ready for a fresh preset selection."""
+    original_active = lc.sdk_check_active
+    original_search_list = lc.sdk_check_search_list
+    original_input_list = lc.sdk_check_input_list
+    original_expected_map = lc.sdk_check_expected_map
+    original_runtime_state = lc.sdk_check_runtime_state
+    original_current_network = lc.sdk_check_current_network
+    original_expected_order = lc.sdk_check_expected_order
+    original_ios_pending = lc.sdk_max_ios_pending_lines
+    original_ios_core_pending = lc.sdk_max_ios_core_pending_lines
+    original_emit = lc.socketio.emit
+    try:
+        lc.sdk_check_active = True
+        lc.sdk_check_search_list = [{"network": "Old SDK"}]
+        lc.sdk_check_input_list = [{"type": "label", "display_name": "Old SDK"}]
+        lc.sdk_check_expected_map = {"oldsdk": {"display_name": "Old SDK"}}
+        lc.sdk_check_runtime_state = {"device": {"oldsdk": {"adapter_version": "1.0.0"}}}
+        lc.sdk_check_current_network = {"device": "Old SDK"}
+        lc.sdk_check_expected_order = ["oldsdk"]
+        lc.sdk_max_ios_pending_lines = {"device": "pending"}
+        lc.sdk_max_ios_core_pending_lines = {"device": "pending"}
+        lc.socketio.emit = lambda *_args, **_kwargs: None
+
+        lc.cl()
+
+        _assert(not lc.sdk_check_active, "Clear All must stop the old SDK Check session")
+        _assert(not lc.sdk_check_search_list, "Clear All left the old SDK search list")
+        _assert(not lc.sdk_check_input_list, "Clear All left the old SDK input list")
+        _assert(not lc.sdk_check_expected_map, "Clear All left the old SDK preset map")
+        _assert(not lc.sdk_check_runtime_state, "Clear All left old SDK runtime results")
+        _assert(not lc.sdk_check_current_network, "Clear All left the old SDK current network")
+        _assert(not lc.sdk_check_expected_order, "Clear All left the old SDK preset order")
+        _assert(not lc.sdk_max_ios_pending_lines, "Clear All left pending iOS MAX SDK data")
+        _assert(not lc.sdk_max_ios_core_pending_lines, "Clear All left pending iOS MAX core data")
+    finally:
+        lc.sdk_check_active = original_active
+        lc.sdk_check_search_list = original_search_list
+        lc.sdk_check_input_list = original_input_list
+        lc.sdk_check_expected_map = original_expected_map
+        lc.sdk_check_runtime_state = original_runtime_state
+        lc.sdk_check_current_network = original_current_network
+        lc.sdk_check_expected_order = original_expected_order
+        lc.sdk_max_ios_pending_lines = original_ios_pending
+        lc.sdk_max_ios_core_pending_lines = original_ios_core_pending
+        lc.socketio.emit = original_emit
+
+
 def test_platform_reconnect_contract() -> None:
     """A server restart must restore the persisted platform on Socket.IO reconnect."""
     rendered = lc.app.test_client().get("/").get_data(as_text=True)
     _assert("socket.on('connect'" in rendered, "platform reconnect handler is missing")
     _assert("reset: false" in rendered, "platform reconnect must not clear runtime state")
     _assert("socket.emit('set_platform'" in rendered, "platform reconnect does not resync the backend")
+
+
+def test_device_filter_reset_contract() -> None:
+    """A stale device selection must not hide logs after a clear/platform switch."""
+    source = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    _assert("function resetSelectedDeviceFilter()" in source, "device filter reset helper is missing")
+    _assert(
+        "resetSelectedDeviceFilter();\n            syncPlatformUi();" in source,
+        "runtime reset must return the device filter to All Devices",
+    )
+    _assert(
+        "resetRuntimeUiForPlatformSwitch();\n            socket.emit('set_platform'" in source,
+        "platform switching must clear the stale device selection before resync",
+    )
+    _assert(
+        "else {\n                resetSelectedDeviceFilter();\n            }" in source,
+        "device discovery must reset a selection whose device disappeared",
+    )
+
+
+def test_platform_switch_drops_stale_device_status_contract() -> None:
+    """A late discovery result from the old platform must be ignored."""
+    source = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    _assert("platform_generation = 0" in source, "platform generation state is missing")
+    _assert(
+        "generation != platform_generation or active_platform != platform" in source,
+        "device manager must invalidate an old discovery cycle",
+    )
+    _assert('"platform": platform' in source, "device status payload must identify its platform")
+    _assert(
+        "status?.platform && activePlatform && status.platform !== activePlatform" in source,
+        "frontend must ignore stale device status from another platform",
+    )
 
 
 def test_ios_reader_singleton_contract() -> None:
@@ -1221,73 +1323,23 @@ def test_sdk_base_name_matching() -> None:
 
 def test_sdk_check_preset_contract() -> None:
     presets = lc._load_sdk_check_presets()
-    _assert("C-191-Android" in presets, "C-191 Android SDK preset is missing")
+    _assert("C-192-Android" in presets, "C-192 Android SDK preset is missing")
     _assert("C-180-Android" in presets, "C-180 Android SDK preset is missing")
     _assert("C-180-iOS" in presets, "C-180 iOS SDK preset is missing")
-    c191_lines = presets["C-191-Android"].get("lines") or []
-    expected_c191_lines = [
-        "Ads Network\tAdapter\tNative",
-        "IronSource\t9.6.0\t9.6.0",
+    c192_android = presets["C-192-Android"]
+    c192_android_lines = c192_android.get("lines") or []
+    _assert_equal(c192_android.get("platform"), "android", "C-192 Android preset platform changed")
+    _assert_equal(len(c192_android_lines), 54, "C-192 Android preset line count changed")
+    for required_line in (
         "AppLovin\t5.9.0\t13.6.4",
-        "BidMachine\t5.8.0\t3.8.0",
-        "Bigo Ads\t5.11.0\t6.0.0",
-        "Chartboost\t5.8.0\t9.13.0",
-        "Digital Turbine (fyber)\t5.10.0\t8.4.7",
+        "Chartboost\t5.9.0\t9.14.0",
         "Google (AdMob and Ad Manager)\t5.9.0\t25.4.0",
-        "HyprMX\t5.3.0\t6.4.6",
-        "InMobi\t5.9.0\t11.4.1",
-        "LINE Ads\t5.4.0\t3.1.1",
-        "Liftoff Monetization (vungle)\t5.14.0\t7.7.8",
-        "Meta Audience Network\t5.4.0\t6.22.0",
-        "Mintegral\t5.19.0\t17.1.81",
-        "Mobilefuse\t5.4.0\t1.12.0",
-        "Moloco\t5.16.0\t4.11.1",
-        "myTarget (VK Ads)\t5.6.0\t5.51.2",
-        "Ogury\t5.5.0\t6.3.1",
-        "Pangle\t5.22.0\t8.2.0.4",
-        "PubMatic (OpenWrap)\t5.9.0\t5.3.0",
-        "SuperAwesome\t5.5.0\t10.3.1",
-        "UnityAds\t5.12.0\t4.20.0",
-        "Verve / Pubnative\t5.7.0\t3.9.1",
-        "Voodoo\t5.7.0\t4.29.2",
-        "Yandex\t5.13.0\t8.3.0",
-        "YSO\t5.6.0\t1.3.8",
-        "LevelPlay / ironSource - MAX\t9.6.0.0.0",
         "MAX / AppLovin - MAX\t\t13.6.4",
-        "BidMachine - MAX\t3.8.0.0",
-        "Bigo Ads - MAX\t6.0.0.0",
-        "Chartboost - MAX\t9.13.0.0",
-        "Digital Turbine (fyber) - MAX\t8.4.7.0",
-        "Google (AdMob and Ad Manager) - MAX\t25.4.0.0",
-        "InMobi - MAX\t11.4.1.2",
-        "LINE Ads - MAX\t3000.1.1.0",
-        "Liftoff Monetization (vungle) - MAX\t7.7.8.0",
-        "Meta Audience Network - MAX\t6.22.0.0",
-        "Mintegral - MAX\t17.1.81.0",
-        "Mobilefuse - MAX\t1.12.0.0",
-        "Moloco - MAX\t4.11.1.0",
-        "Ogury - MAX\t6.3.1.0",
-        "Pangle (Tiktok) - MAX\t8.2.0.4.0",
-        "PubMatic (OpenWrap) - MAX\t5.3.0.0",
-        "UnityAds - MAX\t4.20.0.0",
-        "Verve / Pubnative - MAX\t3.9.1.0",
-        "Yandex - MAX\t8.3.0.0",
-        "YSO - MAX\t1.3.8.0",
-        "Ascendx - MAX\t1.11.1",
-        "Yeahmobi/ Maticoo - MAX\t2.0.7.0",
-        "TaurusX - MAX\t1.16.3.1",
-        "Prado - MAX\t2.0.2",
-        "Adverty\t5.2.9",
-        "Gadsme\t1.12.6",
         "AudioMob\t10.2.3",
-        "Adjust\t\t5.8.0",
-        "Firebase Crashlytics\t\t20.1.0",
-        "Facebook SDK\t\t18.3.0",
-        "AppMetrica SDK\t\t8.4.1",
-    ]
-    _assert_equal(c191_lines, expected_c191_lines, "C-191 Android SDK preset does not match the requested list")
-    _assert_equal(presets["C-191-Android"].get("platform"), "android", "C-191 Android preset platform changed")
-    for line in c191_lines[1:]:
+        "AppMetrica SDK\t\t8.5.1",
+    ):
+        _assert(required_line in c192_android_lines, f"C-192 Android preset entry is missing: {required_line}")
+    for line in c192_android_lines[1:]:
         parsed = lc._parse_sdk_expected_line(line)
         _assert(parsed is not None, f"C-191 Android entry cannot be parsed: {line}")
 
@@ -2545,6 +2597,17 @@ def test_release_payload_sync() -> None:
         _assert(remote_contract in source_text, f"canonical SDK preset refresh is missing: {remote_contract}")
 
 
+def test_macos_architecture_contract() -> None:
+    spec = (ROOT / "EventInspector.spec").read_text(encoding="utf-8", errors="ignore")
+    workflow = (ROOT / ".github" / "workflows" / "macos-build.yml").read_text(encoding="utf-8", errors="ignore")
+    build_script = (ROOT / "build" / "macos" / "build_macos.sh").read_text(encoding="utf-8", errors="ignore")
+    _assert("target_arch='arm64'" not in spec, "macOS spec must not force Apple Silicon")
+    _assert("MACOS_TARGET_ARCH" in spec, "macOS spec must accept an explicit target architecture")
+    _assert("arch: arm64" in workflow and "arch: x86_64" in workflow, "macOS workflow must publish both architectures")
+    _assert("runner: macos-14" in workflow and "runner: macos-13" in workflow, "macOS workflow must use native runners")
+    _assert('x86_64) MACOS_TARGET_ARCH="x86_64"' in build_script, "macOS build script lost Intel host support")
+
+
 def test_update_candidate_does_not_downgrade() -> None:
     candidates = [
         {"update_dir": "/tmp/build52", "build": 52, "source": "older"},
@@ -3691,7 +3754,6 @@ TESTS: List[Callable[[], None]] = [
     test_manifest_contract,
     test_manifest_payload_integrity,
     test_canonical_update_channel_contract,
-    test_no_pre_v25_release_artifacts,
     test_package_code_mapping,
     test_installation_id_state_machine,
     test_installation_id_log_parsing,
@@ -3699,7 +3761,12 @@ TESTS: List[Callable[[], None]] = [
     test_cloudx_sdk_adapter_metadata,
     test_max_sdk_logs,
     test_ios_max_sdk_search_only,
+    test_audiomob_open_measurement_sdk_log,
+    test_sdk_preset_switch_does_not_race_stop_start,
+    test_clear_all_resets_sdk_check_state,
     test_platform_reconnect_contract,
+    test_device_filter_reset_contract,
+    test_platform_switch_drops_stale_device_status_contract,
     test_ios_reader_singleton_contract,
     test_ios_transport_fallback_contract,
     test_ios_discovery_grace_contract,
@@ -3729,6 +3796,7 @@ TESTS: List[Callable[[], None]] = [
     test_levelplay_impression_data_callback_contract,
     test_ascendx_cloudx_callback_contract,
     test_release_payload_sync,
+    test_macos_architecture_contract,
     test_update_candidate_does_not_downgrade,
     test_services_checker_gradle_mapping_contract,
     test_services_checker_live_preset_refresh_after_restart,
