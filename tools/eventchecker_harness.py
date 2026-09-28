@@ -522,9 +522,9 @@ def test_max_sdk_logs() -> None:
         lc.sdk_check_runtime_state = {}
         lc.sdk_check_current_network = {}
 
-        c192_lines = lc._load_sdk_check_presets()["C-192-Android"]["lines"]
+        c193_lines = lc._load_sdk_check_presets()["C-193-Android"]["lines"]
         max_expected = {}
-        for line in c192_lines:
+        for line in c193_lines:
             if " - MAX" not in line:
                 continue
             parsed = lc._parse_sdk_expected_line(line)
@@ -535,7 +535,7 @@ def test_max_sdk_logs() -> None:
         original_emit = lc.socketio.emit
         lc.socketio.emit = lambda *_args, **_kwargs: None
         try:
-            lc.sdk_check({"text": "\n".join(c192_lines)})
+            lc.sdk_check({"text": "\n".join(c193_lines)})
         finally:
             lc.socketio.emit = original_emit
 
@@ -1323,23 +1323,23 @@ def test_sdk_base_name_matching() -> None:
 
 def test_sdk_check_preset_contract() -> None:
     presets = lc._load_sdk_check_presets()
-    _assert("C-192-Android" in presets, "C-192 Android SDK preset is missing")
+    _assert("C-193-Android" in presets, "C-193 Android SDK preset is missing")
     _assert("C-180-Android" in presets, "C-180 Android SDK preset is missing")
     _assert("C-180-iOS" in presets, "C-180 iOS SDK preset is missing")
-    c192_android = presets["C-192-Android"]
-    c192_android_lines = c192_android.get("lines") or []
-    _assert_equal(c192_android.get("platform"), "android", "C-192 Android preset platform changed")
-    _assert_equal(len(c192_android_lines), 54, "C-192 Android preset line count changed")
+    c193_android = presets["C-193-Android"]
+    c193_android_lines = c193_android.get("lines") or []
+    _assert_equal(c193_android.get("platform"), "android", "C-193 Android preset platform changed")
+    _assert_equal(len(c193_android_lines), 54, "C-193 Android preset line count changed")
     for required_line in (
         "AppLovin\t5.9.0\t13.6.4",
-        "Chartboost\t5.9.0\t9.14.0",
-        "Google (AdMob and Ad Manager)\t5.9.0\t25.4.0",
+        "Chartboost\t5.10.0\t9.14.1",
+        "Google (AdMob and Ad Manager)\t5.9.0\t25.5.0",
         "MAX / AppLovin - MAX\t\t13.6.4",
         "AudioMob\t10.2.3",
         "AppMetrica SDK\t\t8.5.1",
     ):
-        _assert(required_line in c192_android_lines, f"C-192 Android preset entry is missing: {required_line}")
-    for line in c192_android_lines[1:]:
+        _assert(required_line in c193_android_lines, f"C-193 Android preset entry is missing: {required_line}")
+    for line in c193_android_lines[1:]:
         parsed = lc._parse_sdk_expected_line(line)
         _assert(parsed is not None, f"C-191 Android entry cannot be parsed: {line}")
 
