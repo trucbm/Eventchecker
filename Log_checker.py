@@ -52,6 +52,11 @@ SDK_CHECK_PRESETS_REMOTE_URLS = [
     "https://raw.githubusercontent.com/trucbm/Eventchecker/main/sdk_check_presets.json",
     "https://github.com/trucbm/Eventchecker/raw/main/sdk_check_presets.json",
 ]
+PACKAGE_LOG_PRESETS_FILENAME = "package_log_presets.json"
+PACKAGE_LOG_PRESETS_REMOTE_URLS = [
+    "https://raw.githubusercontent.com/trucbm/Eventchecker/main/package_log_presets.json",
+    "https://github.com/trucbm/Eventchecker/raw/main/package_log_presets.json",
+]
 
 
 def _sanitize_sdk_check_presets(raw):
@@ -248,6 +253,133 @@ def _user_data_dir():
     if sys.platform == "darwin":
         return os.path.join(os.path.expanduser("~/Library/Application Support"), "EventInspector")
     return os.path.join(os.path.expanduser("~"), ".eventinspector")
+
+
+def _package_log_presets_file_candidates():
+    """Return editable and bundled locations for Package Log quick-select data."""
+    candidates = []
+    env_path = os.getenv("PACKAGE_LOG_PRESETS_PATH")
+    if env_path:
+        candidates.append(env_path)
+
+    update_dir = os.getenv("EVENTINSPECTOR_UPDATE_DIR")
+    if update_dir:
+        candidates.append(os.path.join(update_dir, PACKAGE_LOG_PRESETS_FILENAME))
+
+    # A user-data override is writable in an installed app and takes priority
+    # over the read-only PyInstaller bundle.  Developers can instead edit the
+    # root-level JSON file directly.
+    candidates.append(os.path.join(_user_data_dir(), PACKAGE_LOG_PRESETS_FILENAME))
+    candidates.append(os.path.join(SCRIPT_DIR, PACKAGE_LOG_PRESETS_FILENAME))
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(os.path.join(meipass, PACKAGE_LOG_PRESETS_FILENAME))
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(sys.executable)
+        candidates.append(os.path.join(exe_dir, PACKAGE_LOG_PRESETS_FILENAME))
+        if sys.platform == "darwin":
+            resources_dir = os.path.abspath(os.path.join(exe_dir, "..", "Resources"))
+            candidates.append(os.path.join(resources_dir, PACKAGE_LOG_PRESETS_FILENAME))
+
+    unique = []
+    seen = set()
+    for path in candidates:
+        path = os.path.abspath(os.path.expanduser(str(path))) if path else ""
+        if path and path not in seen:
+            seen.add(path)
+            unique.append(path)
+    return unique
+
+
+def _package_log_platform_value(entry, platform_name, code):
+    raw_value = entry.get(platform_name)
+    if raw_value is None:
+        raw_value = entry.get(f"{platform_name}_value")
+    if raw_value is None:
+        raw_value = entry.get(f"{platform_name}_id")
+
+    label = entry.get(f"{platform_name}_label")
+    if isinstance(raw_value, dict):
+        label = raw_value.get("label") or raw_value.get("name") or label
+        raw_value = raw_value.get("id") or raw_value.get("value") or raw_value.get("package") or raw_value.get("bundle")
+
+    identifier = str(raw_value or "").strip()
+    if not identifier:
+        return None
+    label = str(label or "").strip() or (f"{code} - {identifier}" if code else identifier)
+    return {"id": identifier, "label": label}
+
+
+def _sanitize_package_log_presets(raw):
+    if isinstance(raw, dict):
+        projects = raw.get("projects")
+    else:
+        projects = raw
+    if not isinstance(projects, list):
+        return []
+
+    presets = []
+    seen = set()
+    for project in projects:
+        if not isinstance(project, dict):
+            continue
+        code = str(project.get("code") or project.get("key") or project.get("name") or "").strip()
+        clean = {"code": code}
+        for platform_name in ("android", "ios"):
+            platform_value = _package_log_platform_value(project, platform_name, code)
+            if not platform_value:
+                continue
+            identity = (platform_name, platform_value["id"].casefold())
+            if identity in seen:
+                continue
+            seen.add(identity)
+            clean[platform_name] = platform_value
+        if len(clean) > 1:
+            presets.append(clean)
+    return presets
+
+
+def _load_package_log_presets():
+    for path in _package_log_presets_file_candidates():
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                presets = _sanitize_package_log_presets(json.load(handle))
+            if presets:
+                return presets
+        except Exception as exc:
+            logging.warning("Failed to load Package Log presets from %s: %s", path, exc)
+    return []
+
+
+def _fetch_package_log_presets(force_remote=False):
+    local_presets = _load_package_log_presets()
+    if not force_remote and local_presets:
+        return local_presets, "local"
+
+    cache_bust = time.time_ns()
+    for base_url in PACKAGE_LOG_PRESETS_REMOTE_URLS:
+        try:
+            separator = "&" if "?" in base_url else "?"
+            response = requests.get(
+                f"{base_url}{separator}cache_bust={cache_bust}",
+                headers={
+                    "Accept": "application/json",
+                    "Cache-Control": "no-cache, no-store, max-age=0",
+                    "Pragma": "no-cache",
+                    "Accept-Encoding": "identity",
+                },
+                timeout=8,
+            )
+            response.raise_for_status()
+            presets = _sanitize_package_log_presets(response.json())
+            if presets:
+                return presets, "github"
+        except Exception as exc:
+            logging.warning("Failed to fetch Package Log presets from %s: %s", base_url, exc)
+    return local_presets, "local"
 
 def _resolve_default_params_path():
     env_path = os.getenv("DEFAULT_PARAMS_XLSX_PATH")
@@ -4133,7 +4265,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(71)</title>
+    <title>Event Inspector v2.5.0(72)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -4215,7 +4347,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(71)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(72)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -4809,44 +4941,12 @@ HTML_TEMPLATE = """
                             </div>
                         </div>
                         <div class="max-w-[980px] min-h-[120px] flex flex-col justify-start">
-                            <label class="block text-[11px] font-medium text-gray-700 mb-1">Quick Select:</label>
-                            <div class="flex items-start gap-16 text-[11px] text-gray-700 pt-1">
-                                <div class="flex flex-col gap-1 min-w-[320px]">
-                                    <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.nonogram" data-android-value="com.indiez.nonogram" data-android-label="NG - com.indiez.nonogram" data-ios-value="PixelArt" data-ios-label="NG - PixelArt">
-                                        <span>NG - com.indiez.nonogram</span>
-                                    </label>
-                                    <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.train.miner" data-android-value="com.indiez.train.miner" data-android-label="TM - com.indiez.train.miner" data-ios-value="TrainIdle" data-ios-label="TM - TrainIdle">
-                                        <span>TM - com.indiez.train.miner</span>
-                                    </label>
-                                    <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.idletycoon.horse.racing" data-android-value="com.indiez.idletycoon.horse.racing" data-android-label="HR - com.indiez.idletycoon.horse.racing">
-                                        <span>HR - com.indiez.idletycoon.horse.racing</span>
-                                    </label>
-                                    <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.indiez.solitaire.word.card.puzzle" data-android-value="com.indiez.solitaire.word.card.puzzle" data-android-label="SW - com.indiez.solitaire.word.card.puzzle">
-                                        <span>SW - com.indiez.solitaire.word.card.puzzle</span>
-                                    </label>
-                                </div>
-                                <div class="flex flex-col gap-1 min-w-[320px]">
-                                    <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.dot.line.puzzle" data-android-value="com.nostel.dot.line.puzzle" data-android-label="KN - com.nostel.dot.line.puzzle" data-ios-value="CarParking" data-ios-label="CP - CarParking">
-                                        <span>KN - com.nostel.dot.line.puzzle</span>
-                                    </label>
-                                    <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.nostel.parking.car" data-android-value="com.nostel.parking.car" data-android-label="CP - com.nostel.parking.car" data-ios-value="SameColor" data-ios-label="KN - SameColor">
-                                        <span>CP - com.nostel.parking.car</span>
-                                    </label>
-                                    <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="com.afk.idle.cat.food.restaurent" data-android-value="com.afk.idle.cat.food.restaurent" data-android-label="CR - com.afk.idle.cat.food.restaurent" data-ios-value="CatRestaurant" data-ios-label="CR - CatRestaurant">
-                                        <span>CR - com.afk.idle.cat.food.restaurent</span>
-                                    </label>
-                                    <label class="inline-flex items-center gap-2">
-                                        <input type="checkbox" class="package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500" value="tap.monster.block.away" data-android-value="tap.monster.block.away" data-android-label="TP - tap.monster.block.away">
-                                        <span>TP - tap.monster.block.away</span>
-                                    </label>
-                                </div>
+                            <div class="flex items-center justify-between gap-3 mb-1">
+                                <label class="block text-[11px] font-medium text-gray-700">Quick Select:</label>
+                                <button id="reloadPackagePresetsBtn" type="button" class="text-[11px] font-semibold text-indigo-700 border border-indigo-200 bg-white hover:bg-indigo-50 rounded px-2 py-1">Reload list</button>
+                            </div>
+                            <div id="packageQuickSelectList" class="grid grid-cols-1 xl:grid-cols-2 gap-x-16 gap-y-1 text-[11px] text-gray-700 pt-1">
+                                <span id="packageQuickSelectStatus" class="text-slate-500 italic">Loading projects...</span>
                             </div>
                         </div>
                     </div>
@@ -7651,25 +7751,107 @@ HTML_TEMPLATE = """
             setResizerEnabled(isPausedClient);
         })();
 
-        // --- Package ID Quick Select ---
+        // --- Package Log Quick Select ---
         const packageIdInput = document.getElementById('packageIdInput');
-        const packageCheckboxes = document.querySelectorAll('.package-id-checkbox');
+        const packageQuickSelectList = document.getElementById('packageQuickSelectList');
+        const packageQuickSelectStatus = document.getElementById('packageQuickSelectStatus');
+        const reloadPackagePresetsBtn = document.getElementById('reloadPackagePresetsBtn');
+        let packageLogPresets = [];
+        let packageLogPresetsRequestId = 0;
 
-        packageCheckboxes.forEach(cb => {
-            cb.addEventListener('change', (e) => {
-                if (e.target.checked) {
-                    packageCheckboxes.forEach(other => { if (other !== e.target) other.checked = false; });
-                    packageIdInput.value = e.target.value;
-                } else {
-                    if (packageIdInput.value === e.target.value) packageIdInput.value = '';
-                }
+        function renderPackageLogPresets() {
+            if (!packageQuickSelectList) return;
+            const currentValue = String(packageIdInput?.value || '').trim();
+            packageQuickSelectList.replaceChildren();
+            const platform = activePlatform === 'ios' ? 'ios' : 'android';
+            const visiblePresets = packageLogPresets.filter(item => item && item[platform]?.id);
+            if (!visiblePresets.length) {
+                const empty = document.createElement('span');
+                empty.className = 'text-slate-500 italic';
+                empty.textContent = 'No projects configured for this platform.';
+                packageQuickSelectList.appendChild(empty);
+                return;
+            }
+
+            visiblePresets.forEach((project) => {
+                const target = project[platform];
+                const label = document.createElement('label');
+                label.className = 'inline-flex items-center gap-2';
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'package-id-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500';
+                checkbox.value = target.id;
+                checkbox.checked = currentValue === target.id;
+                checkbox.dataset.androidValue = project.android?.id || '';
+                checkbox.dataset.androidLabel = project.android?.label || '';
+                checkbox.dataset.iosValue = project.ios?.id || '';
+                checkbox.dataset.iosLabel = project.ios?.label || '';
+                checkbox.dataset.projectCode = project.code || '';
+                label.appendChild(checkbox);
+
+                const text = document.createElement('span');
+                text.textContent = target.label || target.id;
+                label.appendChild(text);
+                packageQuickSelectList.appendChild(label);
             });
+            syncPlatformUi();
+            const running = startPackageLogBtn && startPackageLogBtn.textContent !== 'Start';
+            setPackageControlsEnabled(!running);
+        }
+
+        async function loadPackageLogPresets(forceRemote = false) {
+            const requestId = ++packageLogPresetsRequestId;
+            if (packageQuickSelectStatus) packageQuickSelectStatus.textContent = 'Loading projects...';
+            if (reloadPackagePresetsBtn) reloadPackagePresetsBtn.disabled = true;
+            try {
+                const refreshQuery = forceRemote ? '&refresh=1' : '';
+                const response = await fetch(`/api/package-log-presets?ts=${Date.now()}${refreshQuery}`, {cache: 'no-store'});
+                const payload = await response.json();
+                if (requestId !== packageLogPresetsRequestId) return;
+                if (!response.ok || !payload.ok || !Array.isArray(payload.presets)) {
+                    throw new Error(payload.error || 'package_log_presets_unavailable');
+                }
+                packageLogPresets = payload.presets;
+                renderPackageLogPresets();
+                const sourceText = payload.source === 'github' ? 'GitHub' : 'Local file';
+                if (packageQuickSelectStatus) {
+                    packageQuickSelectStatus.textContent = `${sourceText}: ${packageLogPresets.length} projects`;
+                }
+            } catch (error) {
+                if (requestId !== packageLogPresetsRequestId) return;
+                renderPackageLogPresets();
+                if (packageQuickSelectStatus) packageQuickSelectStatus.textContent = 'Could not load project list.';
+                console.warn('Package Log preset load failed', error);
+            } finally {
+                if (requestId === packageLogPresetsRequestId && reloadPackagePresetsBtn) {
+                    reloadPackagePresetsBtn.disabled = false;
+                }
+            }
+        }
+
+        packageQuickSelectList?.addEventListener('change', (event) => {
+            const selected = event.target.closest('input.package-id-checkbox');
+            if (!selected) return;
+            const checkboxes = packageQuickSelectList.querySelectorAll('.package-id-checkbox');
+            if (selected.checked) {
+                checkboxes.forEach(other => { if (other !== selected) other.checked = false; });
+                packageIdInput.value = selected.value;
+            } else if (packageIdInput.value === selected.value) {
+                packageIdInput.value = '';
+            }
         });
 
-        // Manual input clears quick select
-        packageIdInput.addEventListener('input', () => {
-            packageCheckboxes.forEach(cb => cb.checked = false);
+        // Manual input clears quick select.
+        packageIdInput?.addEventListener('input', () => {
+            packageQuickSelectList?.querySelectorAll('.package-id-checkbox').forEach(cb => { cb.checked = false; });
         });
+
+        // Load the local file immediately so Package Log never waits on the
+        // network.  Reload list explicitly checks the GitHub catalog for new
+        // projects and falls back to the same local file when offline.
+        reloadPackagePresetsBtn?.addEventListener('click', () => loadPackageLogPresets(true));
+        loadPackageLogPresets(false);
 
         // Clear All should also stop package log and re-enable inputs
         clearAllBtn.addEventListener('click', () => {
@@ -7714,6 +7896,18 @@ def get_sdk_check_presets():
         'source': source,
         'presets': presets,
         'error': '' if presets else 'sdk_check_presets_unavailable',
+    })
+
+
+@app.get('/api/package-log-presets')
+def get_package_log_presets():
+    refresh_requested = request.args.get("refresh", "").strip().lower() in {"1", "true", "yes"}
+    presets, source = _fetch_package_log_presets(force_remote=refresh_requested)
+    return jsonify({
+        'ok': bool(presets),
+        'source': source,
+        'presets': presets,
+        'error': '' if presets else 'package_log_presets_unavailable',
     })
 
 
@@ -8708,6 +8902,51 @@ def find_and_parse_event(log_entry):
     return None, None, None
 
 
+def _tracking_service_payload_fragment(raw_line):
+    """Return the payload after a TrackingService marker, if present.
+
+    Some iOS syslog relays hard-wrap a long TrackingService JSON message and
+    repeat the complete syslog prefix on the continuation line.  The second
+    line can therefore look like ``...TrackingService->Track: ode_game...``
+    even though it is not a new event.  Keeping only the text after the
+    repeated marker lets the stream reassembler join the JSON without
+    inserting a newline into a split key/string.
+    """
+    text = str(raw_line or "").rstrip("\r\n")
+    marker = TRACKING_SERVICE_EVENT_PATTERN.search(text)
+    if not marker:
+        return None
+    # The separator after the colon is not part of the JSON.  Remove only
+    # leading transport whitespace; the continuation itself is joined
+    # byte-for-byte afterwards so split keys/strings remain intact.
+    return text[marker.end():].lstrip().rstrip()
+
+
+def _tracking_buffer_expects_continuation(buffered):
+    """Tell whether a buffered JSON payload can still accept a fragment."""
+    payload = _tracking_service_payload_fragment(buffered)
+    if not payload:
+        return False
+
+    in_string = False
+    escaped = False
+    for char in payload:
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\" and in_string:
+            escaped = True
+            continue
+        if char == '"':
+            in_string = not in_string
+
+    # A wrap can happen in a JSON string (the user's ``"m`` example), after
+    # a delimiter, or immediately after an object/array opener.  In all of
+    # those states a repeated marker is more likely a continuation than a
+    # new event, even when its fragment starts with ``{``.
+    return in_string or payload.rstrip().endswith((":", ",", "[", "{"))
+
+
 def _process_ios_event_stream_line(device_id, raw_line):
     """Return completed event records while buffering split iOS JSON lines."""
     text = str(raw_line or "").rstrip("\r\n")
@@ -8717,6 +8956,37 @@ def _process_ios_event_stream_line(device_id, raw_line):
     completed = []
     with lock:
         buffered = incomplete_ios_event_logs.get(device_id, "")
+
+    # A long iOS TrackingService line may be emitted as multiple timestamped
+    # lines, each with the full ``TrackingService->Track:`` prefix repeated.
+    # Try the payload-only concatenation before treating the timestamp as a
+    # new syslog record.  This is important when the wrap occurs in the
+    # middle of a JSON key, e.g. ``"m`` + ``ode_game"``.
+    if buffered:
+        fragment = _tracking_service_payload_fragment(text)
+        if fragment is not None:
+            joined = f"{buffered}{fragment}"
+            joined_parsed = find_and_parse_event(joined)
+            if joined_parsed[0]:
+                with lock:
+                    incomplete_ios_event_logs.pop(device_id, None)
+                completed.append((joined, joined_parsed))
+                return completed
+
+            # A repeated marker followed by a non-object fragment is a
+            # continuation of the buffered JSON. Keep it without a newline;
+            # a newline could corrupt a split key or string value.
+            if fragment and (
+                not fragment.lstrip().startswith("{")
+                or _tracking_buffer_expects_continuation(buffered)
+            ):
+                if len(joined) <= 200000:
+                    with lock:
+                        incomplete_ios_event_logs[device_id] = joined
+                else:
+                    with lock:
+                        incomplete_ios_event_logs.pop(device_id, None)
+                return completed
 
     # A timestamped line starts a new syslog record. Finish the previous
     # TrackingService record before considering this line independently.

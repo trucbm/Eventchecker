@@ -65,6 +65,7 @@ pyinstaller --noconfirm --clean --windowed --icon assets\\app.ico --name "EventI
   --add-data "Log_checker.py;." ^
   --add-data "Default event + Default Params.xlsx;." ^
   --add-data "sdk_check_presets.json;." ^
+  --add-data "package_log_presets.json;." ^
   --add-data "remote_update_config_v250.json;." ^
   --add-data "services_checker\app.py;services_checker" ^
   --add-data "services_checker\axml_fallback.py;services_checker" ^

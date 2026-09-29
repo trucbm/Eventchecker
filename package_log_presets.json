@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "projects": [
+    {
+      "code": "NG",
+      "android": {
+        "id": "com.indiez.nonogram",
+        "label": "NG - com.indiez.nonogram"
+      },
+      "ios": {
+        "id": "PixelArt",
+        "label": "NG - PixelArt"
+      }
+    },
+    {
+      "code": "TM",
+      "android": {
+        "id": "com.indiez.train.miner",
+        "label": "TM - com.indiez.train.miner"
+      },
+      "ios": {
+        "id": "TrainIdle",
+        "label": "TM - TrainIdle"
+      }
+    },
+    {
+      "code": "HR",
+      "android": {
+        "id": "com.indiez.idletycoon.horse.racing",
+        "label": "HR - com.indiez.idletycoon.horse.racing"
+      }
+    },
+    {
+      "code": "SW",
+      "android": {
+        "id": "com.indiez.solitaire.word.card.puzzle",
+        "label": "SW - com.indiez.solitaire.word.card.puzzle"
+      }
+    },
+    {
+      "code": "KN",
+      "android": {
+        "id": "com.nostel.dot.line.puzzle",
+        "label": "KN - com.nostel.dot.line.puzzle"
+      },
+      "ios": {
+        "id": "SameColor",
+        "label": "KN - SameColor"
+      }
+    },
+    {
+      "code": "CP",
+      "android": {
+        "id": "com.nostel.parking.car",
+        "label": "CP - com.nostel.parking.car"
+      },
+      "ios": {
+        "id": "CarParking",
+        "label": "CP - CarParking"
+      }
+    },
+    {
+      "code": "CR",
+      "android": {
+        "id": "com.afk.idle.cat.food.restaurent",
+        "label": "CR - com.afk.idle.cat.food.restaurent"
+      },
+      "ios": {
+        "id": "CatRestaurant",
+        "label": "CR - CatRestaurant"
+      }
+    },
+    {
+      "code": "TP",
+      "android": {
+        "id": "tap.monster.block.away",
+        "label": "TP - tap.monster.block.away"
+      }
+    }
+  ]
+}

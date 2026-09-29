@@ -1,5 +1,5 @@
 {
-  "version": "2026-09-28-1-2.5.0-71",
+  "version": "2026-09-29-1-2.5.0-72",
   "update_enabled": true,
   "update_message": "",
   "files": [
@@ -11,7 +11,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/Log_checker.py",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/Log_checker.py"
       ],
-      "sha256": "6a4e72b297bb2253841affa6c9c82138a49eab911682a0fa4ba961910a26cbfc"
+      "sha256": "a58af025e454bec3960e82118967fe818f06c442bcfe749d9ceee528ef3e2641"
     },
     {
       "path": "remote_update.py",
@@ -42,6 +42,16 @@
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/remote_update_config_v250.json"
       ],
       "sha256": "10eb7518f13031f335303894dbcb4e7f7a9c4da0da3d5959a1423b442f482f44"
+    },
+    {
+      "path": "package_log_presets.json",
+      "url": "https://github.com/trucbm/Eventchecker/raw/main/package_log_presets.json",
+      "urls": [
+        "https://github.com/trucbm/Eventchecker/raw/main/package_log_presets.json",
+        "https://raw.githubusercontent.com/trucbm/Eventchecker/main/package_log_presets.json",
+        "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/package_log_presets.json"
+      ],
+      "sha256": "5c0047bb4b8e038abaa38cf6f29bd27b9aad78a42294ce41c003329e3a22eece"
     },
     {
       "path": "services_checker/app.py",

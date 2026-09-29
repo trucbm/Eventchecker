@@ -43,8 +43,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-28-1-2.5.0-71"
-CURRENT_RELEASE_BUILD = 71
+CURRENT_RELEASE_VERSION = "2026-09-29-1-2.5.0-72"
+CURRENT_RELEASE_BUILD = 72
 ROLLBACK_SOURCE_BUILD = 56
 RELEASE_SOURCE_BUILD = CURRENT_RELEASE_BUILD
 if str(ROOT) not in sys.path:
@@ -219,6 +219,42 @@ def test_package_code_mapping() -> None:
     for package_id, game_code in expected.items():
         _assert_equal(lc._game_code_for_package(package_id), game_code, f"wrong game code for {package_id}")
     _assert_equal(lc._game_code_for_package("com.example.unknown"), "Unknown", "unknown package should stay Unknown")
+
+
+def test_package_log_presets_contract() -> None:
+    """Package Log Quick Select must come from the editable JSON catalog."""
+    preset_path = ROOT / "package_log_presets.json"
+    raw = json.loads(preset_path.read_text(encoding="utf-8"))
+    presets = lc._sanitize_package_log_presets(raw)
+    _assert_equal(len(presets), 8, "package preset catalog entry count changed")
+    _assert(
+        any(item.get("android", {}).get("id") == "com.indiez.nonogram" for item in presets),
+        "package preset catalog lost the NG Android entry",
+    )
+    _assert(
+        any(item.get("ios", {}).get("id") == "CatRestaurant" for item in presets),
+        "package preset catalog lost the CatRestaurant iOS entry",
+    )
+
+    source = (ROOT / "Log_checker.py").read_text(encoding="utf-8")
+    for needle in (
+        "package_log_presets.json",
+        "PACKAGE_LOG_PRESETS_REMOTE_URLS",
+        "@app.get('/api/package-log-presets')",
+        "packageQuickSelectList",
+        "reloadPackagePresetsBtn?.addEventListener('click', () => loadPackageLogPresets(true))",
+    ):
+        _assert(needle in source, f"Package Log dynamic catalog contract missing: {needle}")
+
+    for build_script in (
+        ROOT / "build" / "macos" / "build_macos.sh",
+        ROOT / "build" / "windows" / "build_portable.bat",
+        ROOT / "build" / "windows" / "build_windows.bat",
+    ):
+        _assert(
+            "package_log_presets.json" in build_script.read_text(encoding="utf-8", errors="ignore"),
+            f"{build_script.name} does not bundle package_log_presets.json",
+        )
 
 
 def test_installation_id_state_machine() -> None:
@@ -1125,6 +1161,77 @@ def test_android_tracking_stream_reassembles_wrapped_records() -> None:
         lc.specific_event_results.extend(original_specific_results)
         lc.incomplete_android_event_logs.clear()
         lc.incomplete_android_event_logs.update(original_buffer)
+        for name in lc.record_dedup_seen:
+            lc.record_dedup_seen[name].clear()
+            lc.record_dedup_order[name].clear()
+        for name, values in original_dedup_seen.items():
+            lc.record_dedup_seen[name].update(values)
+            lc.record_dedup_order[name].extend(original_dedup_order[name])
+
+
+def test_ios_tracking_stream_reassembles_repeated_header_wrap() -> None:
+    """A wrapped iOS TrackingService event with a repeated header is recorded."""
+    original_platform = lc.active_platform
+    original_paused = lc.is_paused
+    original_validator_active = lc.validator_active
+    original_emit = lc.socketio.emit
+    original_validator_rows = list(lc.validator_results)
+    original_specific_rows = list(lc.event_log_cache)
+    original_specific_results = list(lc.specific_event_results)
+    original_buffer = dict(lc.incomplete_ios_event_logs)
+    original_dedup_seen = {name: set(values) for name, values in lc.record_dedup_seen.items()}
+    original_dedup_order = {name: list(values) for name, values in lc.record_dedup_order.items()}
+    try:
+        lc.active_platform = "ios"
+        lc.is_paused = False
+        lc.validator_active = True
+        lc.socketio.emit = lambda *_args, **_kwargs: None
+        lc.validator_results.clear()
+        lc.event_log_cache.clear()
+        lc.specific_event_results.clear()
+        lc.incomplete_ios_event_logs.clear()
+        lc._clear_record_dedup()
+
+        first = (
+            'Sep 29 13:47:22 Galaxy-iphone CatRestaurant(UnityFramework)[71830] <Notice>: '
+            '[Tracking] TrackingService->Track: '
+            '{"EventName":"loading_to_home","params":{"time":4.379315,'
+            '"level":3,"m'
+        )
+        second = (
+            'Sep 29 13:47:22 Galaxy-iphone CatRestaurant(UnityFramework)[71830] <Notice>: '
+            '[Tracking] TrackingService->Track: ode_game":"null"}}'
+        )
+
+        lc._process_ios_runtime_line(first, "ios-device")
+        _assert_equal(len(lc.validator_results), 0, "incomplete iOS event was emitted too early")
+        lc._process_ios_runtime_line(second, "ios-device")
+
+        _assert_equal(len(lc.validator_results), 1, "wrapped iOS event missing from Validator")
+        _assert_equal(len(lc.event_log_cache), 1, "wrapped iOS event missing from Specific Validator")
+        _assert_equal(
+            lc.validator_results[-1]["event_name"],
+            "loading_to_home",
+            "wrapped iOS event name changed",
+        )
+        _assert_equal(
+            lc.validator_results[-1]["details"].count("mode_game"),
+            1,
+            "wrapped iOS event JSON was not joined at the split point",
+        )
+    finally:
+        lc.active_platform = original_platform
+        lc.is_paused = original_paused
+        lc.validator_active = original_validator_active
+        lc.socketio.emit = original_emit
+        lc.validator_results.clear()
+        lc.validator_results.extend(original_validator_rows)
+        lc.event_log_cache.clear()
+        lc.event_log_cache.extend(original_specific_rows)
+        lc.specific_event_results.clear()
+        lc.specific_event_results.extend(original_specific_results)
+        lc.incomplete_ios_event_logs.clear()
+        lc.incomplete_ios_event_logs.update(original_buffer)
         for name in lc.record_dedup_seen:
             lc.record_dedup_seen[name].clear()
             lc.record_dedup_order[name].clear()
@@ -2721,7 +2828,7 @@ def test_release_payload_sync() -> None:
         "html_title": rf"<title>Event Inspector v2\.5\.0\({RELEASE_SOURCE_BUILD}\)</title>",
         "socket_fallback": r"typeof window\.io === 'function'",
         "brightsdk_tab": r"switchTab\('BrightSDK'\)",
-        "tm_ios_package": r'data-ios-value="([^"]+)"\s+data-ios-label="TM - ([^"]+)"',
+        "package_quick_select": r'id="packageQuickSelectList"',
         "check_update_call": r"result = remote_update\.check_for_updates\(\)",
     }
 
@@ -3899,6 +4006,7 @@ TESTS: List[Callable[[], None]] = [
     test_manifest_payload_integrity,
     test_canonical_update_channel_contract,
     test_package_code_mapping,
+    test_package_log_presets_contract,
     test_installation_id_state_machine,
     test_installation_id_log_parsing,
     test_sdk_exact_contracts,
@@ -3917,6 +4025,7 @@ TESTS: List[Callable[[], None]] = [
     test_ios_discovery_grace_contract,
     test_ios_reader_liveness_contract,
     test_android_tracking_stream_reassembles_wrapped_records,
+    test_ios_tracking_stream_reassembles_repeated_header_wrap,
     test_android_package_log_ignores_global_pause,
     test_ios_package_log_preserves_multiline_records,
     test_ios_package_log_tidevice_nul_framing,
