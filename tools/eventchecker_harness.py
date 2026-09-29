@@ -43,8 +43,8 @@ from openpyxl import Workbook
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_RELEASE_VERSION = "2026-09-29-1-2.5.0-72"
-CURRENT_RELEASE_BUILD = 72
+CURRENT_RELEASE_VERSION = "2026-09-29-1-2.5.0-73"
+CURRENT_RELEASE_BUILD = 73
 ROLLBACK_SOURCE_BUILD = 56
 RELEASE_SOURCE_BUILD = CURRENT_RELEASE_BUILD
 if str(ROOT) not in sys.path:
@@ -1103,6 +1103,97 @@ def test_ios_reader_liveness_contract() -> None:
         "an idle stream must not be killed" in manager,
         "iOS reader idle-stream protection is missing",
     )
+
+
+def test_android_logcat_reconnect_cursor_contract() -> None:
+    """Continuous Android streams must start near now, not at the ring-buffer head."""
+    command = lc._android_logcat_stream_command("android-device")
+    _assert("-T" in command, "Android logcat reader has no start cursor")
+    cursor_index = command.index("-T") + 1
+    cursor = command[cursor_index]
+    _assert(re.fullmatch(r"\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.000", cursor), "invalid Android logcat cursor")
+    package_command = lc._android_logcat_stream_command("android-device", pid="1234")
+    _assert("--pid=1234" in package_command, "Package Log lost the PID filter")
+    _assert(package_command[cursor_index - 1] == "-T", "Package Log lost the start cursor")
+
+
+def test_package_consumer_replacement_guard() -> None:
+    """A stopped/replaced Package Log process must not append its tail."""
+    original_platform = lc.active_platform
+    original_target = lc.target_package_name
+    original_rows = list(lc.package_log_cache)
+    original_processes = dict(lc.active_logcat_processes)
+    original_dedup_seen = {name: set(values) for name, values in lc.record_dedup_seen.items()}
+    original_dedup_order = {name: list(values) for name, values in lc.record_dedup_order.items()}
+    try:
+        lc.active_platform = "android"
+        lc.target_package_name = "com.example.current"
+        lc.package_log_cache.clear()
+        lc.active_logcat_processes.clear()
+        lc._clear_record_dedup("package")
+        old_process = type("FakeProcess", (), {"stdout": io.StringIO(
+            "09-29 14:00:00.000  1  1 I Unity: stale row\n"
+        )})()
+        replacement_process = type("FakeProcess", (), {"stdout": io.StringIO()})()
+        lc.active_logcat_processes["android-device"] = replacement_process
+        lc.package_log_consumer("android-device", old_process)
+        _assert_equal(len(lc.package_log_cache), 0, "stale Package Log consumer appended after replacement")
+    finally:
+        lc.active_platform = original_platform
+        lc.target_package_name = original_target
+        lc.package_log_cache.clear()
+        lc.package_log_cache.extend(original_rows)
+        lc.active_logcat_processes.clear()
+        lc.active_logcat_processes.update(original_processes)
+        for name in lc.record_dedup_seen:
+            lc.record_dedup_seen[name].clear()
+            lc.record_dedup_order[name].clear()
+        for name, values in original_dedup_seen.items():
+            lc.record_dedup_seen[name].update(values)
+            lc.record_dedup_order[name].extend(original_dedup_order[name])
+
+
+def test_clear_does_not_reopen_replay_dedup_contract() -> None:
+    """Clear All must not erase the replay index while live readers continue."""
+    source = (ROOT / "Log_checker.py").read_text(encoding="utf-8", errors="ignore")
+    clear_block = source.split("@socketio.on('clear_all_logs')", 1)[1].split(
+        "@socketio.on('start_validation')", 1
+    )[0]
+    platform_reset_block = source.split("def _reset_runtime_for_platform_switch():", 1)[1].split(
+        "@socketio.on('set_platform')", 1
+    )[0]
+    _assert("_clear_record_dedup()" not in clear_block, "Clear All reopens exact replay duplicates")
+    _assert("_clear_record_dedup()" not in platform_reset_block, "platform reset reopens exact replay duplicates")
+    _assert(
+        "Queue(maxsize=PACKAGE_LOG_DB_QUEUE_MAX_ITEMS)" in source,
+        "Package Log database queue is not bounded",
+    )
+
+
+def test_ios_package_frame_buffer_has_memory_guard() -> None:
+    """An unterminated iOS relay frame must not grow without bound."""
+    original_platform = lc.active_platform
+    original_frames = dict(lc.active_ios_package_log_frame_buffers)
+    original_modes = dict(lc.active_ios_package_log_stream_modes)
+    try:
+        lc.active_platform = "ios"
+        lc.active_ios_package_log_frame_buffers.clear()
+        lc.active_ios_package_log_stream_modes.clear()
+        lc.process_ios_package_log_stream_chunk(
+            "ios-device",
+            "x" * (lc.MAX_IOS_PACKAGE_LOG_BUFFER_CHARS + 1),
+        )
+        _assert(
+            len(lc.active_ios_package_log_frame_buffers.get("ios-device", ""))
+            <= lc.MAX_IOS_PACKAGE_LOG_BUFFER_CHARS,
+            "unterminated iOS Package Log frame exceeded its memory limit",
+        )
+    finally:
+        lc.active_platform = original_platform
+        lc.active_ios_package_log_frame_buffers.clear()
+        lc.active_ios_package_log_frame_buffers.update(original_frames)
+        lc.active_ios_package_log_stream_modes.clear()
+        lc.active_ios_package_log_stream_modes.update(original_modes)
 
 
 def test_android_tracking_stream_reassembles_wrapped_records() -> None:
@@ -4024,6 +4115,10 @@ TESTS: List[Callable[[], None]] = [
     test_ios_transport_fallback_contract,
     test_ios_discovery_grace_contract,
     test_ios_reader_liveness_contract,
+    test_android_logcat_reconnect_cursor_contract,
+    test_package_consumer_replacement_guard,
+    test_clear_does_not_reopen_replay_dedup_contract,
+    test_ios_package_frame_buffer_has_memory_guard,
     test_android_tracking_stream_reassembles_wrapped_records,
     test_ios_tracking_stream_reassembles_repeated_header_wrap,
     test_android_package_log_ignores_global_pause,

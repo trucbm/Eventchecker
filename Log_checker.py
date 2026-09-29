@@ -31,7 +31,7 @@ try:
 except Exception:
     webview = None
 from pathlib import Path
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 
 # Khởi tạo ứng dụng Flask và SocketIO
 app = Flask(__name__)
@@ -1371,6 +1371,9 @@ specific_event_params_filters = []
 package_log_cache = deque(maxlen=30000)
 PACKAGE_LOG_UI_MAX_ROWS = 8000
 PACKAGE_LOG_UI_MAX_ROWS_IOS = 12000
+PACKAGE_LOG_DB_QUEUE_MAX_ITEMS = 5000
+MAX_IOS_PACKAGE_LOG_BUFFER_CHARS = 500000
+MAX_PACKAGE_LOG_RECORD_CHARS = 200000
 target_package_name = ""
 active_package_pids = {}
 active_logcat_processes = {}
@@ -1378,7 +1381,8 @@ active_ios_package_log_buffers = {}
 active_ios_package_log_frame_buffers = {}
 active_ios_package_log_stream_modes = {}
 active_package_log_session_id = None
-package_log_db_queue = Queue()
+package_log_db_queue = Queue(maxsize=PACKAGE_LOG_DB_QUEUE_MAX_ITEMS)
+package_log_db_dropped_rows = 0
 
 # 6. Dữ liệu cho Tab Callback & Ads Event
 callback_ad_logs = deque(maxlen=MAX_CALLBACK_AD_LOGS)
@@ -1602,6 +1606,45 @@ def _finish_package_log_session(session_id):
         conn.commit()
     finally:
         conn.close()
+
+
+def _enqueue_package_log_db_row(item):
+    """Put one Package Log row on a bounded queue.
+
+    The live table is already bounded, but the SQLite writer used to have an
+    unbounded queue.  A reconnect or a slow/locked database could therefore
+    retain every raw log string in RAM even after the UI had been cleared.
+    Keep the newest rows and drop the oldest pending write when the writer
+    falls behind; rows already committed to SQLite remain available in the
+    history view.
+    """
+    global package_log_db_dropped_rows
+    try:
+        package_log_db_queue.put_nowait(item)
+        return True
+    except Full:
+        try:
+            package_log_db_queue.get_nowait()
+            package_log_db_dropped_rows += 1
+        except Empty:
+            pass
+        try:
+            package_log_db_queue.put_nowait(item)
+            return True
+        except Full:
+            package_log_db_dropped_rows += 1
+            return False
+
+
+def _drain_package_log_db_queue():
+    """Discard writes that belong to a capture the user just stopped/cleared."""
+    drained = 0
+    while True:
+        try:
+            package_log_db_queue.get_nowait()
+            drained += 1
+        except Empty:
+            return drained
 
 
 def _package_log_db_writer():
@@ -4265,7 +4308,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" href="data:,"> <!-- Fix lỗi Favicon 404 -->
-    <title>Event Inspector v2.5.0(72)</title>
+    <title>Event Inspector v2.5.0(73)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.js"></script>
     <style>
@@ -4347,7 +4390,7 @@ HTML_TEMPLATE = """
                     <div>
                         <div class="flex items-center gap-2.5">
                             <h1 class="text-xl font-bold text-gray-700">Event Inspector</h1>
-                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(72)</span>
+                            <span class="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-1 rounded-full">v2.5.0(73)</span>
                         </div>
                         <p class="text-sm text-gray-500">Integrates Load Ads & Event Validation.</p>
                     </div>
@@ -10463,18 +10506,44 @@ def _process_sdk_check_line(line, device_id):
     if changed:
         _emit_sdk_check_results()
 
+
+ANDROID_LOGCAT_LOOKBACK_SECONDS = 1.0
+
+
+def _android_logcat_start_cursor():
+    """Return a logcat cursor just before opening a continuous stream.
+
+    ``adb logcat`` otherwise replays the device ring buffer every time its
+    subprocess is recreated.  A one-second lookback covers the tiny startup
+    race without replaying minutes of old events after a reconnect.
+    """
+    cursor_time = time.time() - ANDROID_LOGCAT_LOOKBACK_SECONDS
+    return time.strftime("%m-%d %H:%M:%S.000", time.localtime(cursor_time))
+
+
+def _android_logcat_stream_command(device_id, pid=None):
+    command = [
+        ADB_EXECUTABLE,
+        "-s",
+        device_id,
+        "logcat",
+        "-v",
+        "threadtime",
+        "-T",
+        _android_logcat_start_cursor(),
+    ]
+    if pid:
+        command.append(f"--pid={pid}")
+    return command
+
+
 def adb_log_reader(device_id):
     print(f"INFO: Starting log reader for {device_id}")
     proc = None
     reader_thread = threading.current_thread()
     try:
-        # Do not clear logcat every time the reader is restarted.  A transient
-        # ADB disconnect used to erase the records emitted during the restart
-        # window, which made the Package Log contain rows while all event tabs
-        # appeared to miss them.  The per-tab exact-record index filters a
-        # replayed identical line without destroying live records.
         proc = subprocess.Popen(
-            [ADB_EXECUTABLE, '-s', device_id, 'logcat', '-v', 'threadtime'],
+            _android_logcat_stream_command(device_id),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             bufsize=1,
@@ -10650,6 +10719,14 @@ def device_manager():
                     }
                     for did in sorted(stale_reader_ids):
                         readers_to_stop.append((did, 'missing from discovery'))
+                    # A reader can disappear from the thread map while its
+                    # tidevice process is still alive. Treat that process as
+                    # orphaned; otherwise the next discovery pass may start a
+                    # second stream for the same device and duplicate the
+                    # whole old syslog buffer.
+                    for did in sorted(set(active_ios_log_processes) - set(active_ios_log_readers)):
+                        if did not in stale_reader_ids:
+                            readers_to_stop.append((did, 'orphan process'))
                     ids.difference_update(stale_reader_ids)
                     ids.update(set(active_ios_log_readers) - stale_reader_ids)
                     ids.update(set(active_ios_log_processes) - stale_reader_ids)
@@ -10677,7 +10754,8 @@ def device_manager():
                     # grace-kept ID must remain visible, but must not spawn a
                     # new tidevice process while discovery is temporarily
                     # empty.
-                    for did in observed_ids - set(active_ios_log_readers.keys()):
+                    active_ios_reader_ids = set(active_ios_log_readers) | set(active_ios_log_processes)
+                    for did in observed_ids - active_ios_reader_ids:
                         t = threading.Thread(target=ios_log_reader, args=(did,), daemon=True)
                         active_ios_log_readers[did] = t
                         t.start()
@@ -10747,6 +10825,13 @@ def device_manager():
         time.sleep(3)
 
 def _append_package_log_row(device_id, raw_log, time_str="", time_display="", level="", tag="", message="", is_error=False):
+    device_name = ""
+    raw_text = str(raw_log or "").strip()
+    if len(raw_text) > MAX_PACKAGE_LOG_RECORD_CHARS:
+        raw_text = raw_text[:MAX_PACKAGE_LOG_RECORD_CHARS] + "\n[Package Log record truncated]"
+    message_text = str(message or "").strip()
+    if len(message_text) > MAX_PACKAGE_LOG_RECORD_CHARS:
+        message_text = message_text[:MAX_PACKAGE_LOG_RECORD_CHARS] + "\n[Package Log message truncated]"
     with lock:
         # A Package Log consumer can deliver one final line after Clear All
         # asks its subprocess to stop. Do not let that tail recreate rows
@@ -10754,36 +10839,37 @@ def _append_package_log_row(device_id, raw_log, time_str="", time_display="", le
         if not target_package_name:
             return
         session_id = active_package_log_session_id
-        if not _accept_exact_record("package", device_id, raw_log, session_id or ""):
+        if not _accept_exact_record("package", device_id, raw_text, session_id or ""):
             return
+        device_name = get_device_name(device_id)
         package_log_cache.append({
             'device_id': device_id,
-            'device_name': get_device_name(device_id),
-            'log': raw_log.strip(),
+            'device_name': device_name,
+            'log': raw_text,
             'time': time_str,
             'time_display': time_display or time_str,
             'level': level,
             'tag': tag,
-            'message': message,
+            'message': message_text,
             'timestamp': time.time(),
             'is_error': is_error
         })
-    if session_id:
-        try:
-            package_log_db_queue.put_nowait((
+        if session_id:
+            # Keep the cache append and its database enqueue in the same
+            # critical section so Clear All cannot drain the queue and then
+            # receive a late row from the old session.
+            _enqueue_package_log_db_row((
                 session_id,
                 time.time(),
                 time_display or time_str,
                 device_id,
-                get_device_name(device_id),
+                device_name,
                 level,
                 tag,
-                message,
-                raw_log.strip(),
+                message_text,
+                raw_text,
                 1 if is_error else 0,
             ))
-        except Exception:
-            pass
 
 def _ios_package_log_matches_target(raw_log, bundle_search):
     """Match iOS package logs by the record's process header, not its body."""
@@ -10915,8 +11001,14 @@ def process_ios_package_log_stream_chunk(device_id, raw_chunk):
     if stream_mode == "nul":
         with lock:
             buffered = active_ios_package_log_frame_buffers.get(device_id, "")
-            frames = (buffered + raw_chunk).split("\x00")
-            active_ios_package_log_frame_buffers[device_id] = frames.pop()
+            combined = buffered + raw_chunk
+            frames = combined.split("\x00")
+            remainder = frames.pop()
+            # A broken relay must not let an unterminated frame grow without
+            # bound. A normal MAX/syslog record is far below this limit.
+            active_ios_package_log_frame_buffers[device_id] = (
+                remainder if len(remainder) <= MAX_IOS_PACKAGE_LOG_BUFFER_CHARS else ""
+            )
 
         for frame in frames:
             frame = frame.strip("\r\n")
@@ -10952,17 +11044,39 @@ def process_ios_package_log_stream_line(device_id, log_obj):
     with lock:
         current = active_ios_package_log_buffers.get(device_id)
         if current is not None:
-            active_ios_package_log_buffers[device_id] = f"{current}\n{raw_line}"
+            combined = f"{current}\n{raw_line}"
+            active_ios_package_log_buffers[device_id] = (
+                combined if len(combined) <= MAX_IOS_PACKAGE_LOG_BUFFER_CHARS else ""
+            )
             return
 
     # Preserve the old behavior for unstructured/prelude lines that arrive
     # before the first timestamped syslog record.
     process_ios_package_log_line(log_obj)
 
+def _append_package_log_row_from_consumer(device_id, logcat_process, *row_args):
+    """Append only while this consumer still owns the live Package stream."""
+    with lock:
+        current_process = active_logcat_processes.get(device_id)
+        if not target_package_name:
+            return False
+        # Direct parser tests do not register a process. In production a
+        # registered replacement must always invalidate the old consumer.
+        if current_process is not None and current_process is not logcat_process:
+            return False
+        return _append_package_log_row(device_id, *row_args)
+
+
 def package_log_consumer(device_id, logcat_process):
     try:
         for line in iter(logcat_process.stdout.readline, ''):
             if not line: break
+            with lock:
+                current_process = active_logcat_processes.get(device_id)
+                if not target_package_name:
+                    break
+                if current_process is not None and current_process is not logcat_process:
+                    break
             is_error = bool(re.search(r'^\S+\s+\S+\s+\d+\s+\d+\s+[EF]\s', line))
             time_str = ""
             time_display = ""
@@ -10981,8 +11095,9 @@ def package_log_consumer(device_id, logcat_process):
                     time_display = time_str.split(' ', 1)[1]
             _safe_runtime_call(
                 "Android Package Log row",
-                _append_package_log_row,
+                _append_package_log_row_from_consumer,
                 device_id,
+                logcat_process,
                 line,
                 time_str,
                 time_display,
@@ -11074,7 +11189,7 @@ def package_pid_monitor():
                                 active_logcat_processes[did].terminate()
                             except Exception:
                                 pass
-                        cmd = [ADB_EXECUTABLE, '-s', did, 'logcat', '-v', 'threadtime', f'--pid={pid}']
+                        cmd = _android_logcat_stream_command(did, pid=pid)
                         proc = subprocess.Popen(
                             cmd,
                             stdout=subprocess.PIPE,
@@ -11164,10 +11279,10 @@ def _reset_runtime_for_platform_switch():
         callback_ad_logs.clear(); incomplete_impression_logs.clear(); incomplete_ios_adrevenue_logs.clear(); incomplete_ios_load_ads_ext_logs.clear(); incomplete_ios_max_load_ads_logs.clear(); incomplete_ios_event_logs.clear(); incomplete_android_event_logs.clear(); incomplete_adjust_adrevenue_logs.clear()
         price_rotation_logs.clear()
         package_log_cache.clear(); active_package_pids.clear(); active_ios_package_log_buffers.clear(); active_ios_package_log_frame_buffers.clear(); active_ios_package_log_stream_modes.clear()
-        _clear_record_dedup()
         installation_id_state.clear()
         connected_devices_info = []
         target_package_name = ""
+        _drain_package_log_db_queue()
         if active_package_log_session_id:
             _finish_package_log_session(active_package_log_session_id)
             active_package_log_session_id = None
@@ -11279,7 +11394,6 @@ def cl():
         specific_event_results.clear(); event_log_cache.clear()
         adrevenue_logs.clear(); callback_ad_logs.clear(); price_rotation_logs.clear()
         package_log_cache.clear()
-        _clear_record_dedup()
         # Clean SDK check
         sdk_check_active = False
         sdk_check_results.clear()
@@ -11310,6 +11424,7 @@ def cl():
         active_ios_package_log_frame_buffers.clear()
         active_ios_package_log_stream_modes.clear()
         target_package_name = ""
+        _drain_package_log_db_queue()
         if active_package_log_session_id:
             _finish_package_log_session(active_package_log_session_id)
             active_package_log_session_id = None
@@ -11458,6 +11573,9 @@ def spl(d):
     for device_id in list(active_ios_package_log_buffers):
         _flush_ios_package_log_buffer(device_id)
     with lock:
+        # Do not let rows waiting behind a slow SQLite writer leak into the
+        # next Package Log session. They belong to the capture being replaced.
+        _drain_package_log_db_queue()
         if active_package_log_session_id:
             _finish_package_log_session(active_package_log_session_id)
             active_package_log_session_id = None
@@ -11465,7 +11583,6 @@ def spl(d):
         if pid:
             active_package_log_session_id = _start_package_log_session(pid)
         package_log_cache.clear()
-        _clear_record_dedup("package")
         active_ios_package_log_buffers.clear()
         active_ios_package_log_frame_buffers.clear()
         active_ios_package_log_stream_modes.clear()
