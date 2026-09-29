@@ -30,6 +30,8 @@
   "C-180-Android": {
     "platform": "android",
     "lines": [
+      "Voodoo (ADN) Adapter\t5.4.0",
+      "Voodoo (ADN) SDK\t4.28.3",
       "Kidoz adapter\t2.2.0",
       "Kidoz native\t10.1.8",
       "Maticoo adapter\t2.0.4.5",
