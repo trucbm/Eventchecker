@@ -79,6 +79,19 @@ def main() -> int:
     if os.name != "nt" and not simulate_windows:
         raise SystemExit("windows_update_smoke must run on Windows (or set EVENTINSPECTOR_WINDOWS_SMOKE_SIMULATE=1 for local code-path testing)")
 
+    manifest_guard = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "verify_update_manifest.py")],
+        cwd=str(ROOT),
+        capture_output=True,
+        text=True,
+    )
+    if manifest_guard.returncode != 0:
+        raise AssertionError(
+            "Windows updater smoke refused a stale manifest:\n"
+            + (manifest_guard.stdout or "")
+            + (manifest_guard.stderr or "")
+        )
+
     manifest = json.loads((ROOT / "Updates_2_5" / "remote_manifest.json").read_text(encoding="utf-8"))
     expected_build = updater._extract_build_number(manifest.get("version"))
     if expected_build is None:

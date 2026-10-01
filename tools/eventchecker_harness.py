@@ -3710,6 +3710,9 @@ def test_build_scripts_clean_outputs() -> None:
     mac_script = (ROOT / "build" / "macos" / "build_macos.sh").read_text(encoding="utf-8", errors="ignore")
     win_portable_script = (ROOT / "build" / "windows" / "build_portable.bat").read_text(encoding="utf-8", errors="ignore")
     win_installer_script = (ROOT / "build" / "windows" / "build_windows.bat").read_text(encoding="utf-8", errors="ignore")
+    _assert("verify_update_manifest.py" in mac_script, "macOS build must verify update manifest hashes")
+    _assert("verify_update_manifest.py" in win_portable_script, "Windows portable build must verify update manifest hashes")
+    _assert("verify_update_manifest.py" in win_installer_script, "Windows installer build must verify update manifest hashes")
 
     mac_expected = [
         'rm -rf "dist/EventInspector.app"',
@@ -3810,6 +3813,7 @@ def test_windows_release_build_version_contract() -> None:
     installer_script = (ROOT / "build" / "windows" / "build_windows.bat").read_text(encoding="utf-8", errors="ignore")
     iss_script = (ROOT / "build" / "windows" / "EventChecker.iss").read_text(encoding="utf-8", errors="ignore")
     smoke_source = (ROOT / "tools" / "windows_update_smoke.py").read_text(encoding="utf-8", errors="ignore")
+    manifest_guard = (ROOT / "tools" / "verify_update_manifest.py").read_text(encoding="utf-8", errors="ignore")
 
     _assert('default: "main"' in workflow, "Windows workflow must default to the main source ref")
     _assert(
@@ -3822,6 +3826,8 @@ def test_windows_release_build_version_contract() -> None:
     _assert("python tools\\windows_update_smoke.py" in workflow, "Windows workflow must execute the Windows updater smoke test")
     _assert("sys.path.insert(0, str(ROOT))" in smoke_source, "Windows updater smoke must import the root updater from CI")
     _assert("EVENTINSPECTOR_WINDOWS_SMOKE_SIMULATE" in smoke_source, "Windows updater smoke must support local code-path testing")
+    _assert("sha256" in manifest_guard and "update manifest: PASS" in manifest_guard, "release manifest hash guard is incomplete")
+    _assert("verify_update_manifest.py" in smoke_source, "Windows updater smoke must verify manifest hashes")
     _assert("EventInspector-Windows-v${{ steps.release.outputs.release_version }}" in workflow, "Windows artifacts must be versioned")
     _assert('[switch]$PrintVersion' in source_guard, "Windows source guard must expose the resolved version")
     _assert('ExpectedSeries = "2.5.0"' in source_guard, "Windows source guard must enforce the v2.5 series")

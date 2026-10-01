@@ -19,6 +19,14 @@ if not exist ".venv" (
 
 call .venv\Scripts\activate.bat
 
+REM Refuse to build an updater payload whose manifest hashes are stale.
+python tools\verify_update_manifest.py
+if errorlevel 1 (
+  echo Remote update manifest validation failed. Portable build stopped.
+  popd
+  exit /b 1
+)
+
 REM Install deps
 python -m pip install --upgrade pip
 pip install -r requirements.txt

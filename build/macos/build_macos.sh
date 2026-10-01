@@ -18,6 +18,11 @@ APP_BUILD_NUMBER="${APP_BUILD_NUMBER%)}"
 # Create venv if missing
 VENV_DIR="${VENV_DIR:-.venv}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+# Existing clients verify every downloaded payload against this manifest.
+# Stop before creating an artifact if a source change was not synchronized.
+"$PYTHON_BIN" tools/verify_update_manifest.py
+
 if [ ! -d "$VENV_DIR" ]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR"
 fi
