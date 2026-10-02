@@ -16,5 +16,6 @@
   "TaurusX - MAX": "TaurusxAdsSDK/AppLovinAdapter",
   "Ascendx - MAX": "AscendXMAXAdapter",
   "Yeahmobi/ Maticoo - MAX": "zMaticooMAXAdapter",
-  "Prado - MAX": "PradoApplovinAdapter"
+  "Prado - MAX": "PradoApplovinAdapter",
+  "Voodoo - MAX": "IronSourceVoodooAdapter"
 }
