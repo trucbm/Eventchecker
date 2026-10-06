@@ -47,7 +47,7 @@
       "TaurusX SDK\t1.19.0",
       "TaurusX Adapter\t1.19.0",
       "Odeeo SDK\t3.10.0",
-      "AppMetrica Analytics\t6.6.0",
+      "AppMetrica Analytics\t6.7.0",
       "Google UMP SDK\t3.1.0",
       "Ascendx adapter\t0.11.0",
       "Adjust/AdjustGoogleOd\t5.8.0",
@@ -55,7 +55,8 @@
       "Ascendx - MAX\t1.9.0",
       "Yeahmobi/ Maticoo - MAX\t2.3.0",
       "TaurusX - MAX\t1.19.0",
-      "Prado - MAX\t2.0.1"
+      "Prado - MAX\t2.0.1",
+      "Voodoo Adapter\t5.5.0.0"    
     ]
   }
 }
