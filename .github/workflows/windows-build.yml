@@ -1,6 +1,9 @@
 name: Build Windows
 
 on:
+  push:
+    branches:
+      - codex/release-69-intel-windows
   workflow_dispatch:
     inputs:
       source_ref:
