@@ -3717,6 +3717,11 @@ def test_windows_portable_update_staging() -> None:
 
 
 def test_build_scripts_clean_outputs() -> None:
+    attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8", errors="ignore")
+    _assert("*.py text eol=lf" in attributes, "Git checkout must keep Python payloads on LF")
+    _assert("*.json text eol=lf" in attributes, "Git checkout must keep JSON payloads on LF")
+    _assert("*.jar binary" in attributes, "Git checkout must keep bundletool binary")
+    _assert("*.keystore binary" in attributes, "Git checkout must keep keystore binary")
     mac_script = (ROOT / "build" / "macos" / "build_macos.sh").read_text(encoding="utf-8", errors="ignore")
     win_portable_script = (ROOT / "build" / "windows" / "build_portable.bat").read_text(encoding="utf-8", errors="ignore")
     win_installer_script = (ROOT / "build" / "windows" / "build_windows.bat").read_text(encoding="utf-8", errors="ignore")

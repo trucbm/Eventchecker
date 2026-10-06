@@ -13,9 +13,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "Updates_2_5" / "remote_manifest.json"
 IMMUTABLE_REF_RE = re.compile(r"^[0-9a-f]{40}$")
+TEXT_PAYLOAD_SUFFIXES = {".py", ".json"}
 
 
 def _sha256(path: Path) -> str:
+    # GitHub serves repository text blobs with LF.  Normalize a Windows
+    # checkout before hashing so core.autocrlf cannot break a release build.
+    if path.suffix.lower() in TEXT_PAYLOAD_SUFFIXES:
+        digest = hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n"))
+        return digest.hexdigest()
+
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
