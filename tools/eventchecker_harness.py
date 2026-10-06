@@ -3836,7 +3836,8 @@ def test_windows_release_build_version_contract() -> None:
 
     _assert('default: "main"' in workflow, "Windows workflow must default to the main source ref")
     _assert(
-        "ref: ${{ inputs.source_ref || 'main' }}" in workflow
+        "ref: ${{ github.event_name == 'workflow_dispatch' && inputs.source_ref || github.sha }}" in workflow
+        or "ref: ${{ inputs.source_ref || 'main' }}" in workflow
         or "ref: ${{ inputs.source_ref || github.sha }}" in workflow,
         "Windows workflow must checkout the requested source ref",
     )
