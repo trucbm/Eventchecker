@@ -14,7 +14,7 @@ if errorlevel 1 (
 
 REM Create venv
 if not exist ".venv" (
-  py -3 -m venv .venv
+  python -m venv .venv
 )
 
 call .venv\Scripts\activate.bat
@@ -29,7 +29,7 @@ if errorlevel 1 (
 
 REM Install deps
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 
 REM Clean old build output (in case files are locked)
 if exist "dist\EventInspector" rmdir /s /q "dist\EventInspector"
@@ -37,8 +37,8 @@ if exist "build\EventInspector" rmdir /s /q "build\EventInspector"
 if exist "dist\EventInspector-portable.zip" del /f /q "dist\EventInspector-portable.zip"
 
 REM Build portable EXE folder
-pip install pyinstaller PySide6 qtpy
-pyinstaller --noconfirm --clean --windowed --icon assets\app.ico --name "EventInspector" ^
+python -m pip install pyinstaller PySide6 qtpy
+python -m PyInstaller --noconfirm --clean --windowed --icon assets\app.ico --name "EventInspector" ^
   --collect-submodules "engineio" ^
   --collect-submodules "socketio" ^
   --collect-submodules "webview" ^
@@ -62,6 +62,7 @@ pyinstaller --noconfirm --clean --windowed --icon assets\app.ico --name "EventIn
   --hidden-import "PySide6.QtWebEngineWidgets" ^
   --hidden-import "shiboken6" ^
   --add-data "Log_checker.py;." ^
+  --add-data "remote_update.py;." ^
   --add-data "Default event + Default Params.xlsx;." ^
   --add-data "sdk_check_presets.json;." ^
   --add-data "package_log_presets.json;." ^

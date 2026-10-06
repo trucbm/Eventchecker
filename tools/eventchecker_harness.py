@@ -112,11 +112,12 @@ def _payload_path_candidates(manifest_path: Path, item: dict) -> List[Path]:
 
 def _valid_payload_urls(manifest_path: Path, rel_path: str, payload_path: Path) -> set[str]:
     repo_rel = payload_path.relative_to(ROOT).as_posix()
-    branch = "main"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload_ref = str(manifest.get("payload_ref") or "").strip()
     return {
-        f"https://github.com/trucbm/Eventchecker/raw/{branch}/{repo_rel}",
-        f"https://raw.githubusercontent.com/trucbm/Eventchecker/{branch}/{repo_rel}",
-        f"https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@{branch}/{repo_rel}",
+        f"https://github.com/trucbm/Eventchecker/raw/{payload_ref}/{repo_rel}",
+        f"https://raw.githubusercontent.com/trucbm/Eventchecker/{payload_ref}/{repo_rel}",
+        f"https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@{payload_ref}/{repo_rel}",
     }
 
 
@@ -131,6 +132,8 @@ def test_manifest_contract() -> None:
     for manifest_path in manifests:
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
         _assert("version" in data and str(data["version"]).strip(), f"{manifest_path.name} missing version")
+        payload_ref = str(data.get("payload_ref") or "").strip().lower()
+        _assert(re.fullmatch(r"[0-9a-f]{40}", payload_ref) is not None, f"{manifest_path.name} payload_ref must be an immutable Git SHA")
         files = data.get("files") or []
         _assert(files, f"{manifest_path.name} missing files list")
         log_checker_files = [item for item in files if str(item.get("path", "")).strip() == "Log_checker.py"]
@@ -139,6 +142,9 @@ def test_manifest_contract() -> None:
             _assert(str(item.get("path", "")).strip(), f"{manifest_path.name} contains file entry without path")
             _assert(str(item.get("url", "")).strip(), f"{manifest_path.name} contains file entry without url")
             _assert(str(item.get("sha256", "")).strip(), f"{manifest_path.name} contains file entry without sha256")
+            for url in [item.get("url"), *(item.get("urls") or [])]:
+                _assert(payload_ref in str(url), f"{manifest_path.name} payload URL is not pinned: {url}")
+                _assert("/main/" not in str(url) and "@main/" not in str(url), f"{manifest_path.name} payload URL is mutable: {url}")
 
 
 def test_manifest_payload_integrity() -> None:
@@ -173,7 +179,7 @@ def test_manifest_payload_integrity() -> None:
 
 
 def test_canonical_update_channel_contract() -> None:
-    """Keep every current release check on the single main/v250 channel."""
+    """Keep checks on the single v250 channel with immutable payloads."""
     import remote_update as updater
 
     _assert_equal(updater.CHANNEL_ID, "v250", "current updater channel changed")
@@ -197,11 +203,13 @@ def test_canonical_update_channel_contract() -> None:
 
     manifest_path = ROOT / "Updates_2_5" / "remote_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload_ref = str(manifest.get("payload_ref") or "").strip().lower()
+    _assert(re.fullmatch(r"[0-9a-f]{40}", payload_ref) is not None, "current payload ref must be an immutable Git SHA")
     for item in manifest.get("files") or []:
         urls = [item.get("url"), *(item.get("urls") or [])]
         _assert(
-            all("/main/" in str(url) or "@main/" in str(url) for url in urls if url),
-            f"current release payload must use main: {item.get('path')}",
+            all(payload_ref in str(url) and "/main/" not in str(url) and "@main/" not in str(url) for url in urls if url),
+            f"current release payload must use immutable ref {payload_ref}: {item.get('path')}",
         )
 
 
@@ -3525,12 +3533,14 @@ def test_canonical_manifest_build_contract() -> None:
     manifest_path = ROOT / "Updates_2_5" / "remote_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     _assert_equal(manifest.get("version"), CURRENT_RELEASE_VERSION, "canonical manifest must target the current build")
+    payload_ref = str(manifest.get("payload_ref") or "").strip().lower()
+    _assert(re.fullmatch(r"[0-9a-f]{40}", payload_ref) is not None, "canonical manifest payload_ref must be an immutable Git SHA")
     for item in manifest.get("files") or []:
         _assert("compat_sha256" not in item, "canonical manifest must not carry a compatibility payload hash")
         for url in [item.get("url"), *(item.get("urls") or [])]:
             _assert(
-                "/main/" in str(url) or "@main/" in str(url),
-                f"canonical manifest URL must use the main payload: {url}",
+                payload_ref in str(url) and "/main/" not in str(url) and "@main/" not in str(url),
+                f"canonical manifest URL must use immutable payload ref {payload_ref}: {url}",
             )
 
 
@@ -3713,6 +3723,12 @@ def test_build_scripts_clean_outputs() -> None:
     _assert("verify_update_manifest.py" in mac_script, "macOS build must verify update manifest hashes")
     _assert("verify_update_manifest.py" in win_portable_script, "Windows portable build must verify update manifest hashes")
     _assert("verify_update_manifest.py" in win_installer_script, "Windows installer build must verify update manifest hashes")
+    _assert("python -m venv .venv" in win_portable_script, "Windows portable build must use the configured Python interpreter")
+    _assert("python -m venv .venv" in win_installer_script, "Windows installer build must use the configured Python interpreter")
+    _assert("python -m PyInstaller" in win_portable_script, "Windows portable build must invoke PyInstaller from the active environment")
+    _assert("python -m PyInstaller" in win_installer_script, "Windows installer build must invoke PyInstaller from the active environment")
+    _assert("python -m pip install -r requirements.txt" in win_portable_script, "Windows portable build must install dependencies into the active environment")
+    _assert("python -m pip install -r requirements.txt" in win_installer_script, "Windows installer build must install dependencies into the active environment")
 
     mac_expected = [
         'rm -rf "dist/EventInspector.app"',
@@ -3749,6 +3765,8 @@ def test_build_scripts_clean_outputs() -> None:
     _assert('--add-data "sdk_check_presets.json;."' in win_installer_script, "Windows installer build must package SDK presets")
     _assert('--add-data "Log_checker.py;."' in win_portable_script, "Windows portable build must package the release source")
     _assert('--add-data "Log_checker.py;."' in win_installer_script, "Windows installer build must package the release source")
+    _assert('--add-data "remote_update.py;."' in win_portable_script, "Windows portable build must package the updater source")
+    _assert('--add-data "remote_update.py;."' in win_installer_script, "Windows installer build must package the updater source")
     _assert('verify_release_source.ps1' in win_portable_script, "Windows portable build must validate the release source")
     _assert('verify_release_source.ps1' in win_installer_script, "Windows installer build must validate the release source")
     _assert('verify_bundle.ps1' in win_portable_script, "Windows portable build must validate the built bundle")
@@ -3775,6 +3793,7 @@ def test_build_scripts_clean_outputs() -> None:
         _assert(service_asset in win_installer_script, f"Windows installer build must package {service_asset}")
     spec_text = (ROOT / "EventInspector.spec").read_text(encoding="utf-8", errors="ignore")
     _assert("('sdk_check_presets.json', '.')" in spec_text, "PyInstaller spec must package SDK presets")
+    _assert("('remote_update.py', '.')" in spec_text, "PyInstaller spec must package the updater source")
     _assert("collect_data_files('androguard')" in spec_text, "PyInstaller spec must collect manifest parser data")
     _assert("collect_submodules('androguard.core')" in spec_text, "PyInstaller spec must include manifest parser submodules")
     _assert("'androguard.core.axml'" in spec_text, "PyInstaller spec must include AXMLPrinter explicitly")
@@ -3833,6 +3852,7 @@ def test_windows_release_build_version_contract() -> None:
     _assert('ExpectedSeries = "2.5.0"' in source_guard, "Windows source guard must enforce the v2.5 series")
     _assert("$match.Groups['build'].Value" in source_guard, "Windows source guard must derive the build number from source")
     _assert("bundleMarker -ne $sourceMarker" in bundle_guard, "Windows bundle guard must reject stale bundled source")
+    _assert('Resolve-BundleFile $BundleRoot "remote_update.py"' in bundle_guard, "Windows bundle guard must verify the updater source")
     _assert("EventInspector.exe" in bundle_guard, "Windows bundle guard must require the executable")
     _assert("-PrintVersion" in installer_script, "Windows installer must derive its version from the source")
     _assert("/DMyAppVersion=%EVENTINSPECTOR_RELEASE_VERSION%" in installer_script, "Inno Setup must receive the source version")
