@@ -1,6 +1,9 @@
 name: Build macOS
 
 on:
+  push:
+    branches:
+      - codex/macos-build-73
   workflow_dispatch:
     inputs:
       source_ref:
