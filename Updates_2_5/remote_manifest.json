@@ -31,7 +31,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/sdk_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/sdk_check_presets.json"
       ],
-      "sha256": "98492db28e9edb3426d5ba80ef9d89e7bbcfe83ae4b6aeab2fa84af85f7558d7"
+      "sha256": "81a31222b76b28ec7332d9309260c4041ad61a45111e73adf73dd62b8cd326ce"
     },
     {
       "path": "remote_update_config_v250.json",
@@ -131,7 +131,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/podfile_check_presets.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/podfile_check_presets.json"
       ],
-      "sha256": "6dbb8c3c782dd64b89c8f456e10cf89e234db92fdf1992564fc615ae9789e4c3"
+      "sha256": "935a2cad1bf09efcc8dbeaab17c43c089d019eb8d8d6db7986b0e4eab338ebf6"
     },
     {
       "path": "services_checker/podfile_lib_mapping.json",
@@ -141,7 +141,7 @@
         "https://raw.githubusercontent.com/trucbm/Eventchecker/main/services_checker/podfile_lib_mapping.json",
         "https://cdn.jsdelivr.net/gh/trucbm/Eventchecker@main/services_checker/podfile_lib_mapping.json"
       ],
-      "sha256": "8a3bed57134de36b1f20121486009e7da2c4b45bb15320e18f38ae25d1168f13"
+      "sha256": "82e0ef979eb11a80eb0a42086b60503357e34ef74f43643db07819a9898a831e"
     },
     {
       "path": "services_checker/manifest_check_presets.json",
